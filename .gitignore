@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.DS_Store
+.venv/
+venv/
+
+runs/*
+!runs/README.md
+
+artifacts/
+downloads/
+models/
