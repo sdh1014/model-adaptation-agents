@@ -3,5 +3,4 @@ model:
 target_repo:
 framework:
 hardware: P800
-current_stage: env
-
+current_stage: model

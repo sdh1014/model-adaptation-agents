@@ -62,19 +62,50 @@ def init_task(
             "target_repo": target_repo,
             "framework": framework,
             "hardware": hardware,
-            "current_stage": "env",
+            "current_stage": "model",
         },
     )
     (directory / "status.md").write_text(
         "# Status\n\n"
-        "stage: env\n"
+        "stage: model\n"
         "status: ready\n\n"
         "## Latest\n\n"
-        "- Waiting for environment survey.\n",
+        "- Waiting for model research.\n",
         encoding="utf-8",
     )
     (directory / "notes.md").write_text(
-        "# Notes\n\n人工确认的信息写在这里。实验事实写入 `runs/`。\n",
+        "# Notes\n\n"
+        "## Scope\n\n\n"
+        "## Focus\n\n\n"
+        "## References\n\n\n"
+        "## Do Not\n\n\n"
+        "## Human Decisions\n\n\n"
+        "## Rules\n\n"
+        "- 人工确认的信息写在这里。\n"
+        "- 实验事实写入 `runs/`。\n"
+        "- 未验证的原因分析不写入本文件。\n",
+        encoding="utf-8",
+    )
+    (directory / "references.md").write_text(
+        "# References\n\n"
+        "## Technical Reports\n\n\n"
+        "## Upstream PRs\n\n\n"
+        "## Local Files\n\n\n"
+        "## Target Repo Files\n\n\n"
+        "## Reading Priority\n\n\n"
+        "## Notes\n\n\n",
+        encoding="utf-8",
+    )
+    reports_dir = directory / "reports"
+    reports_dir.mkdir(exist_ok=True)
+    (reports_dir / "model-research.md").write_text(
+        "# Model Research\n\n"
+        "## Summary\n\n\n"
+        "## Model Architecture\n\n\n"
+        "## Key Structures\n\n\n"
+        "## Reference Implementations\n\n\n"
+        "## Target Gap Analysis\n\n\n"
+        "## Missing Inputs\n\n\n",
         encoding="utf-8",
     )
     return directory

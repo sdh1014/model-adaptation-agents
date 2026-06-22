@@ -34,10 +34,10 @@ runs/       每次尝试的事实记录
 python -m adaptctl init minimax-m3 --model MiniMax-M3 --target-repo ../vllm-kunlun --framework sglang
 ```
 
-跑环境勘测：
+启动模型调研：
 
 ```bash
-python -m adaptctl run minimax-m3 env
+python -m adaptctl run minimax-m3 model --model-path /path/to/model
 ```
 
 查看状态：
@@ -46,10 +46,10 @@ python -m adaptctl run minimax-m3 env
 python -m adaptctl status minimax-m3
 ```
 
-模型调研：
+环境勘测：
 
 ```bash
-python -m adaptctl run minimax-m3 model --model-path /path/to/model
+python -m adaptctl run minimax-m3 env
 ```
 
 ## 规则
@@ -57,5 +57,6 @@ python -m adaptctl run minimax-m3 model --model-path /path/to/model
 - `tasks/<task>/task.yaml` 写任务基本信息。
 - `tasks/<task>/status.md` 写当前状态。
 - `tasks/<task>/notes.md` 写人工确认的信息。
+- `tasks/<task>/references.md` 写技术报告、PR、链接和本地文件。
 - `runs/<task>/...` 只保存事实，不写失败原因分析。
 - `knowledge/` 只保存人工确认过的知识。

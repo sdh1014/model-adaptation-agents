@@ -1,9 +1,8 @@
 # Status
 
-stage: env
+stage: model
 status: ready
 
 ## Latest
 
-- Waiting for environment survey.
-
+- Waiting for model research.

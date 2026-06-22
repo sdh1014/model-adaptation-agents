@@ -7,6 +7,10 @@ venv/
 runs/*
 !runs/README.md
 
+tasks/*
+!tasks/_template/
+!tasks/_template/**
+
 artifacts/
 downloads/
 models/
