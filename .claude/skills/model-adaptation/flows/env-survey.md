@@ -57,21 +57,62 @@ https_proxy=http://agent.baidu.com:8891 \
 
 `runs/<task>/<ts>-env/result.json` 记录环境事实。`status` 为 `PASS` 或 `FAIL`。
 
-PASS 时至少包含：
+env-survey 使用固定字段，因为环境事实跨任务同质，后续 `plan` 需要稳定读取。
+
+固定字段不得写空对象。无法确认的字段写入 `missing`，不得编造。关键字段必须带 `evidence`，指向命令、日志或文件路径。
+
+`status=PASS` 表示环境勘测完成，并且可以进入 `plan`。它不等于环境已经可以直接 `bringup`。
+
+PASS 时至少包含这些字段和最低内容：
 
 ```json
 {
   "status": "PASS",
   "ready_for_plan": true,
-  "target_repo": {},
-  "python": {},
-  "framework": {},
-  "hardware": {},
-  "image": {},
-  "network": {},
-  "storage": {},
+  "target_repo": {
+    "path": "../vllm-kunlun",
+    "exists": true,
+    "branch": "main",
+    "commit": "abcdef0",
+    "dirty": false,
+    "framework_version": "0.21.0",
+    "evidence": "logs/git-status.log"
+  },
+  "python": {
+    "executable": "/usr/bin/python",
+    "version": "3.10.12",
+    "evidence": "logs/python.log"
+  },
+  "framework": {
+    "name": "vllm",
+    "version": "0.21.0",
+    "importable": true,
+    "evidence": "logs/framework-import.log"
+  },
+  "hardware": {
+    "name": "P800",
+    "visible": true,
+    "evidence": "logs/device.log"
+  },
+  "image": {
+    "name": "image:tag",
+    "digest": "sha256:...",
+    "base": "base-image:tag",
+    "evidence": "logs/image.log"
+  },
+  "network": {
+    "proxy_ok": true,
+    "hf_access_ok": true,
+    "evidence": "logs/network.log"
+  },
+  "storage": {
+    "free_gb": 100,
+    "model_path_accessible": true,
+    "evidence": "logs/storage.log"
+  },
   "missing": [],
-  "blockers": []
+  "blockers": [],
+  "bringup_blockers": []
 }
 ```
 
@@ -81,12 +122,39 @@ FAIL 时只写事实，最小形状（禁写字段见 `CLAUDE.md`）：
 {
   "status": "FAIL",
   "ready_for_plan": false,
-  "failed_check": "xpu_visible",
-  "error_signature": "p800-device-not-visible",
-  "evidence": ["logs/device-check.log"],
-  "blockers": ["P800 device not visible"]
+  "failed_check": "framework_import",
+  "error_signature": "vllm-import-failed",
+  "evidence": ["logs/framework-import.log"],
+  "blockers": ["target framework is not importable"]
 }
 ```
+
+## ready_for_plan Rules
+
+`ready_for_plan=true` 当且仅当 `blockers` 为空。
+
+写入 `blockers` 的情况：
+
+- `tasks/<task>/task.yaml` 无法读取。
+- 最近一次 `model-research` 结果无法读取。
+- 目标仓路径不存在或不可访问。
+- 目标仓 branch / commit / framework version 无法确认。
+- 目标框架无法 import。
+- Python 环境无法确认或无法执行最小命令。
+- 目标基线版本无法和目标仓状态建立关系。
+
+写入 `bringup_blockers` 但不阻止 `plan` 的情况：
+
+- P800 / XPU 设备不可见。
+- 镜像、驱动、KLX、XPytorch 或算子库缺失。
+- 模型权重路径不可访问。
+- 磁盘空间不足以运行后续 bringup。
+
+写入 `missing` 但不阻止 `plan` 的情况：
+
+- Hugging Face 不可访问，但已有本地配置、技术报告或 model-research 结果。
+- 镜像 digest 无法确认，但镜像名和运行环境可确认。
+- 当前阶段不需要的可选路径或可选资料缺失。
 
 ## Update Targets
 
@@ -94,7 +162,7 @@ FAIL 时只写事实，最小形状（禁写字段见 `CLAUDE.md`）：
 
 - `tasks/<task>/status.md`：当前进度、本轮 `result.json` 路径、PASS/FAIL、是否可进入 plan。
 - `tasks/<task>/notes.md`：按 `SKILL.md` 的 `Task Notes Rules` 更新。
-- `runs/<task>/<ts>-env/result.json`：环境事实、blocker、missing 和 evidence。
+- `runs/<task>/<ts>-env/result.json`：环境事实、blocker、bringup_blocker、missing 和 evidence。
 
 ## Output Style
 
