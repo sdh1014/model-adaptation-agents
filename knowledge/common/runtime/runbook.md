@@ -38,3 +38,65 @@ model_runtime.py 定义生命周期、日志和清理
 - 改环境变量，只改 `env.sh`；
 - 改验证命令，只改 `checks/validate.sh`；
 - 不在 Skill 文档、`target.yaml` 和多个阶段中复制同一命令。
+
+## `adapt-validate` 集成契约
+
+`adapt-validate` 负责：
+
+- 从模型分析中确定必测能力；
+- 定义参考结果、比较方法和阈值；
+- 生成验证计划与最终报告；
+- 解释失败属于权重、算子、并行、生成协议还是未知问题。
+
+Runbook 负责：
+
+- 使用与 Smoke 相同的环境和启动命令；
+- 启动并等待目标服务；
+- 执行 `checks/validate.sh` 中的实际命令；
+- 保存 stdout、stderr 和进程日志；
+- 无论验证成功、失败或超时都停止服务。
+
+标准调用：
+
+```bash
+python scripts/model_runtime.py run \
+  <model-id>/<target-id> \
+  --check validate \
+  --run-dir <validation-run-dir>/runtime
+```
+
+`checks/validate.sh` 可以直接写完整验证命令，也可以调用 `scripts/validation/lib.sh` 记录结构化 case。示例：
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+source "$CONTROL_ROOT/scripts/validation/lib.sh"
+validation_init
+
+validation_case logits required -- \
+  python /path/to/check_logits.py \
+    --endpoint "$MODEL_BASE_URL" \
+    --output "$RUN_DIR/validation/logits.json"
+
+validation_finish
+```
+
+`model_runtime.py` 只根据脚本退出码判断执行状态：
+
+```text
+0   验证命令执行成功
+64  验证入口未配置或缺少必要输入
+65  验证部分完成
+其他 验证命令执行失败
+```
+
+这不等于最终模型正确性结论。`adapt-validate` 仍需读取：
+
+```text
+<validation-run-dir>/runtime/result.json
+<validation-run-dir>/runtime/logs/
+<validation-run-dir>/runtime/validation/
+```
+
+并根据 required case 覆盖、参考结果和阈值生成 `validation.md`。

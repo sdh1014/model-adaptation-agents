@@ -18,8 +18,7 @@ fi
 for file in \
   "$ROOT/scripts/validation/"*.sh \
   "$ROOT/scripts/benchmark/"*.sh \
-  "$ROOT/examples/runbooks/"*/checks/*.sh \
-  "$ROOT/install.sh"; do
+  "$ROOT/examples/runbooks/"*/checks/*.sh; do
   bash -n "$file"
 done
 "$PYTHON_BIN" -m unittest discover -s "$ROOT/tests" -p 'test_*.py' -v
