@@ -1,0 +1,21 @@
+model-adaptation-agents local validation
+
+Passed:
+- Python compilation for scripts and tests:
+  `PYTHONPYCACHEPREFIX=/tmp/model-adaptation-pycache python3 -m compileall scripts tests`
+- Bash syntax checking for all scripts:
+  `find scripts tests examples/runbooks -type f -name '*.sh' -print0 | xargs -0 -n1 bash -n`
+- combined unittest suite for implementation, model-run, validate and benchmark:
+  `bash tests/run_tests.sh`
+- `git diff --check`
+
+Compatibility fixes applied:
+- `tests/run_tests.sh` prefers `python3` and allows `PYTHON_BIN` override.
+- `scripts/model_runtime.py` uses the child process handle during ephemeral cleanup on macOS.
+- `scripts/validation/lib.sh` and `scripts/benchmark/lib.sh` prefer `python3` and allow `PYTHON_BIN` override.
+- Existing adapt-implement wrapper keeps the same `python3` compatibility behavior.
+
+Not executed:
+- Real Kunlun P800 runtime validation.
+- Real vLLM-Kunlun or SGLang-Kunlun model service launch.
+- Real workload benchmark on P800.

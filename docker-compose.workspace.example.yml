@@ -1,0 +1,30 @@
+services:
+  p800-dev:
+    # 替换为你现有的 P800 开发镜像。
+    image: ${P800_DEV_IMAGE}
+    working_dir: /workspace/control
+    user: "${HOST_UID}:${HOST_GID}"
+    stdin_open: true
+    tty: true
+    environment:
+      HOME: /workspace/.home
+      HF_HOME: /cache/huggingface
+    volumes:
+      - type: bind
+        source: ${ADAPT_ROOT}/control
+        target: /workspace/control
+      - type: bind
+        source: ${ADAPT_ROOT}/targets
+        target: /workspace/targets
+      - type: bind
+        source: ${ADAPT_ROOT}/models
+        target: /models
+        read_only: true
+      - type: bind
+        source: ${ADAPT_ROOT}/cache
+        target: /cache
+      - type: bind
+        source: ${ADAPT_ROOT}/home
+        target: /workspace/.home
+    # 保留你现有的 P800 devices、runtime、ipc、shm_size 和环境配置。
+    # 不要为了 Claude Code 挂载 /var/run/docker.sock。

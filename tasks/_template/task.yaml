@@ -1,6 +1,0 @@
-task_id: _template
-model:
-target_repo:
-framework:
-hardware: P800
-current_stage: model
