@@ -1,51 +1,32 @@
 ---
 name: model-analyze
-description: 分析模型架构、权重组织、Tokenizer 和参考行为，生成与推理引擎无关的模型事实基线。
-argument-hint: "<model-id> [--model-path PATH] [--reference-repo PATH] [--source URL] [--update QUESTION]"
+description: 分析模型架构、权重、Tokenizer 与参考行为，生成可被多个目标引擎复用的模型事实基线。
+argument-hint: "<model-id> [--model-path PATH] [--reference-repo PATH] [--update 问题]"
 disable-model-invocation: true
 ---
 
 # 模型分析
 
-处理参数：`$ARGUMENTS`
+处理 `$ARGUMENTS` 指定的模型。
 
-## 开始前必须读取
+执行前读取 [GUIDE.md](GUIDE.md) 和 `knowledge/model.md`。
 
-1. [requirements.md](requirements.md)
-2. [workflow.md](workflow.md)
-3. [model-analysis-template.md](model-analysis-template.md)
+输入：模型目录、官方来源、参考实现，以及已有 `tasks/<model>/model.yaml`。
 
-## 输入
+输出：
 
-第一个位置参数是 `<model-id>`。
+```text
+tasks/<model>/model.yaml
+tasks/<model>/model-analysis.md
+runs/<model>/model-analyze/<timestamp>/
+```
 
-可选参数：
+写报告前读取 `templates/reports/model-analysis.md`。
 
-- `--model-path PATH`：本地模型目录；
-- `--reference-repo PATH`：本地参考实现；
-- `--source URL`：模型官方来源；
-- `--update QUESTION`：只补充一个已发现的分析缺口。
+边界：
 
-已有任务必须优先读取：
-
-- `tasks/<model-id>/model.yaml`
-- `tasks/<model-id>/model-analysis.md`
-- `tasks/<model-id>/context.md`，存在时读取。
-
-## 输出
-
-写入：
-
-- `tasks/<model-id>/model.yaml`
-- `tasks/<model-id>/model-analysis.md`
-- `runs/<model-id>/model-analyze/<timestamp>/model-facts.json`
-
-## 边界
-
-- 不分析 vLLM-Kunlun、SGLang-Kunlun 或 P800 支持情况；
-- 不修改任何目标引擎仓库；
-- 不生成具体引擎实施计划；
-- 不把未确认推断写入 `knowledge/`；
-- 不自动执行后续 Skill。
-
-严格按照 `workflow.md` 执行。
+- 不判断 vLLM-Kunlun、SGLang-Kunlun 或 P800 支持；
+- 不修改目标仓；
+- 不启动服务；
+- 不把推测写成确认事实；
+- 完成后停止。

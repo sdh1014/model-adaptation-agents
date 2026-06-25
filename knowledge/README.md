@@ -1,12 +1,15 @@
 # Knowledge
 
-此目录只保存经过确认、能够跨任务复用的知识。
+本目录只保存经过确认、可跨任务复用的知识。
 
 ```text
-common/      与模型、引擎和硬件无关的通用方法
-hardware/    具体硬件平台知识
-engines/     具体推理引擎知识
-models/      经确认的模型家族知识
+model.md             模型分析
+adaptation.md        目标评估和缺口分类
+implementation.md    代码修改与阻塞处理
+validation.md        正确性验证
+benchmark.md         性能测量
+p800.md              硬件与运行时
+engines/*.md         引擎专用知识
 ```
 
-临时猜测、单次日志和任务状态不得写入此目录。
+任务特有推断、命令和日志不得写入这里。

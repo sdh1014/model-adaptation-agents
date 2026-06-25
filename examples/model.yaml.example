@@ -1,5 +1,0 @@
-model:
-  id: minimax-m3
-  path: /models/MiniMax-M3
-  source: null
-  reference_repo: /src/MiniMax-M3

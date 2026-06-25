@@ -1,0 +1,7 @@
+engine: vllm-kunlun
+hardware: p800
+target_repo: /workspace/workspaces/demo/vllm-kunlun
+upstream_repo: /workspace/sources/vllm
+runtime:
+  python: python
+  tensor_parallel_size: 1

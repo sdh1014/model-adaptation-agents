@@ -3,10 +3,15 @@ __pycache__/
 .venv/
 .env
 .DS_Store
-.claude/settings.local.json
 
-runs/*
+# Local secrets and overrides
+**/runbook/env.local.sh
+
+# Runtime evidence is local by default
+runs/**
 !runs/.gitkeep
 
-tasks/*
-!tasks/.gitkeep
+# Keep task definitions and reports, ignore large local artifacts
+**/*.safetensors
+**/*.bin
+**/*.pt

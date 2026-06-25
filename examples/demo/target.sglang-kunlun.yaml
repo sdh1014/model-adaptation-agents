@@ -1,0 +1,7 @@
+engine: sglang-kunlun
+hardware: p800
+target_repo: /workspace/workspaces/demo/sglang-kunlun
+upstream_repo: /workspace/sources/sglang
+runtime:
+  python: python
+  tensor_parallel_size: 1

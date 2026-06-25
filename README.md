@@ -1,127 +1,135 @@
 # Model Adaptation Agents
 
-面向昆仑 P800 的模型适配工作区。第一版采用 **Skill-first** 设计：
+面向昆仑 P800 的模型适配工作区，底层使用 Claude Code。
 
-- Skill 定义阶段流程；
-- Knowledge 保存可复用知识；
-- Scripts 执行确定性操作；
-- Tasks 保存当前模型和目标引擎结果；
-- Runs 保存日志、命令和原始证据。
+## 只需理解四个目录
 
-## 当前可用 Skill
+```text
+.claude/skills/   六个公开阶段入口
+knowledge/        可复用模型、引擎和 P800 知识
+scripts/          确定性检查、运行和证据采集
+work/             tasks 保存结论，runs 保存原始证据
+```
+
+实际仓库仍使用：
+
+```text
+tasks/            当前任务结论
+runs/             日志、命令、响应、指标和 patch
+```
+
+## 六个命令
 
 ```text
 /model-analyze
 /adapt-assess
 /adapt-implement
+/model-run
 /adapt-validate
 /adapt-benchmark
-/model-run
 ```
 
-`model-analyze` 只分析模型本身，不分析 vLLM-Kunlun、SGLang-Kunlun 或 P800，也不修改目标仓库。
-`adapt-assess` 面向一个目标引擎生成适配评估、缺口和实施工作项，不修改目标仓库。
-`adapt-implement` 每次只处理一个已确认工作项，并且只修改该工作项声明的一个目标仓库。
-`adapt-validate` 复用目标 Runbook 执行结构化正确性验证，不修改目标仓库。
-`adapt-benchmark` 在正确性验证通过后复用同一 Runbook 执行性能测试，不修改目标仓库。
-`model-run` 是人工运行入口，使用目标目录中的 `runbook/` 和 `scripts/model_runtime.py` 执行 smoke、serve、check、status、stop。
-
-阶段顺序：
+主流程：
 
 ```text
-model-analyze
-      ↓
-adapt-assess
-      ↓
-adapt-implement
-      ↓
-adapt-validate
-      ↓
-adapt-benchmark
-
-model-run：独立运行工具，不属于固定阶段。
+model-analyze → adapt-assess → adapt-implement → adapt-validate → adapt-benchmark
+                              ↑
+                        model-run 用于调试
 ```
 
-## 快速使用
+## 最短上手流程
 
-在 Claude Code 中执行：
+### 1. 分析模型
 
 ```text
 /model-analyze minimax-m3 --model-path /models/MiniMax-M3
 ```
 
-带参考实现：
-
-```text
-/model-analyze minimax-m3 \
-  --model-path /models/MiniMax-M3 \
-  --reference-repo /src/MiniMax-M3
-```
-
-适配过程中发现模型分析缺失时：
-
-```text
-/model-analyze minimax-m3 \
-  --update "确认 grouped routing 的归一化顺序"
-```
-
-输出：
-
-```text
-tasks/minimax-m3/
-├── model.yaml
-└── model-analysis.md
-
-runs/minimax-m3/model-analyze/<timestamp>/
-└── model-facts.json
-```
-
-生成目标引擎适配计划：
+### 2. 评估一个目标
 
 ```text
 /adapt-assess minimax-m3/vllm-kunlun \
-  --target-repo ../vLLM-Kunlun \
-  --upstream-repo ../vllm
+  --target-repo /workspace/workspaces/minimax-m3/vllm-kunlun \
+  --upstream-repo /workspace/sources/vllm
 ```
 
-执行一个适配工作项：
+评估阶段会创建目标目录，并初始化对应引擎的 Runbook。
+
+### 3. 只编辑一个目录
 
 ```text
-/adapt-implement minimax-m3/vllm-kunlun --item WI-001
+tasks/minimax-m3/targets/vllm-kunlun/runbook/
+├── env.sh                 环境变量
+├── start.sh               完整启动命令
+├── ready.sh               单次就绪探测
+├── stop.sh                可选优雅停止
+└── checks/
+    ├── smoke.sh           最小调用
+    ├── validate.sh        正确性命令
+    └── benchmark.sh       压测命令
 ```
 
-执行正确性验证：
+vLLM-Kunlun 和 SGLang-Kunlun 各有独立目标目录，因此启动命令可以完全不同。
+
+### 4. 逐项实现
 
 ```text
-/adapt-validate minimax-m3/vllm-kunlun
+/adapt-implement minimax-m3/vllm-kunlun
 ```
 
-执行性能测试：
+每次只处理一个工作项。
 
-```text
-/adapt-benchmark minimax-m3/vllm-kunlun
-```
-
-初始化目标运行 Runbook：
-
-```text
-/model-run minimax-m3/vllm-kunlun --init
-```
-
-运行模型 smoke：
+### 5. 运行和验收
 
 ```text
 /model-run minimax-m3/vllm-kunlun
+/adapt-validate minimax-m3/vllm-kunlun
+/adapt-benchmark minimax-m3/vllm-kunlun
 ```
 
-## 目录职责
+手工执行某个检查：
 
-| 目录 | 职责 |
-|---|---|
-| `.claude/skills/` | 阶段入口、要求和工作流 |
-| `knowledge/` | 已确认的通用、硬件、引擎和模型知识 |
-| `scripts/` | 检查、启动、验证和采集脚本 |
-| `tasks/` | 当前模型及各目标引擎的阶段结果 |
-| `runs/` | 原始事实、日志、响应、指标和代码差异 |
+```text
+/model-run minimax-m3/vllm-kunlun --check validate
+/model-run minimax-m3/vllm-kunlun --check benchmark
+```
 
-参见 [MIGRATION.md](MIGRATION.md) 完成旧仓库迁移。
+这只执行脚本，不生成正式阶段结论。
+
+## 任务结构
+
+```text
+tasks/<model>/
+├── model.yaml
+├── model-analysis.md
+└── targets/<target>/
+    ├── target.yaml
+    ├── runbook/
+    ├── assessment.md
+    ├── implementation.md
+    ├── validation.md
+    └── benchmark.md
+```
+
+文件均按需生成，不使用庞大的空模板目录。
+
+## 目录设计
+
+```text
+.claude/skills/       每个 Skill 只有 SKILL.md + GUIDE.md
+knowledge/            8 个主题文件，不做过细拆分
+templates/reports/    阶段报告模板
+templates/runbook/    一套公共模板 + 三个引擎 start.sh
+scripts/              6 个核心程序 + 2 个 Shell helper
+docs/                 只保留工作区和迁移说明
+```
+
+## Docker
+
+推荐把控制仓、目标仓和模型保存在宿主机，再 bind mount 到开发容器。详见 [docs/WORKSPACE.md](docs/WORKSPACE.md)。
+
+## 测试
+
+```bash
+bash tests/run.sh
+```

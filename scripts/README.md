@@ -1,21 +1,15 @@
 # Scripts
 
-脚本只负责确定性操作和事实采集，不负责分析根因或更新任务结论。
+公开脚本：
 
-当前可用：
+```text
+model.py           模型静态检查与参考命令
+assess.py          环境勘测和仓库扫描
+implement.py       实现 run、快照、历史、签名、scope 与局部检查
+model_runtime.py   Runbook 服务生命周期
+evaluate.py        Validation / Benchmark 执行与指标解析
+run_bash.py        通用命令证据采集
+lib/*.sh           可选验证和压测辅助库
+```
 
-- `scripts/model/inspect_model.py`
-- `scripts/assess/inspect_target_repo.py`
-- `scripts/hardware/p800/collect_environment.py`
-- `scripts/hardware/p800/preflight.sh`
-- `scripts/engines/vllm-kunlun/assess.sh`
-- `scripts/engines/sglang-kunlun/assess.sh`
-- `scripts/validation/*.py`
-- `scripts/validation/lib.sh`
-- `scripts/benchmark/*.py`
-- `scripts/benchmark/lib.sh`
-- `scripts/model_runtime.py`
-- `scripts/migrate_runbooks.py`
-- `scripts/run_bash.py`
-
-其他 P800 与引擎脚本当前为显式失败的占位实现，防止未实现功能被误判为成功。
+所有脚本只采集事实和执行确定性操作，不自行推断根因。

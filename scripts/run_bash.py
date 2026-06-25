@@ -1,130 +1,39 @@
 #!/usr/bin/env python3
-"""Execute a command and persist command, stdout, stderr, timeout and exit facts."""
+"""Run a command with persisted argv, cwd, stdout, stderr, timeout and exit code."""
 from __future__ import annotations
-
-import argparse
-import json
-import os
-import signal
-import subprocess
-from datetime import datetime, timezone
+import argparse,json,os,signal,subprocess,sys,time
 from pathlib import Path
-from typing import Any
 
 
-def utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-def terminate_process_tree(proc: subprocess.Popen[bytes], grace_seconds: int = 10) -> dict[str, Any]:
-    actions: list[str] = []
-    if proc.poll() is not None:
-        return {"actions": actions, "return_code": proc.returncode}
-
-    try:
-        if os.name == "posix":
-            os.killpg(proc.pid, signal.SIGTERM)
-            actions.append("SIGTERM process group")
-        else:  # pragma: no cover - assessment targets Linux, but keep a safe fallback.
-            proc.terminate()
-            actions.append("terminate process")
-    except ProcessLookupError:
-        return {"actions": actions, "return_code": proc.poll()}
-
-    try:
-        proc.wait(timeout=grace_seconds)
+def stop(proc: subprocess.Popen[bytes]) -> list[str]:
+    actions=[]
+    if proc.poll() is not None:return actions
+    try: os.killpg(proc.pid,signal.SIGTERM); actions.append("SIGTERM")
+    except ProcessLookupError:return actions
+    try:proc.wait(timeout=5)
     except subprocess.TimeoutExpired:
-        try:
-            if os.name == "posix":
-                os.killpg(proc.pid, signal.SIGKILL)
-                actions.append("SIGKILL process group")
-            else:  # pragma: no cover
-                proc.kill()
-                actions.append("kill process")
-        except ProcessLookupError:
-            pass
+        try:os.killpg(proc.pid,signal.SIGKILL);actions.append("SIGKILL")
+        except ProcessLookupError:pass
         proc.wait()
-    return {"actions": actions, "return_code": proc.returncode}
+    return actions
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--run-dir", required=True)
-    parser.add_argument("--timeout-seconds", type=int, default=None)
-    parser.add_argument("--cwd", default=None, help="working directory for the command")
-    parser.add_argument("command", nargs=argparse.REMAINDER)
-    args = parser.parse_args()
-
-    command = args.command
-    if command and command[0] == "--":
-        command = command[1:]
-    if not command:
-        parser.error("missing command after --")
-    if args.timeout_seconds is not None and args.timeout_seconds < 1:
-        parser.error("--timeout-seconds must be >= 1")
-
-    run_dir = Path(args.run_dir)
-    run_dir.mkdir(parents=True, exist_ok=True)
-    started = utc_now()
-    (run_dir / "command.json").write_text(
-        json.dumps(
-            {
-                "argv": command,
-                "started_at": started,
-                "timeout_seconds": args.timeout_seconds,
-                "working_directory": str(Path(args.cwd).expanduser().resolve()) if args.cwd else os.getcwd(),
-            },
-            ensure_ascii=False,
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
-
-    timed_out = False
-    launch_error: str | None = None
-    cleanup: dict[str, Any] = {"actions": []}
-    return_code = 127
-
-    with (run_dir / "stdout.log").open("wb") as out, (run_dir / "stderr.log").open("wb") as err:
-        try:
-            cwd = str(Path(args.cwd).expanduser().resolve()) if args.cwd else None
-            if cwd is not None and not Path(cwd).is_dir():
-                raise OSError(f"working directory does not exist: {cwd}")
-            proc = subprocess.Popen(
-                command,
-                stdout=out,
-                stderr=err,
-                cwd=cwd,
-                start_new_session=(os.name == "posix"),
-            )
+def main()->int:
+    p=argparse.ArgumentParser();p.add_argument("--run-dir",required=True);p.add_argument("--cwd");p.add_argument("--timeout",type=float);p.add_argument("command",nargs=argparse.REMAINDER);a=p.parse_args()
+    cmd=a.command[1:] if a.command and a.command[0]=="--" else a.command
+    if not cmd:p.error("missing command after --")
+    out=Path(a.run_dir).resolve();out.mkdir(parents=True,exist_ok=True);cwd=Path(a.cwd).resolve() if a.cwd else Path.cwd();started=time.time()
+    (out/"command.json").write_text(json.dumps({"argv":cmd,"cwd":str(cwd),"timeout_seconds":a.timeout},ensure_ascii=False,indent=2),encoding="utf-8")
+    timed=False;cleanup=[]
+    with (out/"stdout.log").open("wb") as stdout,(out/"stderr.log").open("wb") as stderr:
+        try:proc=subprocess.Popen(cmd,cwd=str(cwd),stdout=stdout,stderr=stderr,start_new_session=True)
         except OSError as exc:
-            launch_error = f"{type(exc).__name__}: {exc}"
-            err.write((launch_error + "\n").encode("utf-8", errors="replace"))
+            stderr.write((f"{type(exc).__name__}: {exc}\n").encode());rc=127
         else:
-            try:
-                return_code = proc.wait(timeout=args.timeout_seconds)
-            except subprocess.TimeoutExpired:
-                timed_out = True
-                cleanup = terminate_process_tree(proc)
-                return_code = 124
-            except KeyboardInterrupt:
-                cleanup = terminate_process_tree(proc)
-                return_code = 130
-
-    result = {
-        "exit_code": return_code,
-        "started_at": started,
-        "finished_at": utc_now(),
-        "timed_out": timed_out,
-        "launch_error": launch_error,
-        "cleanup": cleanup,
-    }
-    (run_dir / "result.json").write_text(
-        json.dumps(result, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    return return_code
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+            try:rc=proc.wait(timeout=a.timeout)
+            except subprocess.TimeoutExpired:timed=True;cleanup=stop(proc);rc=124
+            except KeyboardInterrupt:cleanup=stop(proc);rc=130
+    result={"exit_code":rc,"passed":rc==0,"timed_out":timed,"cleanup":cleanup,"duration_seconds":round(time.time()-started,3)}
+    (out/"result.json").write_text(json.dumps(result,ensure_ascii=False,indent=2),encoding="utf-8")
+    return rc
+if __name__=="__main__":raise SystemExit(main())
