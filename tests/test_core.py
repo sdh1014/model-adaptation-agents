@@ -34,6 +34,7 @@ class RuntimeFixture(unittest.TestCase):
         (self.root / "runs").mkdir()
         shutil.copytree(ROOT / "templates", self.root / "templates")
         (self.root / "scripts").mkdir()
+        shutil.copy2(ROOT / "scripts/paths.py", self.root / "scripts/paths.py")
         shutil.copy2(RUNTIME, self.root / "scripts/model_runtime.py")
         (self.root / "tests").mkdir()
         shutil.copy2(FAKE, self.root / "tests/fake_server.py")
@@ -113,7 +114,9 @@ class RuntimeTests(RuntimeFixture):
         data = json.loads(self.cli("run", "demo/vllm-kunlun", "--check", "smoke").stdout)
         self.assertEqual(data["status"], "passed")
         self.assertEqual(data["cleanup"]["status"], "passed")
-        self.assertTrue((Path(data["run_dir"]) / "smoke.json").exists())
+        run_dir = Path(data["run_dir"])
+        self.assertEqual(run_dir.parent.name, "demo--vllm-kunlun")
+        self.assertTrue((run_dir / "smoke.json").exists())
 
     def test_persistent_lifecycle(self) -> None:
         data = json.loads(self.cli("serve", "demo/vllm-kunlun").stdout)
@@ -154,6 +157,7 @@ printf '{"completed":10,"request_throughput":2.5,"output_throughput":100.0,"mean
     def test_validate_and_benchmark(self) -> None:
         validation = json.loads(self.stage("validate", "demo/vllm-kunlun").stdout)
         self.assertEqual(validation["status_hint"], "passed")
+        self.assertEqual(Path(validation["run_dir"]).parent.name, "demo--vllm-kunlun")
         target = self.root / "tasks/demo/targets/vllm-kunlun"
         (target / "validation.md").write_text("---\nstatus: passed\n---\n", encoding="utf-8")
         benchmark = json.loads(self.stage("benchmark", "demo/vllm-kunlun").stdout)
@@ -203,6 +207,44 @@ class HelperTests(unittest.TestCase):
                 "--output", str(root / "scope.json"), "--allow", "allowed/**",
             ])
             self.assertEqual(proc.returncode, 4)
+
+
+    def test_flat_run_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            resolved_root = root.resolve()
+            model_run = run([
+                sys.executable, str(ROOT / "scripts/paths.py"), "--repo-root", str(root),
+                "create-run", "--model", "demo", "--stage", "model-analyze",
+            ])
+            self.assertEqual(model_run.returncode, 0, model_run.stderr)
+            model_path = Path(model_run.stdout.strip())
+            self.assertEqual(model_path.parent, resolved_root / "runs" / "demo")
+            self.assertIn("-model-analyze", model_path.name)
+
+            target_run = run([
+                sys.executable, str(ROOT / "scripts/paths.py"), "--repo-root", str(root),
+                "create-run", "--target", "demo/vllm-kunlun", "--stage", "assess",
+            ])
+            self.assertEqual(target_run.returncode, 0, target_run.stderr)
+            target_path = Path(target_run.stdout.strip())
+            self.assertEqual(target_path.parent, resolved_root / "runs" / "demo--vllm-kunlun")
+            self.assertIn("-assess", target_path.name)
+
+    def test_implement_run_uses_flat_target_key(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            repo = root / "repo"
+            repo.mkdir()
+            proc = run([
+                sys.executable, str(ROOT / "scripts/implement.py"), "create-run",
+                "--model", "demo", "--target", "vllm-kunlun", "--item", "WI-001",
+                "--target-repo", str(repo), "--runs-root", str(root / "runs"),
+            ])
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            run_dir = Path(proc.stdout.strip())
+            self.assertEqual(run_dir.parent, root / "runs" / "demo--vllm-kunlun")
+            self.assertIn("-implement-WI-001", run_dir.name)
 
 
 if __name__ == "__main__":

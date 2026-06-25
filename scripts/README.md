@@ -1,8 +1,7 @@
 # Scripts
 
-公开脚本：
-
 ```text
+paths.py           统一 tasks/runs 路径和扁平 run key
 model.py           模型静态检查与参考命令
 assess.py          环境勘测和仓库扫描
 implement.py       实现 run、快照、历史、签名、scope 与局部检查
@@ -12,4 +11,4 @@ run_bash.py        通用命令证据采集
 lib/*.sh           可选验证和压测辅助库
 ```
 
-所有脚本只采集事实和执行确定性操作，不自行推断根因。
+脚本只执行确定性操作并保存事实，不自行推断根因。

@@ -20,7 +20,7 @@ tasks/<model>/targets/<target>/target.yaml
 tasks/<model>/targets/<target>/runbook/
 tasks/<model>/targets/<target>/assessment.md
 tasks/<model>/targets/<target>/implementation.md   # 需要适配时
-runs/<model>/<target>/<timestamp>-assess/
+runs/<model>--<target>/<timestamp>-assess/
 ```
 
 写报告前读取 `templates/reports/assessment.md` 和 `templates/reports/implementation.md`。

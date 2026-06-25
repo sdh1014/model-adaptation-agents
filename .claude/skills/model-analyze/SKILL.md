@@ -18,7 +18,7 @@ disable-model-invocation: true
 ```text
 tasks/<model>/model.yaml
 tasks/<model>/model-analysis.md
-runs/<model>/model-analyze/<timestamp>/
+runs/<model>/<timestamp>-model-analyze/
 ```
 
 写报告前读取 `templates/reports/model-analysis.md`。

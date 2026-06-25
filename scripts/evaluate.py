@@ -13,6 +13,8 @@ import sys
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from paths import target_run_root
+
 EXIT_OK, EXIT_BLOCKED, EXIT_FAILED = 0, 2, 3
 TARGET_RE = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$")
 VALID_STATES = {"passed", "failed", "blocked", "partial", "skipped", "unknown"}
@@ -49,7 +51,7 @@ def parse_target(value: str) -> tuple[str,str]:
 
 def paths_for(root: Path,target: str) -> dict[str,Path]:
     model,target_id=parse_target(target); model_dir=root/"tasks"/model; target_dir=model_dir/"targets"/target_id
-    return {"model_yaml":model_dir/"model.yaml","analysis":model_dir/"model-analysis.md","target_yaml":target_dir/"target.yaml","assessment":target_dir/"assessment.md","implementation":target_dir/"implementation.md","validation":target_dir/"validation.md","benchmark":target_dir/"benchmark.md","runbook":target_dir/"runbook","run_root":root/"runs"/model/target_id}
+    return {"model_yaml":model_dir/"model.yaml","analysis":model_dir/"model-analysis.md","target_yaml":target_dir/"target.yaml","assessment":target_dir/"assessment.md","implementation":target_dir/"implementation.md","validation":target_dir/"validation.md","benchmark":target_dir/"benchmark.md","runbook":target_dir/"runbook","run_root":target_run_root(root,model,target_id)}
 
 
 def scalar(value: str) -> Any:

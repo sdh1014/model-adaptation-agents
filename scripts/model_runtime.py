@@ -21,6 +21,8 @@ import time
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from paths import parse_target_ref, target_run_root, unique_run_dir
+
 EXIT_OK = 0
 EXIT_BLOCKED = 2
 EXIT_FAILED = 3
@@ -74,9 +76,7 @@ def discover_root(explicit: str | None) -> Path:
 
 
 def parse_target(value: str) -> tuple[str, str]:
-    if not TARGET_RE.fullmatch(value):
-        raise ValueError("target must be <model-id>/<target-id>")
-    return tuple(value.split("/", 1))  # type: ignore[return-value]
+    return parse_target_ref(value)
 
 
 def paths_for(root: Path, target: str) -> dict[str, Path]:
@@ -89,8 +89,8 @@ def paths_for(root: Path, target: str) -> dict[str, Path]:
         "model_yaml": model_dir / "model.yaml",
         "target_yaml": target_dir / "target.yaml",
         "runbook": target_dir / "runbook",
-        "run_root": root / "runs" / model / target_id,
-        "active": root / "runs" / model / target_id / ".runtime" / "active.json",
+        "run_root": target_run_root(root, model, target_id),
+        "active": target_run_root(root, model, target_id) / ".active.json",
     }
 
 
@@ -310,15 +310,7 @@ def create_run_dir(root: Path, target: str, operation: str, suffix: str, explici
             raise FileExistsError(f"run directory is not empty: {path}")
         path.mkdir(parents=True, exist_ok=True)
     else:
-        safe = re.sub(r"[^A-Za-z0-9._-]+", "-", suffix).strip("-")
-        name = f"{timestamp()}-{operation}" + (f"-{safe}" if safe else "")
-        base = run_root / name
-        path = base
-        index = 1
-        while path.exists():
-            path = Path(f"{base}-{index}")
-            index += 1
-        path.mkdir(parents=True)
+        path = unique_run_dir(run_root, operation, suffix or None)
     (path / "logs").mkdir(exist_ok=True)
     return path
 

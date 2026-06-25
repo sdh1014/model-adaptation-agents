@@ -17,7 +17,9 @@ for test in \
   tests.test_core.RuntimeTests.test_persistent_lifecycle \
   tests.test_core.StageTests.test_validate_and_benchmark \
   tests.test_core.HelperTests.test_model_inspect \
-  tests.test_core.HelperTests.test_implement_scope_and_run
+  tests.test_core.HelperTests.test_implement_scope_and_run \
+  tests.test_core.HelperTests.test_flat_run_paths \
+  tests.test_core.HelperTests.test_implement_run_uses_flat_target_key
 do
   echo "[TEST] $test"
   "$PYTHON_BIN" -m unittest -v "$test"

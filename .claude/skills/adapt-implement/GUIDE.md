@@ -10,13 +10,20 @@
 2. 汇总历史：
 
 ```bash
-python scripts/implement.py history --runs-root runs/<model>/<target> \
+python scripts/implement.py history --runs-root runs/<model>--<target> \
   --item WI-001 --output <run>/history.json
 ```
 
 3. 写直接观察、稳定签名、唯一假设和否证条件；
-4. 创建 run 与仓库快照；
-5. 只修改允许范围；
+4. 创建 run：
+
+```bash
+RUN_DIR="$(python scripts/implement.py create-run \
+  --model <model> --target <target> --item WI-001 \
+  --target-repo <repo> --runs-root runs)"
+```
+
+5. 保存仓库快照，只修改允许范围；
 6. 执行 scope、diff、py_compile 和工作项最小验收：
 
 ```bash
@@ -24,9 +31,7 @@ python scripts/implement.py check --target-repo <repo> --base-ref <ref> \
   --run-dir <attempt>/verification --allow 'path/**' -- <command>
 ```
 
-7. 记录 passed/rejected/blocked/inconclusive；
+7. 记录 `passed / rejected / blocked / inconclusive`；
 8. 更新 `implementation.md` 后停止。
 
-## 阻塞
-
-以下情况立即停止：模型事实缺失、assessment 失效、环境/仓库漂移、需要第二 capability、跨仓/升级依赖/新增 kernel、三个假设均被否定。
+模型事实缺失、assessment 失效、环境/仓库漂移、需要第二 capability、跨仓/升级依赖/新增 kernel 或三个假设均被否定时立即停止。

@@ -11,7 +11,7 @@
 9. 环境变量只写 `env.sh`，启动命令只写 `start.sh`，检查命令只写 `checks/*.sh`。
 10. 禁止在 Skill、报告和多个脚本中复制同一套启动参数。
 11. `knowledge/` 只保存经过确认、可复用的知识；临时推断留在任务报告。
-12. `runs/` 只保存执行事实，不把未验证的根因写成事实。
+12. `runs/` 只保存执行事实；模型级使用 `runs/<model>/`，目标级使用 `runs/<model>--<target>/`，阶段写入 run 目录名。
 13. 模型事实缺失时返回 `/model-analyze --update`，不在下游阶段猜测。
 14. 环境或目标版本失效时返回 `/adapt-assess`，不通过代码绕开。
 15. 不自动安装依赖，不自动 commit、push、merge、rebase、reset、clean 或 stash。

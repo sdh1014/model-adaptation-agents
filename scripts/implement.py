@@ -13,6 +13,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
+from paths import target_run_key
+
 
 def git(repo: Path, *args: str, binary: bool = False) -> subprocess.CompletedProcess[Any]:
     return subprocess.run(
@@ -42,7 +44,7 @@ def allowed_path(path: str, rules: list[str]) -> bool:
 def create_run(args: argparse.Namespace) -> int:
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     safe = re.sub(r"[^A-Za-z0-9._-]+", "-", args.item)
-    root = Path(args.runs_root) / args.model / args.target
+    root = Path(args.runs_root) / target_run_key(args.model, args.target)
     run = root / f"{stamp}-implement-{safe}"
     index = 1
     while run.exists():
