@@ -35,3 +35,15 @@ python scripts/assess.py repo --engine <engine> --target-repo <repo> \
 9. 只将确认的模型层/backend 缺口转为代码工作项。
 
 结果：`already_supported / adaptation_required / blocked`。
+
+## 结束时必须告诉用户
+
+Runbook 已创建后，明确列出首次运行只需编辑：
+
+```text
+runbook/env.sh
+runbook/start.sh
+runbook/checks/smoke.sh
+```
+
+敏感变量使用 `runbook/env.local.sh`。不要让用户自行浏览 templates 或 scripts 寻找下一步。

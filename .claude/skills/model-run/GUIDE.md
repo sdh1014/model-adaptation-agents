@@ -21,3 +21,14 @@ python scripts/model_runtime.py run minimax-m3/vllm-kunlun --check smoke
 Runbook 规则：环境放 `env.sh`，完整前台启动命令放 `start.sh`，单次探测放 `ready.sh`，测试命令放 `checks/*.sh`。禁止 `nohup` 和后台 `&`。
 
 失败时依次查看 check stderr/stdout、server stderr/stdout、ready.log。只报告失败阶段和证据，不在本 Skill 修复代码。
+
+## 未配置时
+
+遇到 `MODEL_RUN_NOT_CONFIGURED` 时，不做根因分析。直接指出需要编辑的具体文件：
+
+```text
+runbook/start.sh
+runbook/checks/<name>.sh
+```
+
+环境变量缺失时指出 `runbook/env.sh`；敏感值使用 `runbook/env.local.sh`。

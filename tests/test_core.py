@@ -109,6 +109,7 @@ class RuntimeTests(RuntimeFixture):
         self.assertEqual(result["status"], "passed")
         self.assertEqual(start.read_text(encoding="utf-8"), "custom-start\n")
         self.assertTrue(any(item["path"] == "start.sh" and item["action"] == "preserved" for item in result["actions"]))
+        self.assertTrue((self.root / "tasks/demo/targets/vllm-kunlun/runbook/env.local.sh.example").is_file())
 
     def test_smoke_cleanup(self) -> None:
         data = json.loads(self.cli("run", "demo/vllm-kunlun", "--check", "smoke").stdout)
