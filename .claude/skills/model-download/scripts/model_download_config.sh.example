@@ -12,7 +12,7 @@ Local_model_path="/home/models/DeepSeek-V4-Pro-FP8"
 HF_model_path="sgl-project/DeepSeek-V4-Pro-FP8"
 
 # Use this when Source="modelscope".
-MS_model_path=""
+MS_model_path="Qwen/Qwen2.5-32B-Instruct-AWQ"
 
 # Required when Upload=1.
 BOS_model_path="bos:/aihc-private-hcd/LLM/DeepSeek/DeepSeek-V4-Pro-FP8"
@@ -28,9 +28,6 @@ Progress_interval=60
 
 # Upload=1 downloads and uploads to BOS. Upload=0 downloads only.
 Upload=1
-
-# Set to 1 only after running the matching CLI login command.
-Private_model=0
 
 # Keep 0 for manual confirmation before upload. Set 1 only when upload is already approved.
 Skip_upload_confirmation=0

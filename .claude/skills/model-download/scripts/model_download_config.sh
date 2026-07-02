@@ -15,5 +15,4 @@ Upload_concurrency="${Upload_concurrency:-64}"
 Progress_interval="${Progress_interval:-60}"
 
 Upload="${Upload:-1}"                      # 1 uploads to BOS, 0 downloads only
-Private_model="${Private_model:-0}"        # 1 after CLI login, 0 for public models
 Skip_upload_confirmation="${Skip_upload_confirmation:-0}"

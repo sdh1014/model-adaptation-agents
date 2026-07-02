@@ -330,7 +330,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--local-dir")
     parser.add_argument("--bos-path")
     parser.add_argument("--proxy")
-    parser.add_argument("--private", action="store_true")
     parser.add_argument("--upload", action="store_true")
     parser.add_argument("--max-workers", type=int, default=8)
     parser.add_argument("--upload-concurrency", type=int, default=64)

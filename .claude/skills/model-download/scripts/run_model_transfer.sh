@@ -57,10 +57,6 @@ if [[ "$Upload" == "1" ]]; then
   cmd+=(--upload --bos-path "$BOS_model_path")
 fi
 
-if [[ "$Private_model" == "1" ]]; then
-  cmd+=(--private)
-fi
-
 if [[ "$Skip_upload_confirmation" == "1" ]]; then
   cmd+=(--yes)
 fi
