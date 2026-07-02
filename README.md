@@ -176,6 +176,14 @@ runs/<model>--<target>/
 
 正式结论仍由 `/adapt-validate` 和 `/adapt-benchmark` 生成。
 
+## 独立准出文档生成
+
+`/model-inference-release-docs` 不属于模型适配主流程。它读取表格、CSV、Excel、日志摘录或文字说明，按固定模板生成模型推理准出 Markdown 文档。
+
+```text
+/model-inference-release-docs data.xlsx --output model-inference-release-docs.md
+```
+
 ## 目录认知边界
 
 普通使用者主要接触：
