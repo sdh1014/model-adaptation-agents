@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+
+# Copy this file to model_download_config.sh, then edit the values below.
+
+# Choose one: hf | modelscope | local
+Source="hf"
+
+# Local directory for downloaded or existing model weights.
+Local_model_path="/home/models/DeepSeek-V4-Pro-FP8"
+
+# Use this when Source="hf".
+HF_model_path="sgl-project/DeepSeek-V4-Pro-FP8"
+
+# Use this when Source="modelscope".
+MS_model_path=""
+
+# Required when Upload=1.
+BOS_model_path="bos:/aihc-private-hcd/LLM/DeepSeek/DeepSeek-V4-Pro-FP8"
+
+# Proxy from the source knowledge page. Set to "" only when the target machine does not need it.
+Proxy_url="http://192.168.48.191:18000"
+
+Max_workers=8
+Upload_concurrency=64
+
+# Seconds between progress reports. Set 0 to disable.
+Progress_interval=60
+
+# Upload=1 downloads and uploads to BOS. Upload=0 downloads only.
+Upload=1
+
+# Set to 1 only after running the matching CLI login command.
+Private_model=0
+
+# Keep 0 for manual confirmation before upload. Set 1 only when upload is already approved.
+Skip_upload_confirmation=0
