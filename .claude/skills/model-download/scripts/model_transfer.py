@@ -5,9 +5,11 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import shutil
 import subprocess
 import sys
+import tarfile
 import threading
 import time
 from pathlib import Path
@@ -46,6 +48,80 @@ def which_any(candidates: Iterable[str]) -> str | None:
     return None
 
 
+HF_HOSTS = ("huggingface.co", "hf.co")
+MS_HOSTS = ("modelscope.cn", "www.modelscope.cn")
+
+# path segments that are viewer routes, not part of the repo id
+_HF_ROUTE_SEGMENTS = {"tree", "blob", "resolve", "commits", "commit", "raw"}
+_MS_ROUTE_SEGMENTS = {"summary", "files", "tree", "blob", "resolve"}
+
+
+def parse_model_url(value: str) -> tuple[str, str] | None:
+    """Return (source, model_id) if value is an HF/ModelScope model URL, else None."""
+    text = value.strip()
+    if "://" not in text and "/" in text and any(
+        text.split("/", 1)[0].endswith(host) or text.split("/", 1)[0] == host
+        for host in HF_HOSTS + MS_HOSTS
+    ):
+        text = "https://" + text
+    match = re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://([^/]+)/(.*)$", text)
+    if not match:
+        return None
+    host = match.group(1).lower()
+    path = match.group(2).strip("/")
+    if not path:
+        return None
+    segments = path.split("/")
+
+    if host in HF_HOSTS:
+        # optional "models/" prefix, then org/model, then viewer routes
+        if segments and segments[0] in {"models", "datasets", "spaces"}:
+            segments = segments[1:]
+        repo: list[str] = []
+        for seg in segments:
+            if seg in _HF_ROUTE_SEGMENTS:
+                break
+            repo.append(seg)
+        model_id = "/".join(repo[:2]) if len(repo) >= 2 else "/".join(repo)
+        return ("hf", model_id) if model_id else None
+
+    if host in MS_HOSTS:
+        if segments and segments[0] == "models":
+            segments = segments[1:]
+        repo = []
+        for seg in segments:
+            if seg in _MS_ROUTE_SEGMENTS:
+                break
+            repo.append(seg)
+        model_id = "/".join(repo[:2]) if len(repo) >= 2 else "/".join(repo)
+        return ("modelscope", model_id) if model_id else None
+
+    return None
+
+
+def resolve_source_and_model(args: argparse.Namespace) -> None:
+    """If --model-id is a full HF/ModelScope URL, extract the id and infer --source."""
+    if not args.model_id:
+        return
+    parsed = parse_model_url(args.model_id)
+    if parsed is None:
+        if not args.source:
+            raise SystemExit(
+                "cannot auto-detect source: --model-id is not a Hugging Face / ModelScope URL; "
+                "pass --source hf|modelscope, or use a full model URL"
+            )
+        return
+    url_source, model_id = parsed
+    if args.source and args.source != url_source:
+        raise SystemExit(
+            f"--source={args.source} conflicts with URL host (looks like {url_source}); "
+            "omit --source or pass a matching one"
+        )
+    args.source = url_source
+    args.model_id = model_id
+    print(f"[INFO] auto-detected source={url_source}, model id={model_id}", flush=True)
+
+
 def run(cmd: list[str], env: dict[str, str], log_path: Path | None = None) -> int:
     print("[CMD]", " ".join(cmd), flush=True)
     if log_path is None:
@@ -79,6 +155,72 @@ def build_env(proxy: str | None) -> dict[str, str]:
     return env
 
 
+def bcecmd_sync_command(local_dir: Path, bos_path: str | None, concurrency: int) -> str:
+    target = bos_path or "<BOS_model_path>"
+    return f"bcecmd bos sync {local_dir} {target} --concurrency {concurrency}"
+
+
+def archive_path_for(local_dir: Path, pack: str) -> Path:
+    """Deterministic archive path next to the local dir, e.g. <name>.tar[.gz]."""
+    suffix = ".tar.gz" if pack == "tar.gz" else ".tar"
+    return local_dir.parent / f"{local_dir.name}{suffix}"
+
+
+def bos_archive_target(bos_path: str | None, archive: Path) -> str:
+    base = (bos_path or "<BOS_model_path>").rstrip("/")
+    return f"{base}/{archive.name}"
+
+
+def bcecmd_cp_command(archive: Path, bos_path: str | None, concurrency: int) -> str:
+    target = bos_archive_target(bos_path, archive)
+    return f"bcecmd bos cp {archive} {target} --concurrency {concurrency}"
+
+
+def upload_command_hint(
+    local_dir: Path, bos_path: str | None, concurrency: int, pack: str | None
+) -> str:
+    """The exact bcecmd line the user should run: cp the archive when packing, else sync the dir."""
+    if pack:
+        return bcecmd_cp_command(archive_path_for(local_dir, pack), bos_path, concurrency)
+    return bcecmd_sync_command(local_dir, bos_path, concurrency)
+
+
+def build_archive(local_dir: Path, archive: Path, pack: str) -> None:
+    """Pack local_dir into archive; the dir name is the top-level entry inside the archive."""
+    mode = "w:gz" if pack == "tar.gz" else "w"
+    print(f"[PACK] creating {archive} ({pack})", flush=True)
+    start = time.time()
+    tmp = archive.with_name(archive.name + ".part")
+    with tarfile.open(tmp, mode) as tar:
+        tar.add(local_dir, arcname=local_dir.name)
+    tmp.replace(archive)
+    size = archive.stat().st_size
+    print(f"[PACK] done {archive} | {format_bytes(size)} | {time.time() - start:.2f}s", flush=True)
+
+
+def manual_upload_hint(
+    local_dir: Path, bos_path: str | None, concurrency: int, pack: str | None = None
+) -> str:
+    return "\n".join(
+        [
+            "[MANUAL UPLOAD REQUIRED] bcecmd not found; download continues but upload is skipped.",
+            "Install and configure bcecmd, then upload it yourself:",
+            f"  {upload_command_hint(local_dir, bos_path, concurrency, pack)}",
+        ]
+    )
+
+
+def download_only_upload_hint(
+    local_dir: Path, bos_path: str | None, concurrency: int, pack: str | None = None
+) -> str:
+    return "\n".join(
+        [
+            "[UPLOAD SKIPPED] download only (--no-upload). To upload to BOS later, run:",
+            f"  {upload_command_hint(local_dir, bos_path, concurrency, pack)}",
+        ]
+    )
+
+
 def preflight() -> int:
     checks = {
         "hf": which_any(["hf", "huggingface-cli"]),
@@ -91,6 +233,14 @@ def preflight() -> int:
     bcecmd = checks["bcecmd"]
     if bcecmd:
         subprocess.run(["bcecmd", "bos", "--version"], check=False)
+    else:
+        print(
+            manual_upload_hint(
+                Path("<Local_model_path>"),
+                None,
+                64,
+            )
+        )
     return 0
 
 
@@ -297,9 +447,28 @@ def final_sync(local_dir: Path, bos_path: str, env: dict[str, str], concurrency:
     )
 
 
+def upload_archive(archive: Path, bos_path: str, env: dict[str, str], concurrency: int) -> int:
+    return run(
+        [
+            "bcecmd",
+            "bos",
+            "cp",
+            str(archive),
+            bos_archive_target(bos_path, archive),
+            "--concurrency",
+            str(concurrency),
+        ],
+        env,
+    )
+
+
 def confirm_upload(args: argparse.Namespace, local_dir: Path) -> None:
     if not args.upload or args.yes or args.dry_run:
         return
+    if args.pack:
+        upload_line = f"Type YES to pack into {args.pack} and upload the archive to BOS:"
+    else:
+        upload_line = "Type YES to start uploading during download and final BOS sync:"
     print(
         "\n".join(
             [
@@ -307,8 +476,9 @@ def confirm_upload(args: argparse.Namespace, local_dir: Path) -> None:
                 f"source={args.source}",
                 f"model_id={args.model_id or ''}",
                 f"local_dir={local_dir}",
+                f"pack={args.pack or 'none'}",
                 f"bos_path={args.bos_path}",
-                "Type YES to start uploading during download and final BOS sync:",
+                upload_line,
             ]
         ),
         flush=True,
@@ -326,11 +496,19 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--preflight", action="store_true")
     parser.add_argument("--source", choices=["hf", "modelscope", "local"])
-    parser.add_argument("--model-id")
+    parser.add_argument(
+        "--model-id",
+        help="repo id (org/model) or a full Hugging Face / ModelScope model URL",
+    )
     parser.add_argument("--local-dir")
     parser.add_argument("--bos-path")
     parser.add_argument("--proxy")
     parser.add_argument("--upload", action="store_true")
+    parser.add_argument(
+        "--pack",
+        choices=["tar", "tar.gz"],
+        help="pack the downloaded dir into a tar/tar.gz archive and upload that archive instead of syncing files",
+    )
     parser.add_argument("--max-workers", type=int, default=8)
     parser.add_argument("--upload-concurrency", type=int, default=64)
     parser.add_argument(
@@ -360,12 +538,12 @@ def validate(args: argparse.Namespace) -> None:
         raise SystemExit("--model-id is required for downloads")
     if args.upload and not args.bos_path:
         raise SystemExit("--bos-path is required when --upload is set")
-    if args.upload and not args.dry_run and shutil.which("bcecmd") is None:
-        raise SystemExit("bcecmd is required for upload")
 
 
 def main() -> int:
     args = parse_args()
+    if not args.preflight:
+        resolve_source_and_model(args)
     validate(args)
     if args.preflight:
         return preflight()
@@ -374,12 +552,25 @@ def main() -> int:
     env = build_env(args.proxy)
     suffixes = tuple(args.suffixes or DEFAULT_SUFFIXES)
 
+    upload_requested = args.upload
+    if args.upload and shutil.which("bcecmd") is None:
+        print(
+            manual_upload_hint(local_dir, args.bos_path, args.upload_concurrency, args.pack),
+            flush=True,
+        )
+        args.upload = False
+
     download = download_command(args)
     confirm_upload(args, local_dir)
     if args.dry_run:
         if download:
             print("download:", " ".join(download))
-        if args.upload:
+        if args.pack:
+            archive = archive_path_for(local_dir, args.pack)
+            print("pack:", f"{local_dir} -> {archive} ({args.pack})")
+            if args.upload:
+                print("upload:", f"pack then cp {archive} to {bos_archive_target(args.bos_path, archive)}")
+        elif args.upload:
             print("upload:", f"watch {local_dir} then sync to {args.bos_path}")
         print("progress:", f"every {args.progress_interval}s" if args.progress_interval > 0 else "disabled")
         return 0
@@ -399,7 +590,9 @@ def main() -> int:
             daemon=True,
         )
         progress.start()
-    if args.upload:
+    # Packing uploads a single archive built after download, so skip the
+    # incremental file watcher; it only helps when syncing individual files.
+    if args.upload and not args.pack:
         watcher = threading.Thread(
             target=watch_upload,
             args=(
@@ -426,13 +619,28 @@ def main() -> int:
         if watcher:
             watcher.join(timeout=10)
 
+    archive: Path | None = None
+    if args.pack:
+        archive = archive_path_for(local_dir, args.pack)
+        build_archive(local_dir, archive, args.pack)
+
     upload_code = 0
     if args.upload:
-        upload_code = final_sync(local_dir, args.bos_path, env, args.upload_concurrency)
+        if args.pack and archive is not None:
+            upload_code = upload_archive(archive, args.bos_path, env, args.upload_concurrency)
+        else:
+            upload_code = final_sync(local_dir, args.bos_path, env, args.upload_concurrency)
 
     progress_stop_event.set()
     if progress:
         progress.join(timeout=10)
+
+    if upload_requested and not args.upload:
+        upload_status = "skipped_manual"
+    elif args.upload:
+        upload_status = "passed" if upload_code == 0 else "failed"
+    else:
+        upload_status = "disabled"
 
     elapsed = int(time.time() - start)
     print(
@@ -442,15 +650,27 @@ def main() -> int:
                 f"source={args.source}",
                 f"model_id={args.model_id or ''}",
                 f"local_dir={local_dir}",
+                f"pack={args.pack or 'none'}",
+                f"archive={archive or ''}",
                 f"bos_path={args.bos_path or ''}",
                 f"download_status={'passed' if download_code == 0 else 'failed'}",
-                f"upload_status={'passed' if upload_code == 0 else 'failed'}",
+                f"upload_status={upload_status}",
                 f"output_dir={OUTPUT_DIR}",
                 f"elapsed_seconds={elapsed}",
             ]
         ),
         flush=True,
     )
+    if upload_requested and not args.upload:
+        print(
+            manual_upload_hint(local_dir, args.bos_path, args.upload_concurrency, args.pack),
+            flush=True,
+        )
+    elif not upload_requested:
+        print(
+            download_only_upload_hint(local_dir, args.bos_path, args.upload_concurrency, args.pack),
+            flush=True,
+        )
     return download_code or upload_code
 
 

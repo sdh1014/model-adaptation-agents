@@ -2,17 +2,22 @@
 
 # Copy this file to model_download_config.sh, then edit the values below.
 
-# Choose one: hf | modelscope | local
-Source="hf"
+# Easiest path: paste a Hugging Face or ModelScope model URL and leave Source empty.
+# The source (hf / modelscope) is auto-detected from the URL host.
+#   Hugging Face: https://huggingface.co/sgl-project/DeepSeek-V4-Pro-FP8
+#   ModelScope:   https://www.modelscope.cn/models/Qwen/Qwen2.5-32B-Instruct-AWQ
+Model_url="https://huggingface.co/sgl-project/DeepSeek-V4-Pro-FP8"
+
+# Only needed when NOT using Model_url. Set Source="local" to upload an existing
+# local directory without downloading. Leave empty when Model_url is set.
+Source=""  # "" | hf | modelscope | local
 
 # Local directory for downloaded or existing model weights.
 Local_model_path="/home/models/DeepSeek-V4-Pro-FP8"
 
-# Use this when Source="hf".
-HF_model_path="sgl-project/DeepSeek-V4-Pro-FP8"
-
-# Use this when Source="modelscope".
-MS_model_path="Qwen/Qwen2.5-32B-Instruct-AWQ"
+# Legacy per-source fields. Ignored when Model_url is set. Accept a repo id OR a URL.
+HF_model_path=""
+MS_model_path=""
 
 # Required when Upload=1.
 BOS_model_path="bos:/aihc-private-hcd/LLM/DeepSeek/DeepSeek-V4-Pro-FP8"
@@ -25,6 +30,10 @@ Upload_concurrency=64
 
 # Seconds between progress reports. Set 0 to disable.
 Progress_interval=60
+
+# Optional packaging. "" uploads files as-is; "tar" or "tar.gz" packs the
+# downloaded dir into one archive and uploads that archive instead.
+Pack=""  # "" | tar | tar.gz
 
 # Upload=1 downloads and uploads to BOS. Upload=0 downloads only.
 Upload=1
