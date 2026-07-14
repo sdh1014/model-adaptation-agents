@@ -1,0 +1,305 @@
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import unittest
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+REPLAY_COMPARE = REPO_ROOT / "model-adaptation" / "scripts" / "replay_compare.py"
+SPEC_TEMPLATE = (
+    REPO_ROOT / "model-adaptation" / "references" / "migration-spec-template.md"
+)
+MODEL_ADAPTATION_SKILL = REPO_ROOT / "model-adaptation" / "SKILL.md"
+EXPECTED_CONTRACT_SHA256 = (
+    "a7e1defe27ca3359d1a09383e10ad34087eef133b18307fb8c750bc5ad0a6644"
+)
+
+
+def approved_contract() -> dict:
+    return {
+        "schema": "migration-spec/v0",
+        "spec_id": "step3p7-flash-p800-demo",
+        "contract_revision": 1,
+        "model": "Step-3.7-Flash",
+        "source": {
+            "sglang_revision": "sglang-rev",
+            "sglang_kunlun_revision": "kunlun-rev",
+        },
+        "checkpoint": {
+            "id": "checkpoint-rev",
+            "config_digest": "config-sha256",
+        },
+        "model_path": {
+            "target_entry": "Step3p7ForConditionalGeneration.forward",
+            "draft_entry": "Step3p5MTP.forward",
+        },
+        "demo_input_mode": "text-only",
+        "limits": {
+            "max_samples_per_operator": 3,
+            "max_repair_attempts": 5,
+        },
+        "precision_gate": {
+            "comparator": "torch.testing.assert_close",
+            "atol": 0.001,
+            "rtol": 0.01,
+            "require_exact_structure": True,
+            "require_same_dtype": True,
+            "require_finite": True,
+            "check_stride": False,
+        },
+    }
+
+
+def write_spec(path: Path, contract: dict, working_state: str = "state_revision: 0") -> None:
+    contract_json = json.dumps(contract, ensure_ascii=False, indent=2)
+    path.write_text(
+        "\n".join(
+            [
+                "# Migration Spec",
+                "<!-- HUMAN-OWNED CONTRACT: BEGIN -->",
+                "<!-- CONTRACT-DATA: BEGIN -->",
+                contract_json,
+                "<!-- CONTRACT-DATA: END -->",
+                "<!-- HUMAN-OWNED CONTRACT: END -->",
+                "<!-- AGENT-WRITABLE WORKING STATE: BEGIN -->",
+                working_state,
+                "<!-- AGENT-WRITABLE WORKING STATE: END -->",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+
+def run_tool(*args: str) -> subprocess.CompletedProcess:
+    env = os.environ.copy()
+    env["PYTHONPYCACHEPREFIX"] = "/tmp/model-adaptation-agents-pyc"
+    return subprocess.run(
+        [sys.executable, str(REPLAY_COMPARE), *args],
+        cwd=REPO_ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
+class Ticket10SpecBindingTest(unittest.TestCase):
+    def test_approved_spec_runs_synthetic_comparison_with_contract_binding(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            spec_path = workspace / "migration-spec.md"
+            case_path = workspace / "case.json"
+            run_dir = workspace / "runs" / "synthetic-001"
+            write_spec(spec_path, approved_contract())
+            case_path.write_text(
+                json.dumps({"expected": [1.0, 2.0], "actual": [1.0, 2.0]}),
+                encoding="utf-8",
+            )
+
+            completed = run_tool(
+                "--spec",
+                str(spec_path),
+                "--run-dir",
+                str(run_dir),
+                "--mode",
+                "synthetic",
+                "--case",
+                str(case_path),
+            )
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            result = json.loads((run_dir / "result.json").read_text(encoding="utf-8"))
+            self.assertEqual(result["tool"], "replay_compare.py")
+            self.assertEqual(result["action"], "synthetic")
+            self.assertTrue(result["passed"])
+            self.assertEqual(
+                result["spec_binding"],
+                {
+                    "spec_id": "step3p7-flash-p800-demo",
+                    "contract_revision": 1,
+                    "contract_data_sha256": EXPECTED_CONTRACT_SHA256,
+                },
+            )
+            self.assertEqual(result["evidence"], ["synthetic-case.json", "replay.log"])
+            self.assertTrue((run_dir / "synthetic-case.json").is_file())
+            self.assertTrue((run_dir / "replay.log").is_file())
+
+    def test_template_with_unapproved_placeholders_stops_before_creating_run(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            spec_path = workspace / "migration-spec.md"
+            case_path = workspace / "case.json"
+            run_dir = workspace / "runs" / "synthetic-001"
+            template = SPEC_TEMPLATE.read_text(encoding="utf-8")
+            self.assertIn('"model": null', template)
+            draft = template.replace(
+                '"model": null', '"model": "Step-3.7-Flash"', 1
+            )
+            spec_path.write_text(draft, encoding="utf-8")
+            case_path.write_text(
+                json.dumps({"expected": [1.0], "actual": [1.0]}),
+                encoding="utf-8",
+            )
+
+            completed = run_tool(
+                "--spec",
+                str(spec_path),
+                "--run-dir",
+                str(run_dir),
+                "--mode",
+                "synthetic",
+                "--case",
+                str(case_path),
+            )
+
+            self.assertEqual(completed.returncode, 2)
+            self.assertIn("Contract Data is not approved", completed.stderr)
+            self.assertIn("source.sglang_revision", completed.stderr)
+            self.assertIn("precision_gate.atol", completed.stderr)
+            self.assertFalse(run_dir.exists())
+            self.assertIn("- `status`: `NEEDS_HUMAN`", draft)
+            self.assertIn("- `phase`: `SCAN`", draft)
+            self.assertIn("- `next_action`: `none`", draft)
+
+    def test_business_failure_is_a_result_but_contract_drift_is_a_tool_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            spec_path = workspace / "migration-spec.md"
+            case_path = workspace / "case.json"
+            write_spec(spec_path, approved_contract())
+            case_path.write_text(
+                json.dumps({"expected": [1.0], "actual": [2.0]}),
+                encoding="utf-8",
+            )
+
+            comparison = run_tool(
+                "--spec",
+                str(spec_path),
+                "--run-dir",
+                str(workspace / "runs" / "synthetic-fail"),
+                "--mode",
+                "synthetic",
+                "--case",
+                str(case_path),
+            )
+
+            self.assertEqual(comparison.returncode, 0, comparison.stderr)
+            comparison_result = json.loads(
+                (workspace / "runs" / "synthetic-fail" / "result.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertFalse(comparison_result["passed"])
+
+            drifted_contract = approved_contract()
+            drifted_contract["limits"]["max_samples_per_operator"] = 4
+            write_spec(spec_path, drifted_contract)
+            rejected_run = workspace / "runs" / "contract-drift"
+
+            rejected = run_tool(
+                "--spec",
+                str(spec_path),
+                "--run-dir",
+                str(rejected_run),
+                "--mode",
+                "synthetic",
+                "--case",
+                str(case_path),
+            )
+
+            self.assertEqual(rejected.returncode, 2)
+            self.assertIn("max_samples_per_operator must be 3", rejected.stderr)
+            self.assertFalse(rejected_run.exists())
+
+    def test_existing_result_survives_working_state_change_but_not_contract_change(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            spec_path = workspace / "migration-spec.md"
+            case_path = workspace / "case.json"
+            original_run = workspace / "runs" / "synthetic-001"
+            contract = approved_contract()
+            write_spec(spec_path, contract, working_state="state_revision: 0")
+            case_path.write_text(
+                json.dumps({"expected": [1.0], "actual": [1.0]}),
+                encoding="utf-8",
+            )
+            created = run_tool(
+                "--spec",
+                str(spec_path),
+                "--run-dir",
+                str(original_run),
+                "--mode",
+                "synthetic",
+                "--case",
+                str(case_path),
+            )
+            self.assertEqual(created.returncode, 0, created.stderr)
+
+            write_spec(spec_path, contract, working_state="state_revision: 1")
+            working_state_check = workspace / "runs" / "binding-working-state"
+            accepted = run_tool(
+                "--spec",
+                str(spec_path),
+                "--run-dir",
+                str(working_state_check),
+                "--mode",
+                "validate-binding",
+                "--result",
+                str(original_run / "result.json"),
+            )
+
+            self.assertEqual(accepted.returncode, 0, accepted.stderr)
+            accepted_result = json.loads(
+                (working_state_check / "result.json").read_text(encoding="utf-8")
+            )
+            self.assertTrue(accepted_result["passed"])
+            self.assertEqual(accepted_result["mismatched_fields"], [])
+
+            revised_contract = approved_contract()
+            revised_contract["contract_revision"] = 2
+            revised_contract["precision_gate"]["atol"] = 0.002
+            write_spec(spec_path, revised_contract, working_state="state_revision: 2")
+            contract_check = workspace / "runs" / "binding-contract-change"
+            rejected = run_tool(
+                "--spec",
+                str(spec_path),
+                "--run-dir",
+                str(contract_check),
+                "--mode",
+                "validate-binding",
+                "--result",
+                str(original_run / "result.json"),
+            )
+
+            self.assertEqual(rejected.returncode, 0, rejected.stderr)
+            rejected_result = json.loads(
+                (contract_check / "result.json").read_text(encoding="utf-8")
+            )
+            self.assertFalse(rejected_result["passed"])
+            self.assertEqual(
+                rejected_result["mismatched_fields"],
+                ["contract_revision", "contract_data_sha256"],
+            )
+
+    def test_skill_defines_the_first_approved_contract_transition(self) -> None:
+        skill = MODEL_ADAPTATION_SKILL.read_text(encoding="utf-8")
+
+        self.assertIn(
+            "`observed_contract_revision` 设为当前 `contract_revision`", skill
+        )
+        self.assertIn("`state_revision` 加一", skill)
+        self.assertIn("`status: ACTIVE`、`phase: SCAN`", skill)
+        self.assertIn("`last_completed_action: contract_approved`", skill)
+        self.assertIn(
+            "`next_action: 完成 target/draft 扫描并生成 Scan Run`", skill
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()
