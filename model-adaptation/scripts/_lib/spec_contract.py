@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 import hashlib
 import json
+import math
 from pathlib import Path
 from typing import Any, Dict
 
@@ -51,6 +52,14 @@ class SpecBinding:
             "contract_data_sha256": self.contract_data_sha256,
         }
 
+    def mismatched_fields(self, candidate: Any) -> list:
+        candidate_binding = candidate if isinstance(candidate, dict) else {}
+        return [
+            field
+            for field, expected in self.as_result_dict().items()
+            if candidate_binding.get(field) != expected
+        ]
+
 
 def canonical_json_bytes(value: Any) -> bytes:
     return json.dumps(
@@ -70,8 +79,12 @@ def load_contract_data(spec_path: Path) -> Dict[str, Any]:
     if spec_text.count(CONTRACT_DATA_BEGIN) != 1 or spec_text.count(CONTRACT_DATA_END) != 1:
         raise SpecContractError("Migration Spec must contain exactly one Contract Data block")
 
-    begin = spec_text.index(CONTRACT_DATA_BEGIN) + len(CONTRACT_DATA_BEGIN)
-    end = spec_text.index(CONTRACT_DATA_END, begin)
+    begin_marker = spec_text.index(CONTRACT_DATA_BEGIN)
+    end_marker = spec_text.index(CONTRACT_DATA_END)
+    if end_marker < begin_marker:
+        raise SpecContractError("Contract Data markers are out of order")
+    begin = begin_marker + len(CONTRACT_DATA_BEGIN)
+    end = end_marker
     raw_contract = spec_text[begin:end].strip()
     try:
         contract_data = json.loads(raw_contract)
@@ -149,9 +162,14 @@ def require_fixed_contract_data(contract_data: Dict[str, Any]) -> None:
 
     for path in ("precision_gate.atol", "precision_gate.rtol"):
         value = value_at_path(contract_data, path)
-        if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            or value < 0
+        ):
             raise SpecContractError(
-                f"Contract Data {path} must be a non-negative number"
+                f"Contract Data {path} must be a finite non-negative number"
             )
 
 

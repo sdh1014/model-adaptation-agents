@@ -5,7 +5,7 @@ import argparse
 import json
 from pathlib import Path
 import sys
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from _lib.spec_contract import (
     SpecContractError,
@@ -18,7 +18,15 @@ class ToolError(RuntimeError):
     """The deterministic action could not form a trustworthy result."""
 
 
-def read_synthetic_case(case_path: Path) -> Dict[str, Any]:
+DEFAULT_SYNTHETIC_CASE = {
+    "expected": {"spec_binding_smoke": "ready"},
+    "actual": {"spec_binding_smoke": "ready"},
+}
+
+
+def read_synthetic_case(case_path: Optional[Path]) -> Dict[str, Any]:
+    if case_path is None:
+        return DEFAULT_SYNTHETIC_CASE
     try:
         case = json.loads(case_path.read_text(encoding="utf-8"))
     except OSError as error:
@@ -44,7 +52,9 @@ def create_run_dir(run_dir: Path) -> None:
         raise ToolError(f"run directory must be fresh and creatable: {error}") from error
 
 
-def run_synthetic(spec_path: Path, run_dir: Path, case_path: Path) -> None:
+def run_synthetic(
+    spec_path: Path, run_dir: Path, case_path: Optional[Path] = None
+) -> None:
     binding = load_spec_binding(spec_path)
     case = read_synthetic_case(case_path)
     passed = canonical_json_bytes(case["expected"]) == canonical_json_bytes(case["actual"])
@@ -82,16 +92,8 @@ def run_validate_binding(spec_path: Path, run_dir: Path, result_path: Path) -> N
     if not isinstance(candidate_result, dict):
         raise ToolError("result to validate must be one JSON object")
 
-    candidate_binding = candidate_result.get("spec_binding")
     expected_binding = binding.as_result_dict()
-    if not isinstance(candidate_binding, dict):
-        candidate_binding = {}
-    binding_fields = ("spec_id", "contract_revision", "contract_data_sha256")
-    mismatched_fields = [
-        field
-        for field in binding_fields
-        if candidate_binding.get(field) != expected_binding[field]
-    ]
+    mismatched_fields = binding.mismatched_fields(candidate_result.get("spec_binding"))
     passed = not mismatched_fields
 
     create_run_dir(run_dir)
@@ -139,8 +141,6 @@ def main() -> int:
     args = parse_args()
     try:
         if args.mode == "synthetic":
-            if args.case is None:
-                raise ToolError("--case is required for synthetic mode")
             if args.result is not None:
                 raise ToolError("--result is not valid for synthetic mode")
             run_synthetic(args.spec, args.run_dir, args.case)

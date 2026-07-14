@@ -296,9 +296,150 @@ class Ticket10SpecBindingTest(unittest.TestCase):
         self.assertIn("`state_revision` 加一", skill)
         self.assertIn("`status: ACTIVE`、`phase: SCAN`", skill)
         self.assertIn("`last_completed_action: contract_approved`", skill)
-        self.assertIn(
-            "`next_action: 完成 target/draft 扫描并生成 Scan Run`", skill
-        )
+        self.assertIn("`next_action: 运行 Spec 绑定自检`", skill)
+        self.assertIn("`last_completed_action: spec_binding_smoke_passed`", skill)
+        self.assertIn("`last_run: runs/spec-binding-001`", skill)
+        self.assertIn("`next_action: 完成 target/draft 扫描并生成 Scan Run`", skill)
+
+    def test_binding_smoke_run_is_recoverable_from_the_same_spec(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            spec_path = workspace / "migration-spec.md"
+            smoke_run = workspace / "runs" / "spec-binding-001"
+            write_spec(
+                spec_path,
+                approved_contract(),
+                working_state="\n".join(
+                    [
+                        "observed_contract_revision: 1",
+                        "state_revision: 1",
+                        "status: ACTIVE",
+                        "phase: SCAN",
+                        "last_completed_action: contract_approved",
+                        "last_run: null",
+                        "next_action: 运行 Spec 绑定自检",
+                    ]
+                ),
+            )
+
+            completed = run_tool(
+                "--spec",
+                str(spec_path),
+                "--run-dir",
+                str(smoke_run),
+                "--mode",
+                "synthetic",
+            )
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            smoke_result = json.loads(
+                (smoke_run / "result.json").read_text(encoding="utf-8")
+            )
+            self.assertTrue(smoke_result["passed"])
+
+            recovered_working_state = "\n".join(
+                [
+                    "observed_contract_revision: 1",
+                    "state_revision: 2",
+                    "status: ACTIVE",
+                    "phase: SCAN",
+                    "last_completed_action: spec_binding_smoke_passed",
+                    "last_run: runs/spec-binding-001",
+                    "next_action: 完成 target/draft 扫描并生成 Scan Run",
+                ]
+            )
+            write_spec(spec_path, approved_contract(), recovered_working_state)
+
+            recovery_check = run_tool(
+                "--spec",
+                str(spec_path),
+                "--run-dir",
+                str(workspace / "runs" / "recovery-check-001"),
+                "--mode",
+                "validate-binding",
+                "--result",
+                str(smoke_run / "result.json"),
+            )
+
+            self.assertEqual(recovery_check.returncode, 0, recovery_check.stderr)
+            recovery_result = json.loads(
+                (
+                    workspace / "runs" / "recovery-check-001" / "result.json"
+                ).read_text(encoding="utf-8")
+            )
+            self.assertTrue(recovery_result["passed"])
+            restored_spec = spec_path.read_text(encoding="utf-8")
+            self.assertIn("last_run: runs/spec-binding-001", restored_spec)
+            self.assertIn(
+                "next_action: 完成 target/draft 扫描并生成 Scan Run", restored_spec
+            )
+
+    def test_reversed_contract_markers_are_a_clean_tool_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            spec_path = workspace / "migration-spec.md"
+            case_path = workspace / "case.json"
+            run_dir = workspace / "runs" / "invalid-markers"
+            spec_path.write_text(
+                "\n".join(
+                    [
+                        "<!-- CONTRACT-DATA: END -->",
+                        json.dumps(approved_contract()),
+                        "<!-- CONTRACT-DATA: BEGIN -->",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            case_path.write_text(
+                json.dumps({"expected": 1, "actual": 1}), encoding="utf-8"
+            )
+
+            completed = run_tool(
+                "--spec",
+                str(spec_path),
+                "--run-dir",
+                str(run_dir),
+                "--mode",
+                "synthetic",
+                "--case",
+                str(case_path),
+            )
+
+            self.assertEqual(completed.returncode, 2)
+            self.assertIn("Contract Data markers are out of order", completed.stderr)
+            self.assertNotIn("Traceback", completed.stderr)
+            self.assertFalse(run_dir.exists())
+
+    def test_non_finite_precision_tolerance_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            spec_path = workspace / "migration-spec.md"
+            case_path = workspace / "case.json"
+            run_dir = workspace / "runs" / "invalid-tolerance"
+            contract = approved_contract()
+            contract["precision_gate"]["atol"] = float("nan")
+            write_spec(spec_path, contract)
+            case_path.write_text(
+                json.dumps({"expected": 1, "actual": 1}), encoding="utf-8"
+            )
+
+            completed = run_tool(
+                "--spec",
+                str(spec_path),
+                "--run-dir",
+                str(run_dir),
+                "--mode",
+                "synthetic",
+                "--case",
+                str(case_path),
+            )
+
+            self.assertEqual(completed.returncode, 2)
+            self.assertIn(
+                "precision_gate.atol must be a finite non-negative number",
+                completed.stderr,
+            )
+            self.assertFalse(run_dir.exists())
 
 
 if __name__ == "__main__":

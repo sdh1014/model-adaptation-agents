@@ -52,7 +52,9 @@ Contract 首次批准前可以代填草稿；一旦 `contract_revision` 是已�
 
 如果 `contract_revision != observed_contract_revision`，先读最新 Human Decision 并重新对齐 Working State，不执行源码修改、CUDA 采集或 P800 重放。`BLOCKED` 或 `NEEDS_HUMAN` 只有在更高 Contract revision 明确解决原停止原因后才能恢复为 `ACTIVE`；`WAITING / HANDOFF` 在 P800 校验成功后可直接恢复，不需要修改 Contract。`PASS` 不可恢复，新目标使用新的 Spec。
 
-首次批准有一个固定的对齐动作：当前状态必须仍是模板生成的 `NEEDS_HUMAN / SCAN`，最新 Human Decision 必须批准 revision 1，且所有 Contract 必填值已经通过上述校验。满足这些条件后，只更新 Working State：把 `observed_contract_revision` 设为当前 `contract_revision`，把 `state_revision` 加一，写为 `status: ACTIVE`、`phase: SCAN`、`last_completed_action: contract_approved`，并把唯一动作写为 `next_action: 完成 target/draft 扫描并生成 Scan Run`。同时清空旧的停止原因和人类问题，将 `resume_requires_contract_revision` 设为 `false`。若任一条件不满足，保持 `NEEDS_HUMAN / SCAN`，不得靠改 Working State 绕过批准。
+首次批准有一个固定的对齐动作：当前状态必须仍是模板生成的 `NEEDS_HUMAN / SCAN`，最新 Human Decision 必须批准 revision 1，且所有 Contract 必填值已经通过上述校验。满足这些条件后，只更新 Working State：把 `observed_contract_revision` 设为当前 `contract_revision`，把 `state_revision` 加一，写为 `status: ACTIVE`、`phase: SCAN`、`last_completed_action: contract_approved`，并把唯一动作写为 `next_action: 运行 Spec 绑定自检`。同时清空旧的停止原因和人类问题，将 `resume_requires_contract_revision` 设为 `false`。若任一条件不满足，保持 `NEEDS_HUMAN / SCAN`，不得靠改 Working State 绕过批准。
+
+首次批准后的 Spec 绑定自检只运行一次，不做真实算子扫描。创建 `runs/spec-binding-001`，调用 `scripts/replay_compare.py --spec <migration-spec.md> --run-dir <runs/spec-binding-001> --mode synthetic`；这个模式使用脚本内固定且相等的 JSON 值，只验证 Contract Data 解析、摘要和 Run 写入，不代替后续 `torch.testing` 精度比较。只有退出码为 `0`、`passed: true`，且结果的三项 Spec 绑定与当前 Contract Data 全部一致时，才封存该 Run。随后把 Working State 的 `state_revision` 再加一，写入 `last_completed_action: spec_binding_smoke_passed`、`last_run: runs/spec-binding-001`，并把唯一动作改为 `next_action: 完成 target/draft 扫描并生成 Scan Run`。更新后重新读取 Spec；新会话必须先校验 `last_run` 的绑定，再执行这条扫描动作。工具未完成、结果不通过或绑定不一致时，不写成功状态，也不把它记为 Operator Gap。
 
 若 Spec 自相矛盾、证据指针失效、下一动作不唯一，更新 Working State 为 `NEEDS_HUMAN / 当前 phase`，保留证据并只问一个问题。
 
