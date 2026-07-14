@@ -1,7 +1,7 @@
 # 打通 Spec 绑定的最小执行闭环
 
 Type: task
-Status: ready-for-agent
+Status: resolved
 Blocked by:
 
 ## What to build
@@ -25,3 +25,9 @@ Blocked by:
 ## Comments
 
 这是后续所有扫描、采集、交接和修复票据的共同入口，不在这里实现真实算子扫描。
+
+- 已实现 Contract Data 的唯一 JSON 区块解析、固定约束校验、规范化 SHA-256 和结果绑定。
+- `replay_compare.py` 已提供合成绑定自检和旧结果绑定校验；业务比较失败写入可信结果，工具未完成返回非零且不创建 Run。
+- Skill 首次批准后会先封存 `runs/spec-binding-001`，再把唯一下一动作推进到 target/draft 扫描；新会话通过 Spec 的 `last_run` 恢复。
+- `python3 -m unittest discover -s tests -p 'test*.py' -v` 共 8 项通过；Python 语法检查和 `git diff --check` 通过。
+- 两轮双轴代码审查完成，最终 Standards 与 Ticket 10 两个维度均无剩余可操作问题。
