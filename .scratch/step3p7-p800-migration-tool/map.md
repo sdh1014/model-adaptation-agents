@@ -1,0 +1,53 @@
+# Step-3.7-Flash 到 KLX P800 的 Spec 驱动算子迁移工具方案
+
+## Destination
+
+交付一份可直接指导最小 Demo 实现的中文方案设计文档：说明一个 Spec 驱动、单 Agent、少量确定性脚本组成的算子迁移工具，如何完成 Step-3.7-Flash 真实路径扫描、一次性 CUDA Golden 采集、人工跨机器交接，以及 P800 上单算子最多三种 shape 的自动修复与精度验收。
+
+最终文档保存为 `outputs/step3p7-p800-migration-tool-design.md`。本地图不实现或运行 Demo。
+
+## Notes
+
+- 领域词汇以仓库根目录 `CONTEXT.md` 为准。
+- 设计需要参考当前 SGLang、SGLang-Kunlun 与 Step-3.7/Step3p5 源码；所有源码结论必须带稳定路径和行号证据。
+- 背景方案页：<https://ku.baidu-int.com/knowledge/HFVrC7hq1Q/vMri-fRViV/G4ag4GvOr4/hro1tO5i3e6uj0>。
+- 工具运行时只有 `migration-spec.md + runs/`，不设置 `outputs/`；这里的 `outputs/` 仅是当前 Codex 工作区交付最终方案文档的位置。
+- `migration-spec.md` 分为人工只读的 Contract 与 Agent 可更新的 Working State。Agent 每次动作前读取 Spec，动作后立即更新。
+- 一个 Migration Agent 负责扫描、判断、生成修复和推进状态；确定性脚本只负责 Golden 采集、replay/compare、交接包校验和工作区保护。
+- 一个自然语言 Skill 是首次启动和恢复的唯一人类入口，不设置顶层编排 CLI；Skill 内只保留四个职责单一的确定性脚本。
+- `migration-spec.md` 的 Contract 内含专门的 JSON 结构化区块。四个脚本统一通过必选 `--spec` 只读该区块中的固定约束，不解析 Markdown 或 Working State；动作参数仍显式传入，结果绑定 `spec_id + contract_revision + Contract Data SHA-256`。
+- Demo 保留完整路径扫描，但只闭环一个真实缺口算子，最多覆盖三种实际 shape。首选不含权重的特殊 SwiGLU 语义片段。
+- CUDA 只进行一次 Capture Session，可为同一算子保存最多三个去重样本；输入和 CUDA 输出 Tensor 必须保存，内部中间 Tensor 默认不保存。
+- 工具生成并校验 Handoff Bundle，跨机器复制由人工完成。
+- P800 自动修复上限由 Contract 固定为 `max_repair_attempts: 5`，每轮只验证一个假设；允许 Python、P800 可执行的 PyTorch 和已有 xspeedgate，实现需要新 C++/Kernel 注册时进入 BLOCKED。
+- 精度门槛位于 Contract，Agent 不得放宽。用户已在 P800 实机验证 `torch.testing` 可用，比较器直接采用 `torch.testing.assert_close`，不再设计多后端适配层。
+- 本努力对 Wayfinder 的默认“只规划”规则做一个窄覆盖：所有设计决策关闭后，允许最后一个 task 只负责合成最终方案设计文档；不允许进入工具代码实现。
+- 术语优先复用 `CONTEXT.md`；只添加驱动流程所必需的字段，不为失败原因另造错误码体系、子状态机或新领域概念。
+
+## Decisions so far
+
+<!-- 每关闭一个子票，在这里追加一行简述与链接；详细答案只保留在子票中。 -->
+
+- [确认 Step-3.7 Flash 的真实扫描入口与语义算子边界](issues/01-confirm-step3p7-scan-boundary.md)：按实际配置分别扫描 Step3p7 target 与 Step3p5MTP draft 模型树，Worker/Runner 止步；Agent 做语义判断，薄脚本只抽取和校验证据。特殊 SwiGLU 的 replay 边界成立，但因缺配置证据和独立 replacement seam，当前为 `NEEDS_HUMAN`。
+- [原型化单文件 Migration Spec 与状态迁移](issues/02-prototype-migration-spec.md)：一个文件用边界标记分开人工只读 Contract 与 Agent 可写 Working State；`status + phase` 驱动流程，`WAITING` 只表示人工交接，详细历史留在 Run，恢复执行只依赖关键摘要和证据指针。
+- [定义一次性 CUDA Golden Run 与交接包契约](issues/03-define-golden-run-contract.md)：保存边界输入与 CUDA 输出、必要标量和布局元数据；一个算子按调用签名最多保留三个样本，并由新 CUDA 进程自回放。交接包只含 Spec、Golden Run 和逐文件 manifest，底层序列化与比较 API 暂不绑定。
+- [决定特殊 SwiGLU 的替换入口与 Demo 资格](issues/08-decide-swiglu-seam-and-demo-eligibility.md)：把无权重表达式原样抽成普通函数作为采集和替换入口；只有实际配置命中且 P800 baseline 失败时才有 Demo 资格，否则改选其他已采集的真实缺口。
+- [确定 P800 修复的补丁生命周期](issues/04-decide-patch-lifecycle.md)：每轮从同一干净基线生成完整补丁，失败证据留在 Run 后恢复基线；通过补丁作为唯一未提交修改留在 P800 工作区，工具不管理分支、提交或推送。
+- [设计基于 torch.testing 的精度比较接口](issues/05-prototype-comparator-interface.md)：比较器从 Contract 读取固定容差，先检查结构、dtype 与有限值，再逐 Tensor 调用 `torch.testing.assert_close`；Run 只保存诊断结果和日志，不重复保存 P800 actual Tensor。
+- [走查一个 SwiGLU 三 Shape 的端到端纸面 Demo](issues/06-walkthrough-swiglu-demo.md)：固定源码包含 helper seam；baseline 按全部样本判断真实 gap；Contract 最多五轮且通过轮计数；Working State 只保留 `last_run` 与 `passing_run` 两类修复指针。
+- [决定单 Agent 入口与最小脚本表面](issues/09-decide-entrypoint-and-tools.md)：同一个自然语言 Skill 负责初始化和恢复；四个脚本分别处理 Golden 采集、replay/compare、交接校验和工作区保护，并通过 `--spec + --run-dir + result.json` 与 Agent 交接。Spec 的 Contract 内嵌脚本专用 JSON 区块，固定约束不可由命令行覆盖，动态动作参数不写入 Contract。
+- [产出 Spec 驱动 P800 算子迁移工具方案设计文档](issues/07-write-solution-design.md)：最终中文方案已保存到 `outputs/step3p7-p800-migration-tool-design.md`，完整合成单 Agent、Spec、四个脚本、一次 CUDA Golden、人工交接、P800 五轮修复、特殊 SwiGLU Demo 和源码证据；未进入工具实现。
+
+## Not yet specified
+
+- Golden Sample 的逻辑数据、比较方式和校验要求已经确定；底层序列化格式仍待实现前结合 CUDA/P800 两端能力选定。
+
+## Out of scope
+
+- 实际编写或运行迁移工具与 Demo。
+- 重新登录真实 CUDA/P800 环境做其他能力验证；`torch.testing` 可用性直接采用用户已完成的实机验证结论。
+- 自动 SSH、远程执行、自动上传或凭证管理。
+- 新增 C++/自定义 Kernel、底层算子注册或性能优化。
+- 完成 Step-3.7-Flash 的全部算子、全部 shape、DecoderLayer、完整模型组网、E2E 回复或性能验证。
+- 从单算子最多三种 shape 扩展到全部缺口和更多 shape；必须等最小闭环真实运行稳定后另行设计。
+- 沿用或评审现有 `model-adaptation-agents` 的架构设计。
