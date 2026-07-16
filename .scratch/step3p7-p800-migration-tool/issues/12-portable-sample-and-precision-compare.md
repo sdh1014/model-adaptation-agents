@@ -34,6 +34,6 @@ Golden Sample 只保存边界输入 Tensor、CUDA 期望输出 Tensor、容器�
 - 样本最多保存三种去重调用签名，只包含 BF16 `gate_up`、标量 `limit`、CUDA 期望输出和最小结构元数据；拒绝 `nn.Parameter` 与非有限值，第四种调用不落 tensor。
 - preflight 会启动第二个进程，用 `torch.load(..., weights_only=True)` 读回，再按 `torch.testing.assert_close(atol=0.01, rtol=0.02)` 重放。
 - Claude Code 项目入口位于 `.claude/skills/model-adaptation/SKILL.md`，N 卡执行步骤位于 `model-adaptation/references/cuda-capture-validation.md`。
-- 本地 26 个测试全部通过；无 CUDA 的本机只验证了失败路径会生成可信证据且 `consumes_capture_session=false`。
+- 本地 27 个测试全部通过；其中新增测试直接加载固定 SGLang revision 的真实 `HookRegistry` 与 `step3p5_ops.py`，确认两个 Hook、imported binding 传播、target `decode` 上下文和 `3 保存 + 1 重复 + 1 跳过签名`。无 CUDA 的本机只验证了 preflight 失败路径会生成可信证据且 `consumes_capture_session=false`。
 
 下一人工动作是在真实 N 卡 SGLang 环境执行 `runs/cuda-preflight-001`，把 runbook 列出的六个文件带回审查。只有该结果通过后才继续正式模型采集。候选 `torch.save` 格式仍未在 P800 修改版 Torch 完成读回，因此本票据仍不满足跨端 acceptance criteria，`replay_compare.py` 的正式 Golden compare 路径也不在本轮提前宣称完成。

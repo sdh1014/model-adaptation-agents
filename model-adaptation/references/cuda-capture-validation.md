@@ -13,7 +13,14 @@ preflight 使用小型合成 BF16 tensor，不启动模型、不读取 checkpoin
 
 ## 执行
 
-先安装本仓库提供的轻量采集插件；它没有额外依赖：
+先用固定源码中的真实 `HookRegistry` 做一次 CPU 侧接线检查。该测试不会加载 checkpoint，也不会消耗 CUDA Session：
+
+```bash
+SGLANG_WORKTREE="$SGLANG_WORKTREE" \
+  python tests/test_ticket12_real_sglang_hook_integration.py -v
+```
+
+结果必须是 `1 test ... OK`，不能是 `skipped`。然后安装本仓库提供的轻量采集插件；它没有额外依赖：
 
 ```bash
 python -m pip install -e ./model-adaptation --no-deps --no-build-isolation
@@ -37,6 +44,7 @@ python model-adaptation/scripts/capture_golden.py \
 
 只有以下条件同时满足，preflight 才算通过：
 
+- 真实 `HookRegistry` 接线测试在固定 SGLang revision 上得到 `1 test ... OK`。
 - `runs/cuda-preflight-001/result.json` 中 `passed` 为 `true`、`capture_status` 为 `PREFLIGHT_PASSED`、`consumes_capture_session` 为 `false`。
 - `capture-state.json` 中 `saved_sample_count=3`、`repeated_call_count=1`、`skipped_call_count=1`，并保留一条不含 tensor 数值的 `skipped_signatures` 记录。
 - `preflight-capture-summary.json` 记录两个已应用 Hook、实际 Torch 版本、CUDA 设备和固定 helper 路径。
