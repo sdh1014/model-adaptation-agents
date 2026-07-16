@@ -19,16 +19,16 @@ json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False).enco
 <!-- CONTRACT-DATA: BEGIN -->
 {
   "schema": "migration-spec/v0",
-  "spec_id": null,
-  "contract_revision": null,
-  "model": null,
+  "spec_id": "step3p7-flash-p800-demo",
+  "contract_revision": 1,
+  "model": "Step-3.7-Flash",
   "source": {
-    "sglang_revision": null,
-    "sglang_kunlun_revision": null
+    "sglang_revision": "6274831d9fef7bba04eb59302caac24563a974c9",
+    "sglang_kunlun_revision": "4731f8051b7d0bf2f03cf88e237e7e5fba80a5a9"
   },
   "checkpoint": {
-    "id": null,
-    "config_digest": null
+    "id": "stepfun-ai/Step-3.7-Flash@5f6244077ac62e04eec3f320501ff8c2b293373a",
+    "config_digest": "8d740ba5819e574b7a606ea7aa6d7d381142ed5cc77cab96dde2892c10414042"
   },
   "model_path": {
     "target_entry": "Step3p7ForConditionalGeneration.forward",
@@ -41,7 +41,7 @@ json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False).enco
     "speculative_algorithm": "EAGLE",
     "attention_backend": null
   },
-  "demo_input_mode": null,
+  "demo_input_mode": "text-only",
   "limits": {
     "max_samples_per_operator": 3,
     "max_repair_attempts": 5
@@ -62,7 +62,7 @@ json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False).enco
 
 ### Identity
 
-- `human_owner`: `TBD`
+- `human_owner`: `songdehao`
 
 `schema`、`spec_id` 与 `contract_revision` 的唯一机器可读值位于 Contract Data，不在 Markdown 正文维护副本。首次批准前必须填写 `human_owner` 和 Contract Data 中全部未决占位，把 `contract_revision` 设为 `1`，并记录初始 Human Decision。不得把有意固定为 `null` 的两个 runtime 参数改成伪造的实现名。
 
@@ -168,7 +168,7 @@ json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False).enco
 
 | contract_revision | decision | reason |
 |---|---|---|
-| `PENDING` | 初始 Contract 尚未批准 | 填写全部必填值，把 revision 设为 1，并记录批准理由 |
+| `1` | 批准 Step-3.7-Flash TP8 BF16 EAGLE Demo Contract | 用户确认两端同命令、不显式指定 backend、不额外启用 MTP，并批准 atol=0.01、rtol=0.02；源码 revision 与 checkpoint config 由固定证据补齐 |
 
 <!-- HUMAN-OWNED CONTRACT: END -->
 
@@ -180,30 +180,34 @@ Agent 每次动作前完整读取 Contract 与本区；每次动作结束后立�
 
 ### Current
 
-- `observed_contract_revision`: `null`
-- `state_revision`: `0`
+- `observed_contract_revision`: `1`
+- `state_revision`: `3`
 - `status`: `NEEDS_HUMAN`
 - `phase`: `SCAN`
 - `execution_site`: `SOURCE`
 - `active_operator`: `null`
-- `last_completed_action`: `spec_template_created`
-- `last_run`: `null`
+- `last_completed_action`: `target_draft_scan_completed`
+- `last_run`: `runs/scan-001`
 - `next_action`: `none`
 
 规则：`ACTIVE` 时 `next_action` 必须恰好一条；`WAITING` 时必须是一条人工动作；`PASS`、`BLOCKED`、`NEEDS_HUMAN` 时必须为 `none`。
 
 ### Scan
 
-- `scan_run`: `null`
-- `target_coverage`: `PENDING`
-- `draft_coverage`: `PENDING`
-- `operator_counts`: `{ready: 0, capture_required: 0, needs_human: 0}`
+- `scan_run`: `runs/scan-001`
+- `target_coverage`: `COMPLETE`
+- `draft_coverage`: `COMPLETE`
+- `operator_counts`: `{ready: 8, capture_required: 1, needs_human: 4}`
 
 #### Gap queue
 
 | operator_id | scan_verdict | golden | demo_role | repair | evidence |
 |---|---|---|---|---|---|
-| _empty_ |  |  |  |  |  |
+| `activation.step_swiglu_with_limit` | `CAPTURE_REQUIRED` | `PLANNED` | 首选流程验证候选 | 待 P800 baseline 证明真实失败 | `runs/scan-001/result.json` |
+| `norm.gemma_rms` | `NEEDS_HUMAN` | `NOT_PLANNED` | 后续缺口 | 现行边界禁止保存 norm weight | `runs/scan-001/result.json` |
+| `moe.topk_sigmoid_bias` | `NEEDS_HUMAN` | `NOT_PLANNED` | 后续缺口 | 现行边界禁止保存 router bias | `runs/scan-001/result.json` |
+| `moe.bf16_clamped` | `NEEDS_HUMAN` | `NOT_PLANNED` | 后续缺口 | 当前替换边界包含 expert weights | `runs/scan-001/result.json` |
+| `attention.radix` | `NEEDS_HUMAN` | `NOT_PLANNED` | backend 运行证据 | CUDA 默认 backend 待启动日志确认 | `runs/scan-001/result.json` |
 
 完整 operator 列表保存在 Scan Run；Spec 只保留 gap queue 和计数。
 
@@ -238,9 +242,9 @@ baseline replay 不算修复尝试。每轮修改源码前递增 `attempts_used`
 
 | item | status | evidence |
 |---|---|---|
-| Contract approved and tool bindings match | `PENDING` | `null` |
-| target/draft scan complete | `PENDING` | `null` |
-| gap queue complete | `PENDING` | `null` |
+| Contract approved and tool bindings match | `PASS` | `runs/spec-binding-001/result.json` |
+| target/draft scan complete | `PASS` | `runs/scan-001/result.json` |
+| gap queue complete | `PASS` | `runs/scan-001/result.json` |
 | one CUDA Session and at most three samples per operator | `PENDING` | `null` |
 | CUDA self-replay passed | `PENDING` | `null` |
 | bundle verified on CUDA and P800 | `PENDING` | `null` |
@@ -252,8 +256,8 @@ baseline replay 不算修复尝试。每轮修改源码前递增 `attempts_used`
 
 ### Stop reason
 
-- `stop_reason`: `Contract 尚未批准，必填值仍未填写。`
-- `human_question`: `请提供并批准 human_owner、spec_id、两侧源码 revision、checkpoint id 与 config digest、Demo 输入模式、atol 和 rtol，并把 contract_revision 设为 1，可以吗？`
+- `stop_reason`: `完整扫描发现三个已确认但在现行无权重边界下不可重放的 P800 缺口，另有 CUDA 默认 attention backend 需从实机启动日志确认；按当前规则不能消耗唯一 CUDA Session。`
+- `human_question`: `是否批准 Contract revision 2：本轮 Demo 只推进 activation.step_swiglu_with_limit，把另外三个已确认缺口保留在 gap queue 作为后续工作，并在唯一 CUDA Session 启动时记录实际 CUDA backend，而不让它们阻塞本次特殊 SwiGLU 流程验证？`
 - `resume_requires_contract_revision`: `true`
 
 ### Decisions
@@ -262,6 +266,8 @@ baseline replay 不算修复尝试。每轮修改源码前递增 `attempts_used`
 
 | state_revision | decision | evidence |
 |---|---|---|
-| `0` | 创建未批准的 Spec 模板，等待人填写并批准 Contract | `migration-spec.md#contract` |
+| `1` | 对齐已批准的 Contract revision 1，准备运行 Spec 绑定自检 | `migration-spec.md#human-decisions` |
+| `2` | Spec 绑定自检通过，进入 target/draft 扫描 | `runs/spec-binding-001/result.json` |
+| `3` | target/draft 完整扫描已封存；因四项 NEEDS_HUMAN 按 Contract 停止 | `runs/scan-001/result.json` |
 
 <!-- AGENT-WRITABLE WORKING STATE: END -->

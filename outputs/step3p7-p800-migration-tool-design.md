@@ -188,6 +188,13 @@ Contract 与 Working State 使用明确的注释边界。人工修改 Contract �
     "target_entry": "Step3p7ForConditionalGeneration.forward",
     "draft_entry": "Step3p5MTP.forward"
   },
+  "runtime": {
+    "tensor_parallel_size": 8,
+    "dtype": "bfloat16",
+    "quantization": null,
+    "speculative_algorithm": "EAGLE",
+    "attention_backend": null
+  },
   "demo_input_mode": "<approved mode>",
   "limits": {
     "max_samples_per_operator": 3,
@@ -195,8 +202,8 @@ Contract 与 Working State 使用明确的注释边界。人工修改 Contract �
   },
   "precision_gate": {
     "comparator": "torch.testing.assert_close",
-    "atol": null,
-    "rtol": null,
+    "atol": 0.01,
+    "rtol": 0.02,
     "require_exact_structure": true,
     "require_same_dtype": true,
     "require_finite": true,
@@ -206,7 +213,7 @@ Contract 与 Working State 使用明确的注释边界。人工修改 Contract �
 <!-- CONTRACT-DATA: END -->
 ```
 
-模板阶段允许用 JSON `null` 表示未决定；初次批准前，所有必填值必须换成实际值。`atol`、`rtol` 在正式 JSON 中必须是人批准的数字。
+模板阶段允许用 JSON `null` 表示未决定；初次批准前，所有未决必填值必须换成实际值。`runtime.quantization` 与 `runtime.attention_backend` 的 `null` 是本 Demo 有意固定的“命令不传该参数”，不是占位；`atol`、`rtol` 固定为人批准的 `0.01`、`0.02`。
 
 运行期信息不进入 Contract Data，例如当前 Run、当前算子、Golden Run、执行模式、bundle 路径和 worktree 路径。这些是动作参数或 Working State，避免人每执行一步就修改 Contract。
 
@@ -229,10 +236,11 @@ Contract 与 Working State 使用明确的注释边界。人工修改 Contract �
 ### 7.4 Contract 正文必须固定的规则
 
 - 目标、Demo Closure 和非目标。
-- Skill 调用参数中的模型名，以及 SGLang/SGLang-Kunlun revision、checkpoint、配置摘要和输入模式。
+- Skill 调用参数中的模型名，以及 SGLang/SGLang-Kunlun revision、checkpoint、配置摘要、TP8、BF16、EAGLE 和输入模式。CUDA 与 P800 使用同一组启动参数：不传量化参数、不额外传 MTP 开关、不显式传 attention backend；运行后解析出的两端实际 backend 只作为 Run 证据保存。
+- Step-3.7 的 EAGLE 会由 SGLang 自动启用 multi-layer EAGLE，并把 draft 架构改写为 `Step3p5MTP`。因此命令不额外传 MTP 开关，扫描仍必须覆盖 `Step3p5MTP.forward`。
 - 只允许一个 CUDA Capture Session；每个算子最多三个样本。
 - `max_repair_attempts = 5`，baseline 不计数，通过轮计数。
-- Precision Gate 与 `atol/rtol`。
+- Precision Gate 固定使用 `torch.testing.assert_close`、`atol=0.01`、`rtol=0.02`。
 - Repair Boundary 和人工跨机器复制边界。
 - 允许的状态迁移、停止条件和 Recovery protocol。
 - 人工决定记录；任何 Contract 变化都递增 revision。
@@ -720,7 +728,7 @@ runs/repair-003/
 | 特殊 SwiGLU 是否在 P800 真失败 | 未验证 | 只由 P800 baseline 决定；全通过则不能进入修复 |
 | `torch.testing` 在 P800 可用 | 用户已实机确认 | 直接使用；Run 仍记录实际 Torch 版本和比较参数 |
 | active CUDA Graph 下采集 | 现有 SGLang dump 会跳过 | 明确采集模式，在安全边界 dump；不能强行在 graph capture 内采集 |
-| helper 的 plugin 替换可达性 | 源码机制支持，尚未对新 helper 实跑 | 实现后加一次符号替换 smoke，确认调用实际进入 replacement |
+| helper 的 plugin 替换可达性 | CUDA 与 Kunlun 固定 revision 均已实跑 replacement smoke | revision 变化后重跑聚焦测试，不能沿用旧结果 |
 | 一次 Session 只取前三个签名 | 可能漏掉后出现的形态 | 这是最小 Demo 的已知限制；记录未保留签名数，后续再扩展 |
 | 一次 CUDA Session 失败 | Contract 不允许第二次 | 保存失败证据并 `BLOCKED`，由人决定是否修订 Contract |
 | Golden 数据体积或敏感性 | 取决于真实 Tensor | 只采边界输入/输出，禁止 prompt、KV、凭证；交接前检查清单 |
@@ -730,12 +738,12 @@ runs/repair-003/
 
 ### 19.1 前置确认
 
-1. 获取真实 Step-3.7-Flash checkpoint 标识、加载后 config 和 Demo 输入模式。
+1. 获取真实 Step-3.7-Flash BF16 checkpoint 标识、加载后 config 和 Demo 输入模式；CUDA/P800 使用同一组启动参数，不显式指定 attention backend，并在各自启动后把实际解析结果写入运行证据。
 2. 人工批准特殊 SwiGLU helper 纯重构，形成 CUDA/P800 共用的新固定 SGLang revision。
-3. 确定 SGLang-Kunlun 固定 revision 和人批准的 `atol/rtol`。
+3. 确定 SGLang-Kunlun 固定 revision；Precision Gate 使用已批准的 `atol=0.01`、`rtol=0.02`。
 4. 在 CUDA/P800 验证候选 Tensor 序列化格式，记录 Torch 版本和 round-trip 结果。
 
-完成标准：可以生成无 `null`、无占位符的 Contract Data，并由人批准 revision 1。
+完成标准：可以生成无未决占位符的 Contract Data，并由人批准 revision 1；只允许两个有明确含义的 runtime `null`。
 
 ### 19.2 先打通 Spec 与结果绑定
 

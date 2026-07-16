@@ -1,7 +1,7 @@
 # 扫描完整代码路径并形成算子缺口清单
 
 Type: task
-Status: ready-for-agent
+Status: resolved
 Blocked by: 10
 
 ## What to build
@@ -28,3 +28,14 @@ Blocked by: 10
 ## Comments
 
 特殊 SwiGLU 只是第一个验证样例，不是扫描范围。完整缺口清单是本票据的主要交付。
+
+已按最终运行条件完成：
+
+- Contract revision 1 固定 TP8、BF16、EAGLE、两端同一组启动参数、量化参数为空、attention backend 不显式指定，以及 `torch.testing.assert_close(atol=0.01, rtol=0.02)`。
+- 源码确认“不额外传 MTP 开关”不会删除 draft：Step-3.7 的 EAGLE 自动启用 multi-layer EAGLE，并把 draft 架构改写为 `Step3p5MTP`，所以扫描仍同时覆盖 target 和 draft。
+- CUDA SGLang revision 为 `6274831d9fef7bba04eb59302caac24563a974c9`，SGLang-Kunlun revision 为 `4731f8051b7d0bf2f03cf88e237e7e5fba80a5a9`；特殊 SwiGLU helper 补丁 SHA-256 在两侧一致，三组等价性与 HookRegistry smoke 均实跑 `2 tests, OK`。
+- 完整 BF16 源码记录见 `work/research/step3p7-tp8-bf16-operator-scan.md`；正式不可变清单见 `runs/scan-001/result.json`，共 13 项：`READY=8`、`CAPTURE_REQUIRED=1`、`NEEDS_HUMAN=4`。
+- 唯一 CUDA Session 的当前采集计划只包含 `activation.step_swiglu_with_limit`，最多三种去重真实 shape。三个有明确代码证据的其他 P800 缺口因现行边界禁止保存 norm weight、router bias 或 expert weights，不能静默进入采集；CUDA 默认 attention backend 则必须由实机启动日志补证。
+- `migration-spec.md` 已绑定 `runs/spec-binding-001` 与 `runs/scan-001`，Working State 如实停在 `NEEDS_HUMAN / SCAN`，没有消耗 CUDA Capture Session。
+
+Ticket 11 的完整扫描与证据封存已经完成。后续是否允许特殊 SwiGLU Demo 先行、将三个不可重放缺口留待后续，是一次新的 Contract 决策，不属于本票据漏扫。

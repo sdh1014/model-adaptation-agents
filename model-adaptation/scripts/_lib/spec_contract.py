@@ -21,6 +21,9 @@ REQUIRED_PATHS = (
     "checkpoint.config_digest",
     "model_path.target_entry",
     "model_path.draft_entry",
+    "runtime.tensor_parallel_size",
+    "runtime.dtype",
+    "runtime.speculative_algorithm",
     "demo_input_mode",
     "limits.max_samples_per_operator",
     "limits.max_repair_attempts",
@@ -136,6 +139,11 @@ def require_fixed_contract_data(contract_data: Dict[str, Any]) -> None:
         "model": "Step-3.7-Flash",
         "model_path.target_entry": "Step3p7ForConditionalGeneration.forward",
         "model_path.draft_entry": "Step3p5MTP.forward",
+        "runtime.tensor_parallel_size": 8,
+        "runtime.dtype": "bfloat16",
+        "runtime.quantization": None,
+        "runtime.speculative_algorithm": "EAGLE",
+        "runtime.attention_backend": None,
         "limits.max_samples_per_operator": 3,
         "limits.max_repair_attempts": 5,
         "precision_gate.comparator": "torch.testing.assert_close",
@@ -171,6 +179,14 @@ def require_fixed_contract_data(contract_data: Dict[str, Any]) -> None:
             raise SpecContractError(
                 f"Contract Data {path} must be a finite non-negative number"
             )
+
+    for path, expected in (
+        ("precision_gate.atol", 0.01),
+        ("precision_gate.rtol", 0.02),
+    ):
+        actual = value_at_path(contract_data, path)
+        if actual != expected:
+            raise SpecContractError(f"Contract Data {path} must be {expected!r}")
 
 
 def load_spec_binding(spec_path: Path) -> SpecBinding:

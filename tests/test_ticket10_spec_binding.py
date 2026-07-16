@@ -14,7 +14,7 @@ SPEC_TEMPLATE = (
 )
 MODEL_ADAPTATION_SKILL = REPO_ROOT / "model-adaptation" / "SKILL.md"
 EXPECTED_CONTRACT_SHA256 = (
-    "a7e1defe27ca3359d1a09383e10ad34087eef133b18307fb8c750bc5ad0a6644"
+    "79043633b4069ffc93ae94fa52629a73fb74b614647078f808c369caff9dfdc5"
 )
 
 
@@ -36,6 +36,13 @@ def approved_contract() -> dict:
             "target_entry": "Step3p7ForConditionalGeneration.forward",
             "draft_entry": "Step3p5MTP.forward",
         },
+        "runtime": {
+            "tensor_parallel_size": 8,
+            "dtype": "bfloat16",
+            "quantization": None,
+            "speculative_algorithm": "EAGLE",
+            "attention_backend": None,
+        },
         "demo_input_mode": "text-only",
         "limits": {
             "max_samples_per_operator": 3,
@@ -43,8 +50,8 @@ def approved_contract() -> dict:
         },
         "precision_gate": {
             "comparator": "torch.testing.assert_close",
-            "atol": 0.001,
-            "rtol": 0.01,
+            "atol": 0.01,
+            "rtol": 0.02,
             "require_exact_structure": True,
             "require_same_dtype": True,
             "require_finite": True,
@@ -159,7 +166,7 @@ class Ticket10SpecBindingTest(unittest.TestCase):
             self.assertEqual(completed.returncode, 2)
             self.assertIn("Contract Data is not approved", completed.stderr)
             self.assertIn("source.sglang_revision", completed.stderr)
-            self.assertIn("precision_gate.atol", completed.stderr)
+            self.assertNotIn("precision_gate.atol", completed.stderr)
             self.assertFalse(run_dir.exists())
             self.assertIn("- `status`: `NEEDS_HUMAN`", draft)
             self.assertIn("- `phase`: `SCAN`", draft)
@@ -263,7 +270,7 @@ class Ticket10SpecBindingTest(unittest.TestCase):
 
             revised_contract = approved_contract()
             revised_contract["contract_revision"] = 2
-            revised_contract["precision_gate"]["atol"] = 0.002
+            revised_contract["checkpoint"]["id"] = "checkpoint-rev-2"
             write_spec(spec_path, revised_contract, working_state="state_revision: 2")
             contract_check = workspace / "runs" / "binding-contract-change"
             rejected = run_tool(
@@ -440,6 +447,160 @@ class Ticket10SpecBindingTest(unittest.TestCase):
                 completed.stderr,
             )
             self.assertFalse(run_dir.exists())
+
+    def test_tp8_bf16_eagle_runtime_profile_is_required_and_fixed(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            spec_path = workspace / "migration-spec.md"
+            case_path = workspace / "case.json"
+            case_path.write_text(
+                json.dumps({"expected": 1, "actual": 1}), encoding="utf-8"
+            )
+
+            missing_runtime = approved_contract()
+            del missing_runtime["runtime"]
+            write_spec(spec_path, missing_runtime)
+            missing = run_tool(
+                "--spec",
+                str(spec_path),
+                "--run-dir",
+                str(workspace / "runs" / "missing-runtime"),
+                "--mode",
+                "synthetic",
+                "--case",
+                str(case_path),
+            )
+
+            self.assertEqual(missing.returncode, 2)
+            self.assertIn("runtime.tensor_parallel_size", missing.stderr)
+            self.assertIn("runtime.dtype", missing.stderr)
+            self.assertIn("runtime.speculative_algorithm", missing.stderr)
+
+            wrong_dtype = approved_contract()
+            wrong_dtype["runtime"]["dtype"] = "float16"
+            write_spec(spec_path, wrong_dtype)
+            rejected = run_tool(
+                "--spec",
+                str(spec_path),
+                "--run-dir",
+                str(workspace / "runs" / "wrong-dtype"),
+                "--mode",
+                "synthetic",
+                "--case",
+                str(case_path),
+            )
+
+            self.assertEqual(rejected.returncode, 2)
+            self.assertIn("runtime.dtype must be 'bfloat16'", rejected.stderr)
+            self.assertFalse((workspace / "runs" / "wrong-dtype").exists())
+
+            wrong_tp = approved_contract()
+            wrong_tp["runtime"]["tensor_parallel_size"] = 4
+            write_spec(spec_path, wrong_tp)
+            rejected = run_tool(
+                "--spec",
+                str(spec_path),
+                "--run-dir",
+                str(workspace / "runs" / "wrong-tp"),
+                "--mode",
+                "synthetic",
+                "--case",
+                str(case_path),
+            )
+
+            self.assertEqual(rejected.returncode, 2)
+            self.assertIn(
+                "runtime.tensor_parallel_size must be 8", rejected.stderr
+            )
+            self.assertFalse((workspace / "runs" / "wrong-tp").exists())
+
+            wrong_quantization = approved_contract()
+            wrong_quantization["runtime"]["quantization"] = "w8a8_int8"
+            write_spec(spec_path, wrong_quantization)
+            rejected = run_tool(
+                "--spec",
+                str(spec_path),
+                "--run-dir",
+                str(workspace / "runs" / "wrong-quantization"),
+                "--mode",
+                "synthetic",
+                "--case",
+                str(case_path),
+            )
+
+            self.assertEqual(rejected.returncode, 2)
+            self.assertIn(
+                "runtime.quantization must be None", rejected.stderr
+            )
+            self.assertFalse(
+                (workspace / "runs" / "wrong-quantization").exists()
+            )
+
+            wrong_speculative_algorithm = approved_contract()
+            wrong_speculative_algorithm["runtime"]["speculative_algorithm"] = "MTP"
+            write_spec(spec_path, wrong_speculative_algorithm)
+            rejected = run_tool(
+                "--spec",
+                str(spec_path),
+                "--run-dir",
+                str(workspace / "runs" / "wrong-speculative-algorithm"),
+                "--mode",
+                "synthetic",
+                "--case",
+                str(case_path),
+            )
+
+            self.assertEqual(rejected.returncode, 2)
+            self.assertIn(
+                "runtime.speculative_algorithm must be 'EAGLE'", rejected.stderr
+            )
+            self.assertFalse(
+                (workspace / "runs" / "wrong-speculative-algorithm").exists()
+            )
+
+            explicit_attention_backend = approved_contract()
+            explicit_attention_backend["runtime"]["attention_backend"] = "fa3"
+            write_spec(spec_path, explicit_attention_backend)
+            rejected = run_tool(
+                "--spec",
+                str(spec_path),
+                "--run-dir",
+                str(workspace / "runs" / "explicit-attention-backend"),
+                "--mode",
+                "synthetic",
+                "--case",
+                str(case_path),
+            )
+
+            self.assertEqual(rejected.returncode, 2)
+            self.assertIn(
+                "runtime.attention_backend must be None", rejected.stderr
+            )
+            self.assertFalse(
+                (workspace / "runs" / "explicit-attention-backend").exists()
+            )
+
+            wrong_tolerance = approved_contract()
+            wrong_tolerance["precision_gate"]["atol"] = 0.02
+            write_spec(spec_path, wrong_tolerance)
+            rejected = run_tool(
+                "--spec",
+                str(spec_path),
+                "--run-dir",
+                str(workspace / "runs" / "wrong-tolerance"),
+                "--mode",
+                "synthetic",
+                "--case",
+                str(case_path),
+            )
+
+            self.assertEqual(rejected.returncode, 2)
+            self.assertIn(
+                "precision_gate.atol must be 0.01", rejected.stderr
+            )
+            self.assertFalse(
+                (workspace / "runs" / "wrong-tolerance").exists()
+            )
 
 
 if __name__ == "__main__":

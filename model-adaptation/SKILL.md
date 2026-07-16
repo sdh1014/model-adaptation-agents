@@ -46,7 +46,7 @@ Contract 首次批准前可以代填草稿；一旦 `contract_revision` 是已�
 
 1. `<!-- CONTRACT-DATA: BEGIN -->` 与 `<!-- CONTRACT-DATA: END -->` 之间只有一个合法 JSON 对象。
 2. Contract Data 的 `model` 与调用参数一致，其他必填值和 `human_owner` 均已填写，Contract 中没有未决占位；`contract_revision` 是正整数；同 revision 的人工批准记录存在。
-3. Demo 固定约束没有漂移：每算子最多三个样本、最多五次修复、比较器为 `torch.testing.assert_close`，且 `atol`、`rtol` 都是人批准的数值。
+3. Demo 固定约束没有漂移：TP 为 8、权重与计算 dtype 为 BF16、量化参数为空、推测算法为 EAGLE、CUDA 与 P800 使用同一组启动参数且不显式指定 attention backend、每算子最多三个样本、最多五次修复、比较器为 `torch.testing.assert_close`，且 `atol=0.01`、`rtol=0.02`。
 4. `status / phase` 是 Contract 允许的组合；`ACTIVE` 恰有一条 `next_action`，`WAITING` 恰有一条人工动作，终止状态为 `none`。
 5. `last_run`、活动算子和阶段所引用的 Run/证据真实存在。只读取恢复所需的最近 Run，不默认加载全部历史。
 
@@ -69,6 +69,8 @@ Contract 首次批准前可以代填草稿；一旦 `contract_revision` 是已�
 用源码搜索、加载后配置和调用关系分析完成扫描，不创建 `scan.py`：
 
 - 从 `Step3p7ForConditionalGeneration.forward` 扫描 target 路径，从 `Step3p5MTP.forward` 扫描 draft 路径。
+- 只扫描 Contract 固定的 TP8、BF16 与 EAGLE 分支。命令不额外传 MTP 开关，但 Step-3.7 的 EAGLE 会在 SGLang 内自动启用 multi-layer EAGLE 并把 draft 改写为 `Step3p5MTP`，所以 draft 仍属于实际路径。
+- 两端命令都不显式指定 attention backend；不得在 Contract 中猜 backend。扫描或实际启动后分别记录 CUDA 与 P800 的解析结果和代码落点。
 - 沿当前 checkpoint、配置和输入实际激活的分支下钻，到可单独采集、离线重放和替换的 Semantic Operator 为止。
 - 每个算子同时记录 CUDA 与 Kunlun 的实现证据；同名实现不自动算 `READY`，缺少专用 Kunlun Kernel 也不自动算 Operator Gap。
 - 每条记录包含 `operator_id`、`model_path`、`activation_guard`、`boundary`、`cuda_impl`、`kunlun_impl`、`replay_replace_check`、`verdict` 和源码锚点。

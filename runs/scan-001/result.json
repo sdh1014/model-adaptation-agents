@@ -1,0 +1,372 @@
+{
+  "action": "scan",
+  "advance_allowed": false,
+  "capture_plan": [
+    {
+      "max_distinct_shapes": 3,
+      "operator_id": "activation.step_swiglu_with_limit",
+      "reason": "The boundary is weight-free, replayable, and replaceable through the approved helper."
+    }
+  ],
+  "eagle_draft_resolution": {
+    "configured_algorithm": "EAGLE",
+    "explicit_mtp_flag": false,
+    "resolved_draft_entry": "Step3p5MTP.forward",
+    "source_evidence": [
+      "sglang:python/sglang/srt/server_args.py:3985-4003",
+      "sglang:python/sglang/srt/speculative/spec_info.py:216-228",
+      "sglang:python/sglang/srt/speculative/multi_layer_eagle_worker_v2.py:125-168",
+      "sglang:python/sglang/srt/configs/model_config.py:564-571"
+    ],
+    "summary": "Step-3.7 EAGLE automatically enables multi-layer EAGLE and loads the draft as Step3p5MTP even though no separate MTP flag is passed."
+  },
+  "entrypoints": {
+    "draft": {
+      "chain": [
+        "Step3p5MTP.forward",
+        "Step3p5AMultiTokenPredictor.forward",
+        "Step3p5DecoderLayer.forward(layer 45)",
+        "SharedHead / LogitsProcessor"
+      ],
+      "coverage": "COMPLETE",
+      "source_evidence": [
+        "sglang:python/sglang/srt/models/step3p5_mtp.py:61-127",
+        "sglang:python/sglang/srt/models/step3p5_mtp.py:141-179"
+      ]
+    },
+    "target": {
+      "chain": [
+        "Step3p7ForConditionalGeneration.forward",
+        "general_mm_embed_routine(text-only)",
+        "Step3p5ForCausalLM.forward",
+        "Step3p5Model.forward",
+        "Step3p5DecoderLayer.forward(layer 0..44)",
+        "LogitsProcessor.forward"
+      ],
+      "coverage": "COMPLETE",
+      "source_evidence": [
+        "sglang:python/sglang/srt/models/step3p7.py:47-74",
+        "sglang:python/sglang/srt/models/step3p7.py:136-152",
+        "sglang:python/sglang/srt/models/step3p5.py:480-665"
+      ]
+    }
+  },
+  "evidence": [
+    "scan.log"
+  ],
+  "gap_queue": [
+    {
+      "confirmed_gap": true,
+      "golden": "NOT_PLANNED",
+      "operator_id": "norm.gemma_rms",
+      "reason": "Kunlun forward_cuda reaches Gemma sgl_kernel symbols that the current stub does not install; replay needs a forbidden norm weight.",
+      "verdict": "NEEDS_HUMAN"
+    },
+    {
+      "confirmed_gap": false,
+      "golden": "PLANNED",
+      "operator_id": "activation.step_swiglu_with_limit",
+      "reason": "Selected as the weight-free Demo candidate; P800 baseline must still prove a real failure.",
+      "verdict": "CAPTURE_REQUIRED"
+    },
+    {
+      "confirmed_gap": true,
+      "golden": "NOT_PLANNED",
+      "operator_id": "moe.topk_sigmoid_bias",
+      "reason": "Kunlun replacement falls through to the missing upstream sigmoid-plus-bias fused top-k symbol; replay needs a forbidden router bias.",
+      "verdict": "NEEDS_HUMAN"
+    },
+    {
+      "confirmed_gap": true,
+      "golden": "NOT_PLANNED",
+      "operator_id": "moe.bf16_clamped",
+      "reason": "CUDA propagates gemm1_clamp_limit while the Kunlun unquantized MoE replacement calls plain swiglu and ignores the limit; the current boundary includes forbidden expert weights.",
+      "verdict": "NEEDS_HUMAN"
+    },
+    {
+      "confirmed_gap": false,
+      "golden": "NOT_PLANNED",
+      "operator_id": "attention.radix",
+      "reason": "P800 resolves the kunlun backend from source, but the concrete CUDA default depends on the actual GPU and installed backend and must be recorded from the startup log.",
+      "verdict": "NEEDS_HUMAN"
+    }
+  ],
+  "operator_counts": {
+    "capture_required": 1,
+    "needs_human": 4,
+    "ready": 8,
+    "total": 13
+  },
+  "operators": [
+    {
+      "activation_guard": "text-only input and TP8; active in target and draft",
+      "boundary": "token ids plus embedding weight to hidden states, including TP all-reduce",
+      "cuda_impl": [
+        "sglang:python/sglang/srt/layers/vocab_parallel_embedding.py:291-339",
+        "sglang:python/sglang/srt/layers/vocab_parallel_embedding.py:495-529"
+      ],
+      "kunlun_impl": [
+        "shared PyTorch embedding path",
+        "sglang-kunlun:sglang_kunlun/hooks/distributed/parallel_state.py:47-92"
+      ],
+      "model_path": [
+        "target",
+        "draft"
+      ],
+      "operator_id": "embedding.vocab_parallel",
+      "replay_replace_check": "Not captured because replay would require checkpoint weight; both execution paths exist.",
+      "state_dependency": "embedding weight and TP group",
+      "verdict": "READY"
+    },
+    {
+      "activation_guard": "BF16 checkpoint with quantization unset",
+      "boundary": "activation plus BF16 weight and optional bias to output",
+      "cuda_impl": [
+        "sglang:python/sglang/srt/layers/quantization/unquant.py:110-162"
+      ],
+      "kunlun_impl": [
+        "the P800 Torch build executes the same torch.nn.functional.linear call"
+      ],
+      "model_path": [
+        "target",
+        "draft"
+      ],
+      "operator_id": "linear.bf16",
+      "replay_replace_check": "Not captured because replay would require checkpoint weight; no platform-specific semantic gap was found.",
+      "state_dependency": "BF16 checkpoint weight",
+      "verdict": "READY"
+    },
+    {
+      "activation_guard": "all Step-3.7 target and draft layer norms, q/k norms, and final norm",
+      "boundary": "input, optional residual, norm weight, and epsilon to normalized output",
+      "cuda_impl": [
+        "sglang:python/sglang/srt/layers/layernorm.py:648-705"
+      ],
+      "kunlun_impl": [
+        "sglang-kunlun:sglang_kunlun/platform/device.py:8-17",
+        "missing Gemma bindings; sglang-kunlun:sglang_kunlun/bootstrap/sgl_kernel_stub.py:196-207 only installs ordinary RMSNorm symbols"
+      ],
+      "model_path": [
+        "target",
+        "draft"
+      ],
+      "operator_id": "norm.gemma_rms",
+      "replay_replace_check": "A P800 implementation gap is confirmed, but the approved replay boundary forbids saving the required norm weight.",
+      "state_dependency": "norm weight, epsilon, and optional residual",
+      "verdict": "NEEDS_HUMAN"
+    },
+    {
+      "activation_guard": "full and sliding attention in target and draft",
+      "boundary": "positions and q/k to rotated q/k",
+      "cuda_impl": [
+        "sglang:python/sglang/srt/models/step3p5.py:410-437"
+      ],
+      "kunlun_impl": [
+        "sglang-kunlun:sglang_kunlun/hooks/layers/rotary_embedding.py:12-51"
+      ],
+      "model_path": [
+        "target",
+        "draft"
+      ],
+      "operator_id": "rope.step3p5",
+      "replay_replace_check": "The active argument combination is covered by the Kunlun replacement.",
+      "state_dependency": "positions and rotary parameters",
+      "verdict": "READY"
+    },
+    {
+      "activation_guard": "target full/sliding attention and EAGLE draft sliding attention with backend flag omitted",
+      "boundary": "q/k/v, KV state, and batch metadata to attention output",
+      "cuda_impl": [
+        "default resolver: sglang:python/sglang/srt/server_args.py:4407-4455",
+        "assignment and log: sglang:python/sglang/srt/server_args.py:4483-4491"
+      ],
+      "kunlun_impl": [
+        "sglang-kunlun:sglang_kunlun/platform/srt.py:73-88",
+        "sglang-kunlun:sglang_kunlun/hooks/speculative/draft_utils.py:29-68"
+      ],
+      "model_path": [
+        "target",
+        "draft"
+      ],
+      "operator_id": "attention.radix",
+      "replay_replace_check": "The P800 source path is present. The concrete CUDA implementation and runtime-only KV/batch boundary require startup/runtime evidence.",
+      "state_dependency": "KV cache and ForwardBatch metadata",
+      "verdict": "NEEDS_HUMAN"
+    },
+    {
+      "activation_guard": "target dense layers 0-2, shared experts 3-42, and draft layer 45",
+      "boundary": "gate_up tensor to SiLU-multiplied tensor",
+      "cuda_impl": [
+        "sglang:python/sglang/srt/layers/activation.py:90-107"
+      ],
+      "kunlun_impl": [
+        "sglang-kunlun:sglang_kunlun/kernels/kernel_ops.py:329-358"
+      ],
+      "model_path": [
+        "target",
+        "draft"
+      ],
+      "operator_id": "activation.silu_and_mul",
+      "replay_replace_check": "Weight-free and replayable; both implementations exist.",
+      "state_dependency": "none",
+      "verdict": "READY"
+    },
+    {
+      "activation_guard": "target shared experts in layers 43 and 44 with limit 16",
+      "boundary": "gate_up tensor plus scalar limit to clamped SwiGLU output",
+      "cuda_impl": [
+        "sglang:python/sglang/srt/models/step3p5_ops.py:5-13",
+        "sglang:python/sglang/srt/models/step3p5.py:95-104"
+      ],
+      "kunlun_impl": [
+        "no dedicated replacement; current execution uses P800 Torch expressions"
+      ],
+      "model_path": [
+        "target"
+      ],
+      "operator_id": "activation.step_swiglu_with_limit",
+      "replay_replace_check": "Weight-free, replayable, and replaceable through HookRegistry; collect no more than three distinct real shapes.",
+      "state_dependency": "scalar limit only",
+      "verdict": "CAPTURE_REQUIRED"
+    },
+    {
+      "activation_guard": "target MoE layers 3-44 with need_fp32_gate=true",
+      "boundary": "hidden states plus BF16 router weight to FP32 router logits",
+      "cuda_impl": [
+        "sglang:python/sglang/srt/models/step3p5.py:205-221"
+      ],
+      "kunlun_impl": [
+        "the P800 Torch build executes the same torch.matmul expression"
+      ],
+      "model_path": [
+        "target"
+      ],
+      "operator_id": "moe.router_fp32",
+      "replay_replace_check": "Not captured because replay would require checkpoint router weight; no platform-specific semantic gap was found.",
+      "state_dependency": "router weight",
+      "verdict": "READY"
+    },
+    {
+      "activation_guard": "target MoE layers 3-44 with top-k 8, sigmoid scoring, correction bias, and renormalization",
+      "boundary": "router logits plus router bias to expert ids and weights",
+      "cuda_impl": [
+        "sglang:python/sglang/srt/models/step3p5.py:119-145",
+        "sglang:python/sglang/srt/layers/moe/topk.py:1803-1810"
+      ],
+      "kunlun_impl": [
+        "sglang-kunlun:sglang_kunlun/hooks/layers/moe/topk.py:60-167 falls through to upstream fused_topk",
+        "the Kunlun sgl_kernel stub does not install the required sigmoid-plus-bias symbol"
+      ],
+      "model_path": [
+        "target"
+      ],
+      "operator_id": "moe.topk_sigmoid_bias",
+      "replay_replace_check": "A P800 implementation gap is confirmed, but replay needs the forbidden checkpoint router bias.",
+      "state_dependency": "router bias",
+      "verdict": "NEEDS_HUMAN"
+    },
+    {
+      "activation_guard": "target MoE layers 3-42 with clamp limit disabled",
+      "boundary": "hidden states, top-k result, and BF16 expert weights to output",
+      "cuda_impl": [
+        "sglang:python/sglang/srt/layers/quantization/unquant.py:455-615"
+      ],
+      "kunlun_impl": [
+        "sglang-kunlun:sglang_kunlun/hooks/layers/quantization/unquant.py:32-155"
+      ],
+      "model_path": [
+        "target"
+      ],
+      "operator_id": "moe.bf16_unclamped",
+      "replay_replace_check": "Not captured because replay would require expert weights; the unclamped semantic pipeline is present on both sides.",
+      "state_dependency": "expert weights and top-k result",
+      "verdict": "READY"
+    },
+    {
+      "activation_guard": "target MoE layers 43 and 44 with routed expert limit 7",
+      "boundary": "hidden states, top-k result, BF16 expert weights, and clamp limit to output",
+      "cuda_impl": [
+        "sglang:python/sglang/srt/models/step3p5.py:134-158",
+        "sglang:python/sglang/srt/layers/moe/moe_runner/triton.py:145-165"
+      ],
+      "kunlun_impl": [
+        "sglang-kunlun:sglang_kunlun/hooks/layers/quantization/unquant.py:122-125 calls plain kunlun_ops.swiglu and ignores the clamp limit"
+      ],
+      "model_path": [
+        "target"
+      ],
+      "operator_id": "moe.bf16_clamped",
+      "replay_replace_check": "A semantic gap is confirmed, but the current replacement boundary includes forbidden expert weights.",
+      "state_dependency": "expert weights, top-k result, and scalar limit",
+      "verdict": "NEEDS_HUMAN"
+    },
+    {
+      "activation_guard": "TP8 target and draft execution",
+      "boundary": "sharded tensor to all-reduce or all-gather result",
+      "cuda_impl": [
+        "sglang:python/sglang/srt/distributed/communication_op.py:18-47",
+        "sglang:python/sglang/srt/layers/vocab_parallel_embedding.py:520-528"
+      ],
+      "kunlun_impl": [
+        "sglang-kunlun:sglang_kunlun/hooks/distributed/parallel_state.py:47-92"
+      ],
+      "model_path": [
+        "target",
+        "draft"
+      ],
+      "operator_id": "collective.tp8",
+      "replay_replace_check": "A runtime collective rather than an offline replay target; Kunlun group ownership is explicit.",
+      "state_dependency": "TP communicator",
+      "verdict": "READY"
+    },
+    {
+      "activation_guard": "target and draft with logprobs disabled",
+      "boundary": "final hidden states plus BF16 vocab weight to TP logits",
+      "cuda_impl": [
+        "sglang:python/sglang/srt/layers/logits_processor.py:304-381",
+        "sglang:python/sglang/srt/layers/logits_processor.py:830-917"
+      ],
+      "kunlun_impl": [
+        "shared BF16 matmul plus Kunlun TP group"
+      ],
+      "model_path": [
+        "target",
+        "draft"
+      ],
+      "operator_id": "logits.lm_head",
+      "replay_replace_check": "Not captured because replay would require vocab weight; both execution paths exist.",
+      "state_dependency": "LM head weight and TP group",
+      "verdict": "READY"
+    }
+  ],
+  "passed": false,
+  "runtime_profile": {
+    "attention_backend_argument": null,
+    "cuda_resolved_attention_backend": "REQUIRES_STARTUP_LOG",
+    "dtype": "bfloat16",
+    "p800_resolved_attention_backend": "kunlun (source default; runtime log still required)",
+    "quantization": null,
+    "same_launch_arguments_on_cuda_and_p800": true,
+    "speculative_algorithm": "EAGLE",
+    "tensor_parallel_size": 8
+  },
+  "scan_complete": true,
+  "source": {
+    "checkpoint_config_sha256": "8d740ba5819e574b7a606ea7aa6d7d381142ed5cc77cab96dde2892c10414042",
+    "checkpoint_id": "stepfun-ai/Step-3.7-Flash@5f6244077ac62e04eec3f320501ff8c2b293373a",
+    "helper_patch_sha256": "4fe7dc612b1c59c2eacbbf9ea4e7573d4dc632f79e36c4d4673b574796867ed0",
+    "sglang_kunlun_revision": "4731f8051b7d0bf2f03cf88e237e7e5fba80a5a9",
+    "sglang_revision": "6274831d9fef7bba04eb59302caac24563a974c9"
+  },
+  "spec_binding": {
+    "contract_data_sha256": "034e7ae15b480bc0ab7f708a4a2754d3aa69ae13751e070b8ac73ca0a53c4d8c",
+    "contract_revision": 1,
+    "spec_id": "step3p7-flash-p800-demo"
+  },
+  "stop": {
+    "reason": "Three confirmed P800 gaps cannot be replayed without checkpoint weights or router bias under the approved boundary, and the concrete CUDA default attention backend still needs startup evidence.",
+    "resume_requires_contract_revision": true
+  },
+  "summary": "Target and EAGLE draft scans are complete for TP8 BF16. The inventory contains 13 semantic operators (8 READY, 1 CAPTURE_REQUIRED, 4 NEEDS_HUMAN). Capture must not start under the current Contract.",
+  "tool": "migration-agent"
+}
