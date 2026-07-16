@@ -84,12 +84,15 @@ Contract 首次批准前可以代填草稿；一旦 `contract_revision` 是已�
 
 先确认所有 `CAPTURE_REQUIRED` 项都能在禁止保存权重和运行时对象的前提下形成可重放边界，再消耗唯一 CUDA Session。Capture plan 只作为这次动作的输入，不成为第二个状态文件。开始采集前，先把唯一 `capture_session_id`、`session_status: ACTIVE` 和 Golden Run 路径写入 Working State；恢复时只能检查并继续这个 Session，不能创建第二个。
 
+如果唯一 `next_action` 明确写的是 `capture_golden.py preflight`，先完整读取 [references/cuda-capture-validation.md](references/cuda-capture-validation.md) 并只执行该步骤。preflight 用真实 SGLang Hook 和小型合成 BF16 tensor 验证采集与新进程读回，但不启动模型、不访问 checkpoint，也不消耗正式 Session。无论通过还是失败，都报告 preflight Run 并停止，等待人把实机证据带回确认；不要设置 `capture_session_id`，不要修改 `session_status`，也不要自行进入正式采集。
+
 在 CUDA 机器上：
 
-1. 调用 `scripts/capture_golden.py`，在 SGLang 边界打桩；同一算子按调用签名去重，最多保存前三种真实形态的输入 Tensor、CUDA 输出 Tensor 和必要非 Tensor 参数，例如 `limit` 或 `epsilon`。
+1. 调用 `scripts/capture_golden.py`，通过 SGLang 的通用插件 Hook 在边界打桩；同一算子按调用签名去重，最多保存前三种真实形态的输入 Tensor、CUDA 输出 Tensor 和必要非 Tensor 参数，例如 `limit` 或 `epsilon`。
 2. 不保存 checkpoint 权重、`nn.Parameter`、module state、内部中间 Tensor、完整 batch、prompt/token、KV cache、stream/handle、随机状态或凭证。
-3. 在同一次 CUDA Session 内启动新进程，调用 `scripts/replay_compare.py` 做所有 Golden Samples 的 self-replay。全部通过固定 Precision Gate 后才能把 Golden Run 标为 `SEALED`。
-4. 生成下一状态 Spec 临时副本，其中只修改 Working State 为 `WAITING / HANDOFF` 及唯一人工复制动作；调用 `scripts/handoff_bundle.py` 构建并校验 bundle。成功后用同一份 Spec 字节替换工作区 Spec 并停止；构建失败时不替换当前 Spec。
+3. CUDA 与 P800 的正式 SGLang 启动参数保持一致：TP8、BF16、`--speculative-algorithm EAGLE`；不传量化参数，不额外启用 MTP 或 multi-layer EAGLE，不显式传 attention 或 MoE backend。CUDA 采集只多一个插件配置环境变量，实际解析出的 backend 写入启动日志。
+4. 在同一次 CUDA Session 内启动新进程，调用 `scripts/replay_compare.py` 做所有 Golden Samples 的 self-replay。全部通过固定 Precision Gate 后才能把 Golden Run 标为 `SEALED`。
+5. 生成下一状态 Spec 临时副本，其中只修改 Working State 为 `WAITING / HANDOFF` 及唯一人工复制动作；调用 `scripts/handoff_bundle.py` 构建并校验 bundle。成功后用同一份 Spec 字节替换工作区 Spec 并停止；构建失败时不替换当前 Spec。
 
 Session 已消耗但无法形成有效 Golden 时，写入失败 Run 并进入 `BLOCKED / CUDA_CAPTURE`；不得再次访问 CUDA 采集。
 

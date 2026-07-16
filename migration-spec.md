@@ -20,7 +20,7 @@ json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False).enco
 {
   "schema": "migration-spec/v0",
   "spec_id": "step3p7-flash-p800-demo",
-  "contract_revision": 1,
+  "contract_revision": 2,
   "model": "Step-3.7-Flash",
   "source": {
     "sglang_revision": "6274831d9fef7bba04eb59302caac24563a974c9",
@@ -169,6 +169,7 @@ json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False).enco
 | contract_revision | decision | reason |
 |---|---|---|
 | `1` | 批准 Step-3.7-Flash TP8 BF16 EAGLE Demo Contract | 用户确认两端同命令、不显式指定 backend、不额外启用 MTP，并批准 atol=0.01、rtol=0.02；源码 revision 与 checkpoint config 由固定证据补齐 |
+| `2` | 本轮 Demo 只推进 `activation.step_swiglu_with_limit`；`norm.gemma_rms`、`moe.topk_sigmoid_bias`、`moe.bf16_clamped` 保留在 gap queue 作为后续工作 | 用户批准特殊 SwiGLU 先完成 N 卡 Golden 采集验证；唯一 CUDA Session 启动时同时记录实际 CUDA attention 与 MoE backend，其他缺口不阻塞本轮验证 |
 
 <!-- HUMAN-OWNED CONTRACT: END -->
 
@@ -180,15 +181,15 @@ Agent 每次动作前完整读取 Contract 与本区；每次动作结束后立�
 
 ### Current
 
-- `observed_contract_revision`: `1`
-- `state_revision`: `4`
-- `status`: `NEEDS_HUMAN`
-- `phase`: `SCAN`
-- `execution_site`: `SOURCE`
-- `active_operator`: `null`
-- `last_completed_action`: `target_draft_scan_evidence_corrected`
+- `observed_contract_revision`: `2`
+- `state_revision`: `5`
+- `status`: `ACTIVE`
+- `phase`: `CUDA_CAPTURE`
+- `execution_site`: `CUDA`
+- `active_operator`: `activation.step_swiglu_with_limit`
+- `last_completed_action`: `contract_revision_2_aligned`
 - `last_run`: `runs/scan-002`
-- `next_action`: `none`
+- `next_action`: `在 CUDA 机器运行 capture_golden.py preflight，验证 scan-002、HookRegistry 打桩和 capture candidate 读回`
 
 规则：`ACTIVE` 时 `next_action` 必须恰好一条；`WAITING` 时必须是一条人工动作；`PASS`、`BLOCKED`、`NEEDS_HUMAN` 时必须为 `none`。
 
@@ -207,9 +208,8 @@ Agent 每次动作前完整读取 Contract 与本区；每次动作结束后立�
 | `norm.gemma_rms` | `NEEDS_HUMAN` | `NOT_PLANNED` | 后续缺口 | 现行边界禁止保存 norm weight | `runs/scan-002/result.json` |
 | `moe.topk_sigmoid_bias` | `NEEDS_HUMAN` | `NOT_PLANNED` | 后续缺口 | 现行边界禁止保存 router bias | `runs/scan-002/result.json` |
 | `moe.bf16_clamped` | `NEEDS_HUMAN` | `NOT_PLANNED` | 后续缺口 | 当前替换边界包含 expert weights | `runs/scan-002/result.json` |
-| `attention.radix` | `NEEDS_HUMAN` | `NOT_PLANNED` | backend 运行证据 | CUDA 实际 attention backend 待启动日志确认 | `runs/scan-002/result.json` |
 
-完整 operator 列表保存在 Scan Run；Spec 只保留 gap queue 和计数。特殊 SwiGLU 的唯一 CUDA Session 计划由该行的 `PLANNED` 标记表达，最多三种去重 shape 的上限仍由 Contract 固定。
+完整 operator 列表、计数和未决的 attention backend 运行证据保存在 Scan Run；Spec 的 gap queue 只保留特殊 SwiGLU 与三个已确认后续缺口。特殊 SwiGLU 的唯一 CUDA Session 计划由该行的 `PLANNED` 标记表达，最多三种去重 shape 的上限仍由 Contract 固定。
 
 ### CUDA Capture
 
@@ -242,7 +242,7 @@ baseline replay 不算修复尝试。每轮修改源码前递增 `attempts_used`
 
 | item | status | evidence |
 |---|---|---|
-| Contract approved and tool bindings match | `PASS` | `runs/spec-binding-001/result.json` |
+| Contract approved and tool bindings match | `PENDING` | `等待 revision 2 的 CUDA preflight result.json` |
 | target/draft scan complete | `PASS` | `runs/scan-002/result.json` |
 | gap queue complete | `PASS` | `runs/scan-002/result.json` |
 | one CUDA Session and at most three samples per operator | `PENDING` | `null` |
@@ -256,9 +256,9 @@ baseline replay 不算修复尝试。每轮修改源码前递增 `attempts_used`
 
 ### Stop reason
 
-- `stop_reason`: `完整扫描发现三个已确认但在现行无权重边界下不可重放的 P800 缺口；CUDA attention backend 与源码默认解析为 Triton 的 MoE runner 仍需在首次启动日志中落证。按当前规则不能消耗唯一 CUDA Session。`
-- `human_question`: `是否批准 Contract revision 2：本轮 Demo 只推进 activation.step_swiglu_with_limit，把另外三个已确认缺口保留在 gap queue 作为后续工作，并在唯一 CUDA Session 启动时记录实际 CUDA attention 与 MoE backend，而不让它们阻塞本次特殊 SwiGLU 流程验证？`
-- `resume_requires_contract_revision`: `true`
+- `stop_reason`: `null`
+- `human_question`: `null`
+- `resume_requires_contract_revision`: `false`
 
 ### Decisions
 
@@ -270,5 +270,6 @@ baseline replay 不算修复尝试。每轮修改源码前递增 `attempts_used`
 | `2` | Spec 绑定自检通过，进入 target/draft 扫描 | `runs/spec-binding-001/result.json` |
 | `3` | target/draft 完整扫描已封存；因四项 NEEDS_HUMAN 按 Contract 停止 | `runs/scan-001/result.json` |
 | `4` | 保留 scan-001，以 scan-002 补齐逐算子调用链、两侧代码锚点、加载后配置证据和默认 MoE 分支解析 | `runs/scan-002/result.json` |
+| `5` | 对齐已批准的 Contract revision 2；只推进特殊 SwiGLU，其他三个确认缺口继续保留 | `migration-spec.md#human-decisions`、`runs/scan-002/result.json` |
 
 <!-- AGENT-WRITABLE WORKING STATE: END -->
