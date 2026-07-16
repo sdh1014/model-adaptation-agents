@@ -75,14 +75,17 @@ def write_capture_config(path: Path, run_dir: Path) -> None:
 
 class Ticket12RealSglangHookIntegrationTest(unittest.TestCase):
     def test_real_registry_captures_only_three_target_signatures(self) -> None:
+        worktree_was_configured = "SGLANG_WORKTREE" in os.environ
         configured_worktree = os.environ.get("SGLANG_WORKTREE")
+        if worktree_was_configured and not configured_worktree:
+            self.fail("SGLANG_WORKTREE must be set to a non-empty path")
         worktree = Path(
             configured_worktree or DEFAULT_SGLANG_WORKTREE
         ).resolve()
         helper_path = worktree / "python/sglang/srt/models/step3p5_ops.py"
         registry_path = worktree / "python/sglang/srt/plugins/hook_registry.py"
         if not helper_path.is_file() or not registry_path.is_file():
-            if configured_worktree:
+            if worktree_was_configured:
                 self.fail(
                     "SGLANG_WORKTREE does not contain the required fixed "
                     f"SGLang sources: {worktree}"

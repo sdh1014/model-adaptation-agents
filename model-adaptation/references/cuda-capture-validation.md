@@ -8,12 +8,21 @@ preflight 使用小型合成 BF16 tensor，不启动模型、不读取 checkpoin
 
 - 当前目录是 `model-adaptation-agents` 仓库。
 - 当前 Python 是将来启动 SGLang 的 CUDA Python，`torch.cuda.is_available()` 为真。
-- `SGLANG_WORKTREE` 指向固定 revision `6274831d9fef7bba04eb59302caac24563a974c9` 的 SGLang 0.5.14 源码。
+- 调用者已显式设置非空的 `SGLANG_WORKTREE`，且它指向固定 revision `6274831d9fef7bba04eb59302caac24563a974c9` 的 SGLang 0.5.14 源码；Agent 不猜测默认目录。
 - `runs/cuda-preflight-001` 尚不存在；如果已经存在，换一个新的编号，不能覆盖旧 Run。
 
 ## 执行
 
-先用固定源码中的真实 `HookRegistry` 做一次 CPU 侧接线检查。该测试不会加载 checkpoint，也不会消耗 CUDA Session：
+先硬检查调用者确实提供了源码路径。失败时停止，不继续安装或创建 Run：
+
+```bash
+if [ -z "${SGLANG_WORKTREE:-}" ]; then
+  echo "SGLANG_WORKTREE must be set to the fixed SGLang checkout" >&2
+  exit 2
+fi
+```
+
+然后用固定源码中的真实 `HookRegistry` 做一次 CPU 侧接线检查。该测试不会加载 checkpoint，也不会消耗 CUDA Session：
 
 ```bash
 SGLANG_WORKTREE="$SGLANG_WORKTREE" \
