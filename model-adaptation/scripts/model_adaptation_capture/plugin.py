@@ -1,6 +1,7 @@
-"""SGLang plugin entry point for bounded Step-3.7 Golden capture."""
+"""SGLang plugin entry point for rank-0 Step3p5MLP capture and replay."""
 
 import contextvars
+import json
 import os
 from pathlib import Path
 from typing import Any, Optional
@@ -9,8 +10,10 @@ from .collector import CandidateCollector
 from .contracts import (
     CAPTURE_CONFIG_ENV,
     FORWARD_HOOK_TARGET,
-    SWIGLU_HOOK_TARGET,
+    MLP_HOOK_TARGET,
+    REPLAY_CONFIG_ENV,
 )
+from .replay import LoadedModelReplay
 
 
 _execution_phase: contextvars.ContextVar[str] = contextvars.ContextVar(
@@ -18,7 +21,9 @@ _execution_phase: contextvars.ContextVar[str] = contextvars.ContextVar(
     default="unknown",
 )
 _collector: Optional[CandidateCollector] = None
+_replay: Optional[LoadedModelReplay] = None
 _config_path: Optional[Path] = None
+_mode: Optional[str] = None
 
 
 def _phase_from_forward_batch(forward_batch: Any) -> str:
@@ -46,31 +51,99 @@ def around_target_forward(original, *args, **kwargs):
         _execution_phase.reset(token)
 
 
+def _tp_context(config_path: Path) -> tuple[int, int]:
+    try:
+        from sglang.srt.distributed.parallel_state import get_tp_group
+
+        group = get_tp_group()
+        return group.rank_in_group, group.world_size
+    except (AssertionError, ImportError):
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        preflight_context = config.get("preflight_tp_context")
+        if isinstance(preflight_context, dict):
+            return preflight_context["rank"], preflight_context["size"]
+        raise RuntimeError(
+            "capture requires an initialized SGLang tensor-parallel group"
+        )
+
+
 def _get_collector() -> CandidateCollector:
     global _collector
     if _config_path is None:
         raise RuntimeError(f"{CAPTURE_CONFIG_ENV} was not set during plugin registration")
     if _collector is None:
-        _collector = CandidateCollector.from_config_path(_config_path)
+        tp_rank, tp_size = _tp_context(_config_path)
+        _collector = CandidateCollector.from_config_path(
+            _config_path,
+            tp_rank=tp_rank,
+            tp_size=tp_size,
+        )
     return _collector
 
 
-def around_step_swiglu(original, gate_up, limit):
-    return _get_collector().capture(
-        original,
-        gate_up,
-        limit,
+def _get_replay() -> LoadedModelReplay:
+    global _replay
+    if _config_path is None:
+        raise RuntimeError(f"{REPLAY_CONFIG_ENV} was not set during plugin registration")
+    if _replay is None:
+        tp_rank, tp_size = _tp_context(_config_path)
+        _replay = LoadedModelReplay.from_config_path(
+            _config_path,
+            tp_rank=tp_rank,
+            tp_size=tp_size,
+        )
+    return _replay
+
+
+def _model_instance_path(module: Any) -> str:
+    gate_up_proj = getattr(module, "gate_up_proj", None)
+    prefix = getattr(gate_up_proj, "prefix", None)
+    suffix = ".gate_up_proj"
+    if not isinstance(prefix, str) or not prefix.endswith(suffix):
+        raise RuntimeError(
+            "Step3p5MLP gate_up_proj prefix is required to identify the model instance"
+        )
+    return prefix[: -len(suffix)]
+
+
+def around_step3p5_mlp(original, module, x):
+    limit = getattr(module, "limit", None)
+    if limit is None:
+        return original(module, x)
+    model_instance_path = _model_instance_path(module)
+    if _mode == "replay":
+        _get_replay().run_for_instance(
+            original,
+            module,
+            model_instance_path=model_instance_path,
+            device=x.device,
+        )
+        return original(module, x)
+    output = original(module, x)
+    _get_collector().record(
+        x,
+        output,
+        model_instance_path=model_instance_path,
+        limit=limit,
         execution_phase=_execution_phase.get(),
     )
+    return output
 
 
 def register() -> None:
     """Register hooks only for launches that explicitly supply a capture config."""
-    global _config_path
-    configured = os.environ.get(CAPTURE_CONFIG_ENV)
-    if not configured:
+    global _config_path, _mode
+    capture_config = os.environ.get(CAPTURE_CONFIG_ENV)
+    replay_config = os.environ.get(REPLAY_CONFIG_ENV)
+    if capture_config and replay_config:
+        raise RuntimeError(
+            f"{CAPTURE_CONFIG_ENV} and {REPLAY_CONFIG_ENV} are mutually exclusive"
+        )
+    configured = capture_config or replay_config
+    if configured is None:
         return
     _config_path = Path(configured).resolve()
+    _mode = "capture" if capture_config else "replay"
 
     from sglang.srt.plugins.hook_registry import HookRegistry, HookType
 
@@ -80,14 +153,16 @@ def register() -> None:
         HookType.AROUND,
     )
     HookRegistry.register(
-        SWIGLU_HOOK_TARGET,
-        around_step_swiglu,
+        MLP_HOOK_TARGET,
+        around_step3p5_mlp,
         HookType.AROUND,
     )
 
 
 def _reset_for_tests() -> None:
-    global _collector, _config_path
+    global _collector, _config_path, _mode, _replay
     _collector = None
+    _replay = None
     _config_path = None
+    _mode = None
     _execution_phase.set("unknown")

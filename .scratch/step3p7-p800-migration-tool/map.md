@@ -39,6 +39,8 @@
 - [产出 Spec 驱动 P800 算子迁移工具方案设计文档](issues/07-write-solution-design.md)：最终中文方案已保存到 `outputs/step3p7-p800-migration-tool-design.md`，完整合成单 Agent、Spec、四个脚本、一次 CUDA Golden、人工交接、P800 五轮修复、特殊 SwiGLU Demo 和源码证据；未进入工具实现。
 - [纠正 eager 运行模式与 Spec 绑定](issues/17-correct-eager-runtime-contract.md)：Contract revision 3 明确为 target-only eager，不启用投机解码、不加载 draft，并同时禁用 decode/prefill CUDA Graph；新结果必须绑定 revision 3，旧 Run 仅作历史证据。
 - [按 target-only eager 范围重新封存算子扫描](issues/18-rescan-target-only-eager-operator-gaps.md)：`runs/scan-003` 重新确认 target 路径的 13 个算子与缺口，Spec 已进入 `ACTIVE / CUDA_CAPTURE`，下一步是 revision 3 的真实 N 卡 preflight。
+- [恢复 Step3p5MLP 原始算子边界](issues/19-restore-step3p5-mlp-boundary.md)：Contract revision 4 回到原始 CUDA/Kunlun 提交，以 `Step3p5MLP.forward` 覆盖投影、特殊 SwiGLU 和下投影，不再要求 helper 重构。
+- [实现 TP8 rank 0 MLP 采集与模型内重放](issues/20-tp8-rank-local-mlp-capture-replay.md)：每种 shape 只保存 rank 0 的 `x/output`；CUDA 与 P800 都在加载同 checkpoint 的 TP8 模型实例内重放，不新增模型算子函数。
 
 ## Not yet specified
 

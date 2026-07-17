@@ -10,7 +10,7 @@ import unittest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CAPTURE_GOLDEN = REPO_ROOT / "model-adaptation" / "scripts" / "capture_golden.py"
-OPERATOR_ID = "activation.step_swiglu_with_limit"
+OPERATOR_ID = "Step3p5MLP.forward"
 
 
 def run_command(*args: str, cwd: Path = REPO_ROOT) -> subprocess.CompletedProcess:
@@ -28,11 +28,13 @@ def run_command(*args: str, cwd: Path = REPO_ROOT) -> subprocess.CompletedProces
 
 def create_sglang_fixture(root: Path) -> tuple[Path, str]:
     source = root / "sglang"
-    helper = source / "python" / "sglang" / "srt" / "models" / "step3p5_ops.py"
-    helper.parent.mkdir(parents=True)
-    helper.write_text(
-        "def step_swiglu_with_limit(x, limit):\n"
-        "    return x\n",
+    model = source / "python" / "sglang" / "srt" / "models" / "step3p5.py"
+    model.parent.mkdir(parents=True)
+    model.write_text(
+        "class Step3p5MLP:\n"
+        "    def forward(self, x):\n"
+        "        if self.limit is not None:\n"
+        "            return x\n",
         encoding="utf-8",
     )
     for command in (
@@ -53,7 +55,7 @@ def write_spec(path: Path, revision: str) -> dict:
     contract = {
         "schema": "migration-spec/v0",
         "spec_id": "step3p7-flash-p800-demo",
-        "contract_revision": 3,
+        "contract_revision": 4,
         "model": "Step-3.7-Flash",
         "source": {
             "sglang_revision": revision,
@@ -67,6 +69,11 @@ def write_spec(path: Path, revision: str) -> dict:
             "target_entry": "Step3p7ForConditionalGeneration.forward",
             "draft_entry": None,
         },
+        "operator_boundary": {
+            "id": "Step3p5MLP.forward",
+            "activation_guard": "self.limit is not None",
+            "tp_rank": 0,
+        },
         "runtime": {
             "tensor_parallel_size": 8,
             "dtype": "bfloat16",
@@ -78,7 +85,7 @@ def write_spec(path: Path, revision: str) -> dict:
         },
         "demo_input_mode": "text-only",
         "limits": {
-            "max_samples_per_operator": 3,
+            "max_shapes_per_operator": 3,
             "max_repair_attempts": 5,
         },
         "precision_gate": {
@@ -137,17 +144,26 @@ def write_scan_result(path: Path, revision: str, binding: dict) -> None:
                         "operator_id": OPERATOR_ID,
                         "verdict": "CAPTURE_REQUIRED",
                         "model_path": ["target"],
-                        "boundary": "gate_up plus scalar limit to output",
-                        "state_dependency": "scalar limit only",
-                        "cuda_impl": ["sglang:step3p5_ops.py:5-13"],
-                        "kunlun_impl": ["sglang-kunlun:step3p5_ops.py:5-13"],
+                        "activation_guard": "self.limit is not None",
+                        "boundary": "x to output",
+                        "state_dependency": (
+                            "same checkpoint, TP8, current-rank model weights"
+                        ),
+                        "hook_target": (
+                            "sglang.srt.models.step3p5.Step3p5MLP.forward"
+                        ),
+                        "cuda_impl": ["sglang:step3p5.py:58-108"],
+                        "kunlun_impl": ["sglang-kunlun:step3p5.py:58-108"],
                     }
                 ],
                 "capture_plan": [
                     {
                         "operator_id": OPERATOR_ID,
                         "max_distinct_shapes": 3,
-                        "reason": "weight-free capture candidate",
+                        "tp_rank": 0,
+                        "replay_mode": "loaded_model",
+                        "weights_in_golden_sample": False,
+                        "reason": "original MLP boundary with checkpoint weights",
                     }
                 ],
             },
@@ -197,9 +213,23 @@ class Ticket12CudaCapturePreflightTest(unittest.TestCase):
             self.assertEqual(result["capture_status"], "PREPARED")
             self.assertFalse(result["consumes_capture_session"])
             self.assertEqual(config["operator_id"], OPERATOR_ID)
-            self.assertEqual(config["max_samples"], 3)
+            self.assertEqual(config["max_shapes"], 3)
+            self.assertEqual(config["tensor_parallel_size"], 8)
+            self.assertEqual(config["tp_rank"], 0)
+            self.assertEqual(
+                config["activation_guard"],
+                "self.limit is not None",
+            )
             self.assertEqual(config["source"]["sglang_revision"], revision)
-            self.assertEqual(config["serialization"], "candidate-torch-save/v1")
+            self.assertEqual(config["serialization"], "candidate-torch-save/v2")
+            self.assertEqual(
+                config["replay"],
+                {
+                    "mode": "loaded_model",
+                    "checkpoint_id": "stepfun-ai/Step-3.7-Flash@fixture",
+                    "weights_in_golden_sample": False,
+                },
+            )
             self.assertEqual(
                 result["launch_environment"],
                 {

@@ -1,0 +1,400 @@
+{
+  "tool": "migration-agent",
+  "action": "scan",
+  "spec_binding": {
+    "spec_id": "step3p7-flash-p800-demo",
+    "contract_revision": 4,
+    "contract_data_sha256": "8536c27c52a7b48f97fca9415d9b7dc90a3401aea9776f35d0dbf61e01f8660a"
+  },
+  "source": {
+    "sglang_revision": "49e384ce9d304648e9959666ecb8ce8cd98d0deb",
+    "sglang_kunlun_revision": "546ad8c682392922792bbbfe53a8bf575545f118",
+    "checkpoint_id": "stepfun-ai/Step-3.7-Flash@5f6244077ac62e04eec3f320501ff8c2b293373a",
+    "checkpoint_config_sha256": "8d740ba5819e574b7a606ea7aa6d7d381142ed5cc77cab96dde2892c10414042",
+    "loaded_config_evidence": "checkpoint-config-summary.json",
+    "target_source_evidence_reused_from": "runs/scan-003",
+    "original_mlp_boundary_revalidated": true
+  },
+  "runtime_profile": {
+    "tensor_parallel_size": 8,
+    "dtype": "bfloat16",
+    "quantization": null,
+    "speculative_algorithm": null,
+    "cuda_graph_backend_decode": "disabled",
+    "cuda_graph_backend_prefill": "disabled",
+    "attention_backend_argument": null,
+    "moe_a2a_backend_argument": null,
+    "moe_runner_backend_argument": null,
+    "same_launch_arguments_on_cuda_and_p800": true,
+    "cuda_resolved_attention_backend": "REQUIRES_STARTUP_LOG",
+    "p800_resolved_attention_backend": "kunlun (source default; runtime log still required)",
+    "source_resolved_moe_a2a_backend": "none",
+    "server_args_moe_runner_backend": "auto",
+    "cuda_effective_unquantized_moe_runner_backend": "triton",
+    "cuda_moe_backend_confirmation": "REQUIRES_STARTUP_LOG",
+    "p800_unquantized_moe_path": "Kunlun plugin REPLACE for UnquantizedFusedMoEMethod.apply",
+    "eager_source_evidence": [
+      "sglang:python/sglang/srt/server_args.py:1446-1449",
+      "sglang:python/sglang/srt/server_args.py:1925-1937,1959-1966",
+      "sglang-kunlun:python/sglang/srt/server_args.py:1446-1449",
+      "sglang-kunlun:python/sglang/srt/server_args.py:1925-1937,1959-1966"
+    ],
+    "source_resolved_moe_evidence": [
+      "sglang:python/sglang/srt/server_args.py:1601-1623",
+      "sglang:python/sglang/srt/layers/moe/utils.py:261-285",
+      "sglang:python/sglang/srt/models/step3p5.py:177-193",
+      "sglang:python/sglang/srt/layers/quantization/unquant.py:410-421"
+    ]
+  },
+  "entrypoints": {
+    "target": {
+      "entry": "Step3p7ForConditionalGeneration.forward",
+      "coverage": "COMPLETE",
+      "chain": [
+        "Step3p7ForConditionalGeneration.forward",
+        "general_mm_embed_routine(text-only)",
+        "Step3p5ForCausalLM.forward",
+        "Step3p5Model.forward",
+        "Step3p5DecoderLayer.forward(layer 0..44)",
+        "LogitsProcessor.forward"
+      ],
+      "source_evidence": [
+        "sglang:python/sglang/srt/models/step3p7.py:47-74",
+        "sglang:python/sglang/srt/models/step3p7.py:136-152",
+        "sglang:python/sglang/srt/managers/mm_utils.py:1023-1145",
+        "sglang:python/sglang/srt/models/step3p5.py:480-665"
+      ]
+    }
+  },
+  "operator_counts": {
+    "ready": 8,
+    "capture_required": 1,
+    "needs_human": 4,
+    "total": 13
+  },
+  "operators": [
+    {
+      "operator_id": "embedding.vocab_parallel",
+      "model_path": ["target"],
+      "activation_guard": "text-only target input with TP8",
+      "boundary": "token ids plus embedding weight to hidden states, including TP all-reduce",
+      "state_dependency": "embedding weight and TP group",
+      "cuda_impl": [
+        "sglang:python/sglang/srt/managers/mm_utils.py:1048-1049,1131-1144",
+        "sglang:python/sglang/srt/layers/vocab_parallel_embedding.py:291-339",
+        "sglang:python/sglang/srt/layers/vocab_parallel_embedding.py:495-529",
+        "sglang:python/sglang/srt/layers/quantization/unquant.py:72-107"
+      ],
+      "kunlun_impl": [
+        "sglang-kunlun:python/sglang/srt/managers/mm_utils.py:1048-1049,1131-1144",
+        "sglang-kunlun:python/sglang/srt/layers/vocab_parallel_embedding.py:291-339,495-529",
+        "sglang-kunlun:python/sglang/srt/layers/quantization/unquant.py:72-107",
+        "sglang-kunlun:sglang_kunlun/hooks/distributed/parallel_state.py:47-92"
+      ],
+      "replay_replace_check": "Not captured because replay would require checkpoint weight; both CUDA and Kunlun target paths exist.",
+      "verdict": "READY",
+      "call_chains": {
+        "target": [
+          ["Step3p7ForConditionalGeneration.forward", "general_mm_embed_routine(text-only)", "Step3p5ForCausalLM.get_input_embeddings", "Step3p5Model.get_input_embeddings", "VocabParallelEmbedding.forward", "UnquantizedEmbeddingMethod.embedding", "tensor_model_parallel_all_reduce"]
+        ]
+      }
+    },
+    {
+      "operator_id": "linear.bf16",
+      "model_path": ["target"],
+      "activation_guard": "BF16 checkpoint with quantization unset",
+      "boundary": "activation plus BF16 weight and optional bias to output",
+      "state_dependency": "BF16 checkpoint weight",
+      "cuda_impl": [
+        "sglang:python/sglang/srt/layers/quantization/unquant.py:110-162",
+        "sglang:python/sglang/srt/layers/linear.py:466-478"
+      ],
+      "kunlun_impl": [
+        "sglang-kunlun:python/sglang/srt/layers/quantization/unquant.py:110-162",
+        "sglang-kunlun:python/sglang/srt/layers/linear.py:466-478"
+      ],
+      "replay_replace_check": "Not captured as a separate gap because replay would require checkpoint weight; the active MLP candidate obtains its rank-0 weights from the loaded checkpoint.",
+      "verdict": "READY",
+      "call_chains": {
+        "target": [
+          ["Step3p7ForConditionalGeneration.forward", "general_mm_embed_routine(text-only)", "Step3p5ForCausalLM.forward", "Step3p5Model.forward", "Step3p5DecoderLayer.forward", "Step3p5Attention.forward", "qkv_proj(QKVParallelLinear.__call__)", "ColumnParallelLinear.forward", "UnquantizedLinearMethod.apply"],
+          ["Step3p7ForConditionalGeneration.forward", "general_mm_embed_routine(text-only)", "Step3p5ForCausalLM.forward", "Step3p5Model.forward", "Step3p5DecoderLayer.forward", "Step3p5MLP.forward", "gate_up_proj(MergedColumnParallelLinear.__call__)", "ColumnParallelLinear.forward", "UnquantizedLinearMethod.apply"]
+        ]
+      }
+    },
+    {
+      "operator_id": "norm.gemma_rms",
+      "model_path": ["target"],
+      "activation_guard": "Step-3.7 target layer norms, q/k norms, and final norm",
+      "boundary": "input, optional residual, norm weight, and epsilon to normalized output",
+      "state_dependency": "norm weight, epsilon, and optional residual",
+      "cuda_impl": ["sglang:python/sglang/srt/layers/layernorm.py:648-705"],
+      "kunlun_impl": [
+        "sglang-kunlun:sglang_kunlun/platform/device.py:8-17",
+        "missing Gemma bindings; sglang-kunlun:sglang_kunlun/bootstrap/sgl_kernel_stub.py:196-207 only installs ordinary RMSNorm symbols"
+      ],
+      "replay_replace_check": "A P800 implementation gap is confirmed, but the approved replay boundary forbids saving the required norm weight.",
+      "verdict": "NEEDS_HUMAN",
+      "call_chains": {
+        "target": [
+          ["Step3p7ForConditionalGeneration.forward", "general_mm_embed_routine(text-only)", "Step3p5ForCausalLM.forward", "Step3p5Model.forward", "Step3p5DecoderLayer.forward", "LayerCommunicator.prepare_attn", "GemmaRMSNorm.forward"],
+          ["Step3p7ForConditionalGeneration.forward", "general_mm_embed_routine(text-only)", "Step3p5ForCausalLM.forward", "Step3p5Model.forward", "Step3p5DecoderLayer.forward", "Step3p5Attention.forward", "Step3p5Attention.forward_prepare_native", "q_norm(GemmaRMSNorm.forward)"],
+          ["Step3p7ForConditionalGeneration.forward", "general_mm_embed_routine(text-only)", "Step3p5ForCausalLM.forward", "Step3p5Model.forward", "final norm(GemmaRMSNorm.forward)"]
+        ]
+      }
+    },
+    {
+      "operator_id": "rope.step3p5",
+      "model_path": ["target"],
+      "activation_guard": "full and sliding attention in target layers 0-44",
+      "boundary": "positions and q/k to rotated q/k",
+      "state_dependency": "positions and rotary parameters",
+      "cuda_impl": ["sglang:python/sglang/srt/models/step3p5.py:410-437"],
+      "kunlun_impl": ["sglang-kunlun:sglang_kunlun/hooks/layers/rotary_embedding.py:12-51"],
+      "replay_replace_check": "The active argument combination is covered by the Kunlun replacement.",
+      "verdict": "READY",
+      "call_chains": {
+        "target": [
+          ["Step3p7ForConditionalGeneration.forward", "general_mm_embed_routine(text-only)", "Step3p5ForCausalLM.forward", "Step3p5Model.forward", "Step3p5DecoderLayer.forward", "Step3p5Attention.forward", "Step3p5Attention.forward_prepare_native", "rotary_emb.forward"]
+        ]
+      }
+    },
+    {
+      "operator_id": "attention.radix",
+      "model_path": ["target"],
+      "activation_guard": "target full/sliding attention in eager mode with attention backend flag omitted",
+      "boundary": "q/k/v, KV state, and batch metadata to attention output",
+      "state_dependency": "KV cache and ForwardBatch metadata",
+      "cuda_impl": [
+        "default resolver: sglang:python/sglang/srt/server_args.py:4407-4455",
+        "assignment and log: sglang:python/sglang/srt/server_args.py:4483-4491"
+      ],
+      "kunlun_impl": ["sglang-kunlun:sglang_kunlun/platform/srt.py:73-88"],
+      "replay_replace_check": "The P800 target path is present. The concrete CUDA implementation and runtime-only KV/batch boundary require startup/runtime evidence.",
+      "verdict": "NEEDS_HUMAN",
+      "call_chains": {
+        "target": [
+          ["Step3p7ForConditionalGeneration.forward", "general_mm_embed_routine(text-only)", "Step3p5ForCausalLM.forward", "Step3p5Model.forward", "Step3p5DecoderLayer.forward", "Step3p5Attention.forward", "RadixAttention.forward"]
+        ]
+      }
+    },
+    {
+      "operator_id": "activation.silu_and_mul",
+      "model_path": ["target"],
+      "activation_guard": "target dense layers 0-2 and shared experts 3-42",
+      "boundary": "gate_up tensor to SiLU-multiplied tensor",
+      "state_dependency": "none",
+      "cuda_impl": ["sglang:python/sglang/srt/layers/activation.py:90-107"],
+      "kunlun_impl": ["sglang-kunlun:sglang_kunlun/kernels/kernel_ops.py:329-358"],
+      "replay_replace_check": "Weight-free and replayable; both implementations exist.",
+      "verdict": "READY",
+      "call_chains": {
+        "target": [
+          ["Step3p7ForConditionalGeneration.forward", "general_mm_embed_routine(text-only)", "Step3p5ForCausalLM.forward", "Step3p5Model.forward", "Step3p5DecoderLayer.forward(dense layers 0-2)", "Step3p5MLP.forward", "SiluAndMul.forward"],
+          ["Step3p7ForConditionalGeneration.forward", "general_mm_embed_routine(text-only)", "Step3p5ForCausalLM.forward", "Step3p5Model.forward", "Step3p5DecoderLayer.forward(MoE layers 3-42)", "share_expert(Step3p5MLP.forward)", "SiluAndMul.forward"]
+        ]
+      }
+    },
+    {
+      "operator_id": "Step3p5MLP.forward",
+      "model_path": ["target"],
+      "activation_guard": "self.limit is not None",
+      "boundary": "x to output",
+      "state_dependency": "same checkpoint, TP8, current-rank model weights",
+      "hook_target": "sglang.srt.models.step3p5.Step3p5MLP.forward",
+      "cuda_impl": [
+        "sglang:python/sglang/srt/models/step3p5.py:58-107",
+        "sglang:python/sglang/srt/models/step3p5.py:549-558",
+        "sglang:python/sglang/srt/models/step3p5.py:631-644"
+      ],
+      "kunlun_impl": [
+        "sglang-kunlun:python/sglang/srt/models/step3p5.py:58-107",
+        "sglang-kunlun:python/sglang/srt/models/step3p5.py:549-558",
+        "sglang-kunlun:python/sglang/srt/layers/quantization/unquant.py:110-162; no MLP-specific replacement is registered"
+      ],
+      "replay_replace_check": "Capture rank-0 x and output at the original MLP method, then replay with rank-0 weights from the same checkpoint loaded in the TP8 P800 model.",
+      "verdict": "CAPTURE_REQUIRED",
+      "call_chains": {
+        "target": [
+          ["Step3p7ForConditionalGeneration.forward", "general_mm_embed_routine(text-only)", "Step3p5ForCausalLM.forward", "Step3p5Model.forward", "Step3p5DecoderLayer.forward(MoE layers 43-44)", "share_expert(Step3p5MLP.forward)"]
+        ]
+      }
+    },
+    {
+      "operator_id": "moe.router_fp32",
+      "model_path": ["target"],
+      "activation_guard": "target MoE layers 3-44 with need_fp32_gate=true",
+      "boundary": "hidden states plus BF16 router weight to FP32 router logits",
+      "state_dependency": "router weight",
+      "cuda_impl": ["sglang:python/sglang/srt/models/step3p5.py:205-221"],
+      "kunlun_impl": ["sglang-kunlun:python/sglang/srt/models/step3p5.py:205-221"],
+      "replay_replace_check": "Not captured because replay would require checkpoint router weight; no platform-specific semantic gap was found.",
+      "verdict": "READY",
+      "call_chains": {
+        "target": [
+          ["Step3p7ForConditionalGeneration.forward", "general_mm_embed_routine(text-only)", "Step3p5ForCausalLM.forward", "Step3p5Model.forward", "Step3p5DecoderLayer.forward(MoE layers 3-44)", "Step3p5MoEMLP.forward", "Step3p5MoEMLP.forward_normal", "torch.matmul(FP32 router)"]
+        ]
+      }
+    },
+    {
+      "operator_id": "moe.topk_sigmoid_bias",
+      "model_path": ["target"],
+      "activation_guard": "target MoE layers 3-44 with top-k 8, sigmoid scoring, correction bias, and renormalization",
+      "boundary": "router logits plus router bias to expert ids and weights",
+      "state_dependency": "router bias",
+      "cuda_impl": [
+        "sglang:python/sglang/srt/models/step3p5.py:119-145",
+        "sglang:python/sglang/srt/layers/moe/topk.py:1803-1810"
+      ],
+      "kunlun_impl": [
+        "sglang-kunlun:sglang_kunlun/hooks/layers/moe/topk.py:60-167 falls through to upstream fused_topk",
+        "sglang-kunlun:sglang_kunlun/bootstrap/sgl_kernel_stub.py:36-70,158-172 leaves topk_sigmoid as a failing stub while binding only fast_topk and moe_fused_gate"
+      ],
+      "replay_replace_check": "A P800 implementation gap is confirmed, but replay needs the forbidden checkpoint router bias.",
+      "verdict": "NEEDS_HUMAN",
+      "call_chains": {
+        "target": [
+          ["Step3p7ForConditionalGeneration.forward", "general_mm_embed_routine(text-only)", "Step3p5ForCausalLM.forward", "Step3p5Model.forward", "Step3p5DecoderLayer.forward(MoE layers 3-44)", "Step3p5MoEMLP.forward", "Step3p5MoEMLP.forward_normal", "TopK.__call__", "MultiPlatformOp.forward", "TopK.forward_cuda", "select_experts", "fused_topk", "topk_sigmoid"]
+        ]
+      }
+    },
+    {
+      "operator_id": "moe.bf16_unclamped",
+      "model_path": ["target"],
+      "activation_guard": "target MoE layers 3-42 with clamp limit disabled",
+      "boundary": "hidden states, top-k result, and BF16 expert weights to output",
+      "state_dependency": "expert weights and top-k result",
+      "cuda_impl": ["sglang:python/sglang/srt/layers/quantization/unquant.py:455-615"],
+      "kunlun_impl": ["sglang-kunlun:sglang_kunlun/hooks/layers/quantization/unquant.py:32-155"],
+      "replay_replace_check": "Not captured because replay would require expert weights; the unclamped semantic pipeline is present on both sides.",
+      "verdict": "READY",
+      "call_chains": {
+        "target": [
+          ["Step3p7ForConditionalGeneration.forward", "general_mm_embed_routine(text-only)", "Step3p5ForCausalLM.forward", "Step3p5Model.forward", "Step3p5DecoderLayer.forward(MoE layers 3-42)", "Step3p5MoEMLP.forward", "Step3p5MoEMLP.forward_normal", "FusedMoE.forward", "UnquantizedFusedMoEMethod.apply", "MultiPlatformOp.forward", "UnquantizedFusedMoEMethod.forward_cuda"]
+        ]
+      }
+    },
+    {
+      "operator_id": "moe.bf16_clamped",
+      "model_path": ["target"],
+      "activation_guard": "target MoE layers 43 and 44 with routed expert limit 7; source defaults moe_a2a_backend to none and the BF16 unquantized CUDA method to the Triton runner",
+      "boundary": "hidden states, top-k result, BF16 expert weights, and clamp limit to output",
+      "state_dependency": "expert weights, top-k result, and scalar limit",
+      "cuda_impl": [
+        "sglang:python/sglang/srt/models/step3p5.py:134-158",
+        "sglang:python/sglang/srt/models/step3p5.py:177-193",
+        "sglang:python/sglang/srt/layers/moe/fused_moe_triton/layer.py:250-270,272-289",
+        "sglang:python/sglang/srt/layers/quantization/unquant.py:410-421",
+        "sglang:python/sglang/srt/layers/moe/moe_runner/triton.py:145-165"
+      ],
+      "kunlun_impl": [
+        "sglang-kunlun:sglang_kunlun/hooks/layers/quantization/unquant.py:122-125 calls plain kunlun_ops.swiglu and ignores the clamp limit"
+      ],
+      "replay_replace_check": "A semantic gap is confirmed, but the current replacement boundary includes forbidden expert weights.",
+      "verdict": "NEEDS_HUMAN",
+      "call_chains": {
+        "target": [
+          ["Step3p7ForConditionalGeneration.forward", "general_mm_embed_routine(text-only)", "Step3p5ForCausalLM.forward", "Step3p5Model.forward", "Step3p5DecoderLayer.forward(MoE layers 43-44)", "Step3p5MoEMLP.forward", "Step3p5MoEMLP.forward_normal", "FusedMoE.forward", "UnquantizedFusedMoEMethod.apply", "MultiPlatformOp.forward", "UnquantizedFusedMoEMethod.forward_cuda", "MoeRunner.run", "fused_experts_none_to_triton(gemm1_limit=7)"]
+        ]
+      }
+    },
+    {
+      "operator_id": "collective.tp8",
+      "model_path": ["target"],
+      "activation_guard": "TP8 target execution",
+      "boundary": "sharded tensor to all-reduce or all-gather result",
+      "state_dependency": "TP communicator",
+      "cuda_impl": [
+        "sglang:python/sglang/srt/distributed/communication_op.py:18-47",
+        "sglang:python/sglang/srt/layers/vocab_parallel_embedding.py:520-528"
+      ],
+      "kunlun_impl": ["sglang-kunlun:sglang_kunlun/hooks/distributed/parallel_state.py:47-92"],
+      "replay_replace_check": "A runtime collective rather than an offline replay target; Kunlun group ownership is explicit.",
+      "verdict": "READY",
+      "call_chains": {
+        "target": [
+          ["Step3p7ForConditionalGeneration.forward", "general_mm_embed_routine(text-only)", "Step3p5ForCausalLM.get_input_embeddings", "Step3p5Model.get_input_embeddings", "VocabParallelEmbedding.forward", "tensor_model_parallel_all_reduce"]
+        ]
+      }
+    },
+    {
+      "operator_id": "logits.lm_head",
+      "model_path": ["target"],
+      "activation_guard": "target path with logprobs disabled",
+      "boundary": "final hidden states plus BF16 vocab weight to TP logits",
+      "state_dependency": "LM head weight and TP group",
+      "cuda_impl": [
+        "sglang:python/sglang/srt/layers/logits_processor.py:304-381",
+        "sglang:python/sglang/srt/layers/logits_processor.py:830-917"
+      ],
+      "kunlun_impl": [
+        "sglang-kunlun:python/sglang/srt/layers/logits_processor.py:304-381,830-917",
+        "sglang-kunlun:sglang_kunlun/hooks/distributed/parallel_state.py:47-92"
+      ],
+      "replay_replace_check": "Not captured because replay would require vocab weight; both CUDA and Kunlun target paths exist.",
+      "verdict": "READY",
+      "call_chains": {
+        "target": [
+          ["Step3p7ForConditionalGeneration.forward", "general_mm_embed_routine(text-only)", "Step3p5ForCausalLM.forward", "Step3p5Model.forward", "LogitsProcessor.forward", "LogitsProcessor._get_logits", "LogitsProcessor._compute_lm_head", "torch.matmul", "tensor_model_parallel_all_gather"]
+        ]
+      }
+    }
+  ],
+  "gap_queue": [
+    {
+      "operator_id": "Step3p5MLP.forward",
+      "verdict": "CAPTURE_REQUIRED",
+      "confirmed_gap": false,
+      "golden": "PLANNED",
+      "reason": "Original model boundary selected to validate the rank-0 capture and loaded-model replay flow; P800 baseline must still prove a real gap."
+    },
+    {
+      "operator_id": "norm.gemma_rms",
+      "verdict": "NEEDS_HUMAN",
+      "confirmed_gap": true,
+      "golden": "NOT_PLANNED",
+      "reason": "Kunlun forward_cuda reaches Gemma sgl_kernel symbols that the current stub does not install; replay needs a forbidden norm weight."
+    },
+    {
+      "operator_id": "moe.topk_sigmoid_bias",
+      "verdict": "NEEDS_HUMAN",
+      "confirmed_gap": true,
+      "golden": "NOT_PLANNED",
+      "reason": "Kunlun replacement falls through to the missing upstream sigmoid-plus-bias fused top-k symbol; replay needs a forbidden router bias."
+    },
+    {
+      "operator_id": "moe.bf16_clamped",
+      "verdict": "NEEDS_HUMAN",
+      "confirmed_gap": true,
+      "golden": "NOT_PLANNED",
+      "reason": "CUDA propagates gemm1_clamp_limit while the Kunlun unquantized MoE replacement calls plain swiglu and ignores the limit; the current boundary includes forbidden expert weights."
+    },
+    {
+      "operator_id": "attention.radix",
+      "verdict": "NEEDS_HUMAN",
+      "confirmed_gap": false,
+      "golden": "NOT_PLANNED",
+      "reason": "The concrete CUDA attention backend must be recorded from the one CUDA Session startup log; the runtime KV/batch boundary is outside offline replay scope."
+    }
+  ],
+  "capture_plan": [
+    {
+      "operator_id": "Step3p5MLP.forward",
+      "max_distinct_shapes": 3,
+      "tp_rank": 0,
+      "replay_mode": "loaded_model",
+      "weights_in_golden_sample": false,
+      "reason": "Replay rank 0 inside the loaded TP8 model using the same checkpoint weights."
+    }
+  ],
+  "evidence": [
+    "scan.log",
+    "checkpoint-config-summary.json",
+    "config-load-probe.log"
+  ],
+  "scan_complete": true,
+  "advance_allowed": true,
+  "passed": true,
+  "summary": "Target-only eager scan is complete for TP8 BF16. All 13 semantic operators retain target call chains and fixed-revision CUDA/Kunlun evidence; the capture plan uses the original Step3p5MLP.forward boundary for rank 0 and at most three real shapes.",
+  "supersedes": "runs/scan-003"
+}

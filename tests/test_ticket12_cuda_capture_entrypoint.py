@@ -21,10 +21,16 @@ class Ticket12CudaCaptureEntrypointTest(unittest.TestCase):
     def test_runbook_uses_target_only_eager_launch_arguments(self) -> None:
         runbook = RUNBOOK.read_text(encoding="utf-8")
 
-        self.assertIn("--scan-result runs/scan-003/result.json", runbook)
+        self.assertIn("--scan-result runs/scan-004/result.json", runbook)
+        self.assertIn("--operator-id Step3p5MLP.forward", runbook)
+        self.assertIn(
+            "49e384ce9d304648e9959666ecb8ce8cd98d0deb",
+            runbook,
+        )
         self.assertIn("--cuda-graph-backend-decode disabled", runbook)
         self.assertIn("--cuda-graph-backend-prefill disabled", runbook)
         self.assertNotIn("--speculative-algorithm EAGLE", runbook)
+        self.assertNotIn("step_swiglu_with_limit", runbook)
 
     def test_runbook_command_rejects_empty_sglang_worktree(self) -> None:
         environment = os.environ.copy()

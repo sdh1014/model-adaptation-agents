@@ -170,12 +170,16 @@ class Ticket11ScanArtifactTest(unittest.TestCase):
 
     def test_historical_scan_is_superseded_without_rewrite(self):
         spec = (ROOT / "migration-spec.md").read_text()
-        current_scan = json.loads(
+        target_only_scan = json.loads(
             (ROOT / "runs" / "scan-003" / "result.json").read_text()
         )
-        self.assertIn("- `scan_run`: `runs/scan-003`", spec)
+        current_scan = json.loads(
+            (ROOT / "runs" / "scan-004" / "result.json").read_text()
+        )
+        self.assertIn("- `scan_run`: `runs/scan-004`", spec)
         self.assertEqual(self.result["supersedes"], "runs/scan-001")
-        self.assertEqual(current_scan["supersedes"], "runs/scan-002")
+        self.assertEqual(target_only_scan["supersedes"], "runs/scan-002")
+        self.assertEqual(current_scan["supersedes"], "runs/scan-003")
 
     def test_eagle_defaults_cover_all_three_draft_weight_layers(self):
         eagle = self.result["eagle_draft_resolution"]

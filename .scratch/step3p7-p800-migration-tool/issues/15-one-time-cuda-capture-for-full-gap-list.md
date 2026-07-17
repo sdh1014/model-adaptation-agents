@@ -2,7 +2,7 @@
 
 Type: task
 Status: ready-for-agent
-Blocked by: 13, 18
+Blocked by: 13, 20
 
 ## What to build
 
@@ -10,7 +10,7 @@ Blocked by: 13, 18
 
 采集发生在 SGLang 已确认的 Semantic Operator 边界。每个算子按稳定签名去重，最多保留三个真实调用形态；重复调用和第四个以后的新形态只计数，不再保存数据。每个样本保存边界输入、CUDA 期望输出、必要标量和重放元数据，不保存权重或内部 Tensor。
 
-Session 结束后，在新的 CUDA 进程中对全部 Golden Samples 自回放。只有全部通过，才封存 Golden Run、构建交接包并完成 CUDA 端校验。
+Session 结束后，在已加载同一 checkpoint 的 CUDA TP8 模型 rank 0 上对全部 Golden Samples 自回放。只有全部通过，才封存 Golden Run、构建交接包并完成 CUDA 端校验。
 
 ## Acceptance criteria
 
@@ -28,3 +28,5 @@ Session 结束后，在新的 CUDA 进程中对全部 Golden Samples 自回放�
 特殊 SwiGLU 是首选验证样例，但唯一 CUDA Session 必须覆盖完整扫描中所有符合 Contract 的采集候选。
 
 2026-07-17 纠正：本票据只消费 Contract revision 3 的 target-only eager 扫描结果 `runs/scan-003`；不得使用旧 EAGLE 范围的 `scan-002` 启动唯一 CUDA Capture Session。
+
+2026-07-17 边界更新：正式 Session 改为消费 revision 4 的 `scan-004`，在 TP8 模型 rank 0 的原始 `Step3p5MLP.forward` 保存每种 shape 的一份 `x/output`；权重由同一 checkpoint 提供，revision 3 的旧方案只保留为历史。

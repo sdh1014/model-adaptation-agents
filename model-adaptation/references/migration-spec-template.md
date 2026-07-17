@@ -34,6 +34,11 @@ json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False).enco
     "target_entry": "Step3p7ForConditionalGeneration.forward",
     "draft_entry": null
   },
+  "operator_boundary": {
+    "id": "Step3p5MLP.forward",
+    "activation_guard": "self.limit is not None",
+    "tp_rank": 0
+  },
   "runtime": {
     "tensor_parallel_size": 8,
     "dtype": "bfloat16",
@@ -45,7 +50,7 @@ json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False).enco
   },
   "demo_input_mode": null,
   "limits": {
-    "max_samples_per_operator": 3,
+    "max_shapes_per_operator": 3,
     "max_repair_attempts": 5
   },
   "precision_gate": {
@@ -77,8 +82,8 @@ json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False).enco
 - 模型名由 Skill 调用参数写入 Contract Data；本 Demo 的值必须是 `Step-3.7-Flash`。
 - SGLang 与 SGLang-Kunlun revision、checkpoint、配置摘要、target 入口、TP8、BF16、target-only eager 和 Demo 输入模式全部由 Contract Data 固定。CUDA 与 P800 使用同一组启动参数；不传量化或投机解码参数，不额外传 MTP 开关，也不显式传 attention backend。运行后解析出的两端实际 backend 必须分别进入 Scan/Capture 证据。
 - eager 固定为 decode 与 prefill 的 CUDA Graph backend 都是 `disabled`。`draft_entry: null` 与 `speculative_algorithm: null` 表示不加载 draft 路径，不得把 eager 解释为 EAGLE。
-- 正式 `sglang_revision` 必须已经包含人类批准的特殊 SwiGLU helper 纯重构；CUDA 与 P800 使用同一固定源码。这个前置重构不算 P800 repair attempt。
-- CUDA 只允许一个 Capture Session；每个算子最多保存三个去重后的真实调用形态。
+- Demo 直接使用原始源码中的 `Step3p5MLP.forward`，激活条件固定为 `self.limit is not None`。不得新增特殊 SwiGLU 函数，也不得把内部表达式升级为独立 Demo 算子。
+- CUDA 只允许一个 Capture Session；TP8 模型中只保存 rank 0 的边界输入 `x` 和 CUDA `output`，每个算子最多保存三个去重后的真实 shape。权重由同一 checkpoint 的 rank 0 分片提供，不进入 Golden Sample。
 - `max_repair_attempts` 固定为五；baseline 不计数，通过轮计数。
 - Precision Gate 本 Demo 固定为 `atol=0.01`、`rtol=0.02`。
 
@@ -89,8 +94,8 @@ json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False).enco
 1. Contract 已由人批准，全部必填值已填写，所有工具结果都绑定同一 Contract Data。
 2. target-only eager 实际路径扫描完成，每条结论都有源码或运行证据。
 3. 所有发现的 Operator Gap 都进入 gap queue，所有 `CAPTURE_REQUIRED` 项都纳入唯一 CUDA Capture Session。
-4. 每个算子最多三个不同真实调用形态的边界输入和 CUDA 输出已保存。
-5. Golden Run 在新 CUDA 进程中全部 self-replay 通过，bundle 在 CUDA 与 P800 两端校验通过。
+4. rank 0 的边界输入 `x` 和 CUDA `output` 已保存，最多三个不同真实 shape；Golden Sample 不包含权重和内部 Tensor。
+5. Golden Run 在已加载同一 checkpoint 的 CUDA TP8 模型 rank 0 上全部 self-replay 通过，bundle 在 CUDA 与 P800 两端校验通过。
 6. 被选作 Demo 的算子在 P800 baseline 中至少有一个样本执行或精度失败。
 7. 修复没有超出 Repair Boundary；baseline 不计数，修复不超过五轮。
 8. 该算子的全部已保存样本都通过固定 Precision Gate。
@@ -99,7 +104,7 @@ json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False).enco
 
 ### Non-goals
 
-- 不要求关闭其他 Operator Gap 或覆盖第四种以后 shape。
+- 不要求关闭其他 Operator Gap、覆盖第四种以后 shape，或证明 TP8 的全部八个权重分片都通过。
 - 不迁移 DecoderLayer、完成模型组网、服务拉起、回复质量或 E2E logits 对齐。
 - 不做吞吐、延迟或大 batch 性能优化。
 - 不自动跨机器复制、管理凭证或新增 C++、自定义 Kernel、底层算子注册。

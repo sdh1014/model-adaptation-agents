@@ -50,7 +50,7 @@ class Ticket12SglangCapturePluginTest(unittest.TestCase):
         FakeHookRegistry.calls = []
         plugin._reset_for_tests()
 
-    def test_registers_target_only_context_and_swiglu_hooks_when_enabled(self) -> None:
+    def test_registers_target_context_and_original_mlp_hooks_when_enabled(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = Path(temp_dir) / "capture-config.json"
             config_path.write_text(json.dumps({}) + "\n", encoding="utf-8")
@@ -65,7 +65,7 @@ class Ticket12SglangCapturePluginTest(unittest.TestCase):
             [call[0] for call in FakeHookRegistry.calls],
             [
                 "sglang.srt.models.step3p5.Step3p5ForCausalLM.forward",
-                "sglang.srt.models.step3p5_ops.step_swiglu_with_limit",
+                "sglang.srt.models.step3p5.Step3p5MLP.forward",
             ],
         )
         self.assertTrue(all(call[2] == FakeHookType.AROUND for call in FakeHookRegistry.calls))
@@ -79,6 +79,25 @@ class Ticket12SglangCapturePluginTest(unittest.TestCase):
             plugin.register()
 
         self.assertEqual(FakeHookRegistry.calls, [])
+
+    def test_registers_the_same_model_hooks_for_loaded_model_replay(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "replay-config.json"
+            config_path.write_text(json.dumps({}) + "\n", encoding="utf-8")
+            with patch.dict(sys.modules, fake_sglang_modules()), patch.dict(
+                os.environ,
+                {"MODEL_ADAPTATION_REPLAY_CONFIG": str(config_path)},
+                clear=True,
+            ):
+                plugin.register()
+
+        self.assertEqual(
+            [call[0] for call in FakeHookRegistry.calls],
+            [
+                "sglang.srt.models.step3p5.Step3p5ForCausalLM.forward",
+                "sglang.srt.models.step3p5.Step3p5MLP.forward",
+            ],
+        )
 
 
 if __name__ == "__main__":

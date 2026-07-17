@@ -14,7 +14,7 @@ SPEC_TEMPLATE = (
 )
 MODEL_ADAPTATION_SKILL = REPO_ROOT / "model-adaptation" / "SKILL.md"
 EXPECTED_CONTRACT_SHA256 = (
-    "9ee412b66d22e66c0d6904f3cfbf2b5fae9c8311cb32ad0668f2ffc37a0251db"
+    "7763452fedc846349a49d048509b97ae48910d5041e147a6bb78efaeee705988"
 )
 
 
@@ -36,6 +36,11 @@ def approved_contract() -> dict:
             "target_entry": "Step3p7ForConditionalGeneration.forward",
             "draft_entry": None,
         },
+        "operator_boundary": {
+            "id": "Step3p5MLP.forward",
+            "activation_guard": "self.limit is not None",
+            "tp_rank": 0,
+        },
         "runtime": {
             "tensor_parallel_size": 8,
             "dtype": "bfloat16",
@@ -47,7 +52,7 @@ def approved_contract() -> dict:
         },
         "demo_input_mode": "text-only",
         "limits": {
-            "max_samples_per_operator": 3,
+            "max_shapes_per_operator": 3,
             "max_repair_attempts": 5,
         },
         "precision_gate": {
@@ -233,7 +238,7 @@ class Ticket10SpecBindingTest(unittest.TestCase):
             self.assertFalse(comparison_result["passed"])
 
             drifted_contract = approved_contract()
-            drifted_contract["limits"]["max_samples_per_operator"] = 4
+            drifted_contract["limits"]["max_shapes_per_operator"] = 4
             write_spec(spec_path, drifted_contract)
             rejected_run = workspace / "runs" / "contract-drift"
 
@@ -249,7 +254,7 @@ class Ticket10SpecBindingTest(unittest.TestCase):
             )
 
             self.assertEqual(rejected.returncode, 2)
-            self.assertIn("max_samples_per_operator must be 3", rejected.stderr)
+            self.assertIn("max_shapes_per_operator must be 3", rejected.stderr)
             self.assertFalse(rejected_run.exists())
 
     def test_existing_result_survives_working_state_change_but_not_contract_change(

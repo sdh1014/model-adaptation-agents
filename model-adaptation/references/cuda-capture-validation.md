@@ -1,14 +1,14 @@
 # CUDA 采集 preflight
 
-本步骤让 Claude Code 在 N 卡机器上验证三件事：revision 3 的 target-only eager `scan-003` 选择的特殊 SwiGLU 边界仍与固定源码一致；SGLang 的通用 Hook 能打到真实 helper；候选样本能由另一个进程读回并用固定精度门槛重放。
+本步骤让 Claude Code 在 N 卡机器上验证三件事：revision 4 的 target-only eager `scan-004` 与固定原始源码一致；SGLang 的通用 Hook 能直接打到 `Step3p5MLP.forward`；TP8 配置下只有 rank 0 会保存最多三种 shape 的 `x` 和 `output`。
 
-preflight 使用小型合成 BF16 tensor，不启动模型、不读取 checkpoint，也不消耗唯一正式 CUDA Capture Session。
+preflight 使用小型合成 BF16 tensor 和原始 `Step3p5MLP.forward`，不启动模型、不读取 checkpoint，也不消耗唯一正式 CUDA Capture Session。它只验证 Hook 与样本格式，不声称完成 checkpoint 权重参与的模型内重放。
 
 ## 前提
 
 - 当前目录是 `model-adaptation-agents` 仓库。
 - 当前 Python 是将来启动 SGLang 的 CUDA Python，`torch.cuda.is_available()` 为真。
-- 调用者已显式设置非空的 `SGLANG_WORKTREE`，且它指向固定 revision `6274831d9fef7bba04eb59302caac24563a974c9` 的 SGLang 0.5.14 源码；Agent 不猜测默认目录。
+- 调用者已显式设置非空的 `SGLANG_WORKTREE`，且它指向固定原始 revision `49e384ce9d304648e9959666ecb8ce8cd98d0deb` 的 SGLang 0.5.14 源码；Agent 不猜测默认目录。
 - `runs/cuda-preflight-001` 尚不存在；如果已经存在，换一个新的编号，不能覆盖旧 Run。
 
 ## 执行
@@ -42,12 +42,12 @@ python model-adaptation/scripts/capture_golden.py \
   --mode preflight \
   --spec migration-spec.md \
   --run-dir runs/cuda-preflight-001 \
-  --scan-result runs/scan-003/result.json \
-  --operator-id activation.step_swiglu_with_limit \
+  --scan-result runs/scan-004/result.json \
+  --operator-id Step3p5MLP.forward \
   --sglang-worktree "$SGLANG_WORKTREE"
 ```
 
-命令会依次启动两个新进程。第一个进程通过 SGLang 的 `sglang.srt.plugins` 入口安装 Hook，调用固定源码中的真实 `step_swiglu_with_limit`，保存三种调用形态并验证重复与第四种形态不会新增样本；第二个进程用 `torch.load(..., weights_only=True)` 读回样本，再用同一个 helper 和 `torch.testing.assert_close(atol=1e-2, rtol=2e-2)` 重放。
+命令会启动一个 preflight worker，通过 SGLang 的 `sglang.srt.plugins` 入口安装 `Step3p5ForCausalLM.forward` 上下文 Hook 和原始 `Step3p5MLP.forward` Hook。worker 使用原始 MLP 方法与小型投影替身保存 rank 0 的三种 shape，并验证重复调用和第四种 shape 不会新增样本。它不会创建或调用任何特殊 SwiGLU 函数。
 
 ## 验收
 
@@ -55,21 +55,20 @@ python model-adaptation/scripts/capture_golden.py \
 
 - 真实 `HookRegistry` 接线测试在固定 SGLang revision 上得到 `1 test ... OK`。
 - `runs/cuda-preflight-001/result.json` 中 `passed` 为 `true`、`capture_status` 为 `PREFLIGHT_PASSED`、`consumes_capture_session` 为 `false`。
-- `capture-state.json` 中 `saved_sample_count=3`、`repeated_call_count=1`、`skipped_call_count=1`，并保留一条不含 tensor 数值的 `skipped_signatures` 记录。
-- `preflight-capture-summary.json` 记录两个已应用 Hook、实际 Torch 版本、CUDA 设备和固定 helper 路径。
-- `preflight-verify-summary.json` 记录 `new_process=true`、三份样本、`atol=0.01` 和 `rtol=0.02`。
+- `capture-state.json` 中 `tp_rank=0`、`tensor_parallel_size=8`、`saved_shape_count=3`、`repeated_call_count=1`、`skipped_call_count=1`，并保留一条不含 tensor 数值的 `skipped_signatures` 记录。
+- `samples/` 只有三份 `.pt`，每份只包含 `x`、CUDA `output`、`limit` 和必要元数据，不包含权重、`gate_up`、`gate` 或 `up`。
+- `preflight-capture-summary.json` 记录两个已应用 Hook、实际 Torch 版本、CUDA 设备、原始模型源码路径、`tp_rank=0`、`tensor_parallel_size=8`、`checkpoint_loaded=false` 和 `loaded_model_replay_performed=false`。
 
-失败时保留整个 Run，报告 `result.json` 和两份 preflight 日志，不重写同一个 Run，也不要把失败解释成 P800 算子缺口。
+失败时保留整个 Run，报告 `result.json` 和 preflight 日志，不重写同一个 Run，也不要把失败解释成 P800 算子缺口。
 
 通过后同样停止，把以下文件交回当前设计会话确认；不要直接开始正式 CUDA Session：
 
 ```text
 runs/cuda-preflight-001/result.json
+runs/cuda-preflight-001/capture-config.json
 runs/cuda-preflight-001/capture-state.json
 runs/cuda-preflight-001/preflight-capture-summary.json
-runs/cuda-preflight-001/preflight-verify-summary.json
 runs/cuda-preflight-001/preflight-capture.log
-runs/cuda-preflight-001/preflight-verify.log
 ```
 
 ## 后续正式启动参数边界
@@ -86,3 +85,5 @@ python -m sglang.launch_server \
 ```
 
 不要追加 `--speculative-algorithm`、量化参数、MTP 开关、`--enable-multi-layer-eagle`、`--attention-backend`、`--prefill-attention-backend`、`--decode-attention-backend` 或 MoE backend 参数。这里的 eager 表示 decode 与 prefill 都禁用 CUDA Graph，不使用仍经过 graph capture/replay 路径的 `--debug-cuda-graph`。CUDA 正式采集时只额外设置 `MODEL_ADAPTATION_CAPTURE_CONFIG` 环境变量；它不是 SGLang 启动参数。实际解析出的 attention 与 MoE backend 从启动日志记录，不回写成 Contract 参数。
+
+正式采集和两端重放必须加载 Contract 固定的同一 checkpoint 与 TP8 模型。CUDA 和 P800 都只在 rank 0 的相同 `Step3p5MLP` 实例上处理 Golden Sample；其他 rank 正常执行模型但不额外落盘或比较。模型内重放通过 `MODEL_ADAPTATION_REPLAY_CONFIG` 启用，不能退回为独立无权重函数调用。

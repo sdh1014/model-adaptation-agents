@@ -15,15 +15,17 @@ from _lib.spec_contract import (
     load_spec_binding,
 )
 from model_adaptation_capture.contracts import (
+    ACTIVATION_GUARD,
     CANDIDATE_SERIALIZATION,
     CAPTURE_CONFIG_ENV,
     CONFIG_SCHEMA,
-    HELPER_RELATIVE_PATH as HELPER_PATH_TEXT,
+    MLP_HOOK_TARGET,
+    MODEL_RELATIVE_PATH as MODEL_PATH_TEXT,
 )
 from model_adaptation_capture.preflight import PreflightError, run_workers
 
 
-HELPER_RELATIVE_PATH = Path(HELPER_PATH_TEXT)
+MODEL_RELATIVE_PATH = Path(MODEL_PATH_TEXT)
 
 
 class ToolError(RuntimeError):
@@ -69,9 +71,9 @@ def file_sha256(path: Path) -> str:
 
 
 def resolve_git_revision(worktree: Path) -> str:
-    if not (worktree / HELPER_RELATIVE_PATH).is_file():
+    if not (worktree / MODEL_RELATIVE_PATH).is_file():
         raise ToolError(
-            f"SGLang worktree is missing {HELPER_RELATIVE_PATH.as_posix()}"
+            f"SGLang worktree is missing {MODEL_RELATIVE_PATH.as_posix()}"
         )
     completed = subprocess.run(
         ["git", "rev-parse", "HEAD"],
@@ -137,20 +139,38 @@ def validate_scan_candidate(
             raise ToolError(f"Scan Run source {field} does not match Contract Data")
 
     operator = find_operator(scan_result, operator_id)
+    expected_boundary = contract["operator_boundary"]
+    if operator_id != expected_boundary["id"]:
+        raise ToolError("requested operator does not match Contract Data")
     if operator.get("verdict") != "CAPTURE_REQUIRED":
         raise ToolError(f"operator {operator_id!r} is not CAPTURE_REQUIRED")
     if operator.get("model_path") != ["target"]:
         raise ToolError(f"operator {operator_id!r} must be target-only for this Demo")
-    if operator.get("state_dependency") != "scalar limit only":
-        raise ToolError(f"operator {operator_id!r} is not weight-free")
+    if operator.get("activation_guard") != expected_boundary["activation_guard"]:
+        raise ToolError(f"operator {operator_id!r} activation guard has drifted")
+    if operator.get("hook_target") != MLP_HOOK_TARGET:
+        raise ToolError(f"operator {operator_id!r} hook target has drifted")
+    if (
+        operator.get("state_dependency")
+        != "same checkpoint, TP8, current-rank model weights"
+    ):
+        raise ToolError(
+            f"operator {operator_id!r} must replay with loaded checkpoint weights"
+        )
     for field in ("boundary", "cuda_impl", "kunlun_impl"):
         if not operator.get(field):
             raise ToolError(f"operator {operator_id!r} is missing {field}")
 
     plan = find_capture_plan(scan_result, operator_id)
-    max_samples = contract["limits"]["max_samples_per_operator"]
-    if plan.get("max_distinct_shapes") != max_samples:
-        raise ToolError("capture plan sample limit does not match Contract Data")
+    max_shapes = contract["limits"]["max_shapes_per_operator"]
+    if plan.get("max_distinct_shapes") != max_shapes:
+        raise ToolError("capture plan shape limit does not match Contract Data")
+    if plan.get("tp_rank") != expected_boundary["tp_rank"]:
+        raise ToolError("capture plan TP rank does not match Contract Data")
+    if plan.get("replay_mode") != "loaded_model":
+        raise ToolError("capture plan must replay inside a loaded model")
+    if plan.get("weights_in_golden_sample") is not False:
+        raise ToolError("capture plan must keep checkpoint weights out of Golden Samples")
     return operator
 
 
@@ -160,6 +180,8 @@ def prepare_capture_config(
     scan_result_path: Path,
     operator_id: str,
     sglang_worktree: Path,
+    *,
+    preflight: bool = False,
 ) -> tuple[Any, Dict[str, Any]]:
     binding = load_spec_binding(spec_path)
     contract = load_contract_data(spec_path)
@@ -185,8 +207,11 @@ def prepare_capture_config(
         "schema": CONFIG_SCHEMA,
         "spec_binding": binding.as_result_dict(),
         "operator_id": operator_id,
+        "activation_guard": contract["operator_boundary"]["activation_guard"],
         "model_path": "target",
-        "max_samples": contract["limits"]["max_samples_per_operator"],
+        "max_shapes": contract["limits"]["max_shapes_per_operator"],
+        "tensor_parallel_size": contract["runtime"]["tensor_parallel_size"],
+        "tp_rank": contract["operator_boundary"]["tp_rank"],
         "serialization": CANDIDATE_SERIALIZATION,
         "capture_device_type": "cuda",
         "dtype": contract["runtime"]["dtype"],
@@ -199,11 +224,21 @@ def prepare_capture_config(
         "source": {
             "sglang_revision": actual_revision,
             "sglang_worktree": str(sglang_worktree.resolve()),
-            "helper_path": str((sglang_worktree / HELPER_RELATIVE_PATH).resolve()),
+            "model_path": str((sglang_worktree / MODEL_RELATIVE_PATH).resolve()),
         },
         "boundary": operator["boundary"],
         "state_dependency": operator["state_dependency"],
+        "replay": {
+            "mode": "loaded_model",
+            "checkpoint_id": contract["checkpoint"]["id"],
+            "weights_in_golden_sample": False,
+        },
     }
+    if preflight:
+        config["preflight_tp_context"] = {
+            "rank": contract["operator_boundary"]["tp_rank"],
+            "size": contract["runtime"]["tensor_parallel_size"],
+        }
     write_json(config_path, config)
     return binding, config
 
@@ -235,7 +270,10 @@ def run_prepare(
             CAPTURE_CONFIG_ENV: str(config_path.resolve()),
         },
         "evidence": ["capture-config.json", "capture.log"],
-        "summary": "Scan candidate and fixed SGLang revision are ready for CUDA preflight.",
+        "summary": (
+            "The original MLP boundary and fixed source are ready for rank-0 "
+            "CUDA capture in the TP8 model."
+        ),
     }
     write_json(run_dir / "result.json", result)
     (run_dir / "capture.log").write_text(
@@ -244,7 +282,10 @@ def run_prepare(
                 "action=prepare",
                 f"operator_id={operator_id}",
                 f"sglang_revision={config['source']['sglang_revision']}",
-                f"max_samples={config['max_samples']}",
+                f"max_shapes={config['max_shapes']}",
+                f"tensor_parallel_size={config['tensor_parallel_size']}",
+                f"tp_rank={config['tp_rank']}",
+                "replay_mode=loaded_model",
                 "capture_session_consumed=false",
                 "",
             ]
@@ -266,6 +307,7 @@ def run_preflight(
         scan_result_path,
         operator_id,
         sglang_worktree,
+        preflight=True,
     )
     passed, evidence = run_workers(
         run_dir / "capture-config.json",
@@ -282,9 +324,10 @@ def run_preflight(
         "serialization": config["serialization"],
         "evidence": evidence,
         "summary": (
-            "The installed SGLang hook captured three CUDA BF16 candidates and a new process replayed them."
+            "The installed SGLang hook captured rank-0 MLP boundary records; "
+            "real checkpoint capture and loaded-model replay remain real-model steps."
             if passed
-            else "CUDA preflight did not prove capture and new-process replay; inspect the preflight logs."
+            else "CUDA preflight did not prove the original MLP hook and rank-0 format; inspect the preflight logs."
         ),
     }
     write_json(run_dir / "result.json", result)

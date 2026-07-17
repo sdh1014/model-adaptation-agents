@@ -19,14 +19,15 @@ sys.path.insert(0, str(SCRIPTS_ROOT))
 from model_adaptation_capture import plugin
 
 
-FIXED_SGLANG_REVISION = "6274831d9fef7bba04eb59302caac24563a974c9"
-DEFAULT_SGLANG_WORKTREE = Path("/tmp/sglang-step3p7-cuda")
+FIXED_SGLANG_REVISION = "49e384ce9d304648e9959666ecb8ce8cd98d0deb"
+DEFAULT_SGLANG_WORKTREE = Path("/tmp/sglang-step3p7-cuda-original")
 MODULE_NAMES = (
     "sglang",
     "sglang.srt",
     "sglang.srt.models",
     "sglang.srt.plugins",
-    "sglang.srt.models.step3p5_ops",
+    "sglang.srt.distributed",
+    "sglang.srt.distributed.parallel_state",
     "sglang.srt.models.step3p5",
     "sglang.srt.plugins.hook_registry",
 )
@@ -53,16 +54,19 @@ def write_capture_config(path: Path, run_dir: Path) -> None:
     path.write_text(
         json.dumps(
             {
-                "schema": "golden-capture-config/v0",
+                "schema": "golden-capture-config/v1",
                 "spec_binding": {
                     "spec_id": "step3p7-flash-p800-demo",
-                    "contract_revision": 2,
+                    "contract_revision": 4,
                     "contract_data_sha256": "fixture-sha256",
                 },
-                "operator_id": "activation.step_swiglu_with_limit",
+                "operator_id": "Step3p5MLP.forward",
+                "activation_guard": "self.limit is not None",
                 "model_path": "target",
-                "max_samples": 3,
-                "serialization": "candidate-torch-save/v1",
+                "max_shapes": 3,
+                "tensor_parallel_size": 8,
+                "tp_rank": 0,
+                "serialization": "candidate-torch-save/v2",
                 "run_dir": str(run_dir),
                 "capture_device_type": "cpu",
                 "dtype": "bfloat16",
@@ -74,24 +78,23 @@ def write_capture_config(path: Path, run_dir: Path) -> None:
 
 
 class Ticket12RealSglangHookIntegrationTest(unittest.TestCase):
-    def test_real_registry_captures_only_three_target_signatures(self) -> None:
+    def test_real_registry_captures_limited_mlp_without_source_helper(self) -> None:
         worktree_was_configured = "SGLANG_WORKTREE" in os.environ
         configured_worktree = os.environ.get("SGLANG_WORKTREE")
         if worktree_was_configured and not configured_worktree:
             self.fail("SGLANG_WORKTREE must be set to a non-empty path")
-        worktree = Path(
-            configured_worktree or DEFAULT_SGLANG_WORKTREE
-        ).resolve()
-        helper_path = worktree / "python/sglang/srt/models/step3p5_ops.py"
+        worktree = Path(configured_worktree or DEFAULT_SGLANG_WORKTREE).resolve()
+        model_path = worktree / "python/sglang/srt/models/step3p5.py"
         registry_path = worktree / "python/sglang/srt/plugins/hook_registry.py"
-        if not helper_path.is_file() or not registry_path.is_file():
+        helper_path = worktree / "python/sglang/srt/models/step3p5_ops.py"
+        if not model_path.is_file() or not registry_path.is_file():
             if worktree_was_configured:
                 self.fail(
-                    "SGLANG_WORKTREE does not contain the required fixed "
+                    "SGLANG_WORKTREE does not contain the required original "
                     f"SGLang sources: {worktree}"
                 )
             self.skipTest(
-                "fixed SGLang checkout unavailable; set SGLANG_WORKTREE to run"
+                "original SGLang checkout unavailable; set SGLANG_WORKTREE to run"
             )
 
         revision = subprocess.run(
@@ -102,6 +105,11 @@ class Ticket12RealSglangHookIntegrationTest(unittest.TestCase):
             check=True,
         ).stdout.strip()
         self.assertEqual(revision, FIXED_SGLANG_REVISION)
+        self.assertFalse(helper_path.exists())
+        model_source = model_path.read_text(encoding="utf-8")
+        self.assertIn("class Step3p5MLP(nn.Module):", model_source)
+        self.assertIn("if self.limit is not None:", model_source)
+        self.assertIn("output, _ = self.down_proj(gate * up)", model_source)
 
         saved_modules = {
             name: sys.modules.get(name, MISSING) for name in MODULE_NAMES
@@ -111,27 +119,59 @@ class Ticket12RealSglangHookIntegrationTest(unittest.TestCase):
         install_package("sglang.srt", python_root / "sglang/srt")
         install_package("sglang.srt.models", python_root / "sglang/srt/models")
         install_package("sglang.srt.plugins", python_root / "sglang/srt/plugins")
-        ops = load_module(
-            "sglang.srt.models.step3p5_ops",
-            helper_path,
+        install_package(
+            "sglang.srt.distributed",
+            python_root / "sglang/srt/distributed",
         )
         hooks = load_module(
             "sglang.srt.plugins.hook_registry",
             registry_path,
         )
 
+        parallel_state = types.ModuleType(
+            "sglang.srt.distributed.parallel_state"
+        )
+        parallel_state.get_tp_group = lambda: types.SimpleNamespace(
+            rank_in_group=0,
+            world_size=8,
+        )
+        sys.modules[parallel_state.__name__] = parallel_state
+
         step3p5 = types.ModuleType("sglang.srt.models.step3p5")
-        step3p5.step_swiglu_with_limit = ops.step_swiglu_with_limit
+
+        class Step3p5MLP:
+            def __init__(self, *, limit, prefix):
+                self.limit = limit
+                self.gate_up_proj = types.SimpleNamespace(
+                    prefix=f"{prefix}.gate_up_proj"
+                )
+
+            def forward(self, x):
+                return x * 2
 
         class Step3p5ForCausalLM:
+            def __init__(self):
+                self.limited = Step3p5MLP(
+                    limit=16.0,
+                    prefix="model.layers.43.share_expert",
+                )
+                self.plain = Step3p5MLP(
+                    limit=None,
+                    prefix="model.layers.42.share_expert",
+                )
+
             def forward(self, input_ids, positions, forward_batch):
                 del positions, forward_batch
-                return step3p5.step_swiglu_with_limit(input_ids, 16.0)
+                return (
+                    self.limited.forward(input_ids),
+                    self.plain.forward(input_ids),
+                )
 
+        step3p5.Step3p5MLP = Step3p5MLP
         step3p5.Step3p5ForCausalLM = Step3p5ForCausalLM
         sys.modules[step3p5.__name__] = step3p5
-        original_helper = ops.step_swiglu_with_limit
-        original_forward = Step3p5ForCausalLM.forward
+        original_mlp_forward = Step3p5MLP.forward
+        original_model_forward = Step3p5ForCausalLM.forward
 
         try:
             with tempfile.TemporaryDirectory() as temp_dir:
@@ -153,27 +193,23 @@ class Ticket12RealSglangHookIntegrationTest(unittest.TestCase):
                     hooks.HookRegistry._patched,
                     {
                         "sglang.srt.models.step3p5.Step3p5ForCausalLM.forward",
-                        "sglang.srt.models.step3p5_ops.step_swiglu_with_limit",
+                        "sglang.srt.models.step3p5.Step3p5MLP.forward",
                     },
                 )
-                self.assertIsNot(ops.step_swiglu_with_limit, original_helper)
-                self.assertIs(
-                    step3p5.step_swiglu_with_limit,
-                    ops.step_swiglu_with_limit,
-                )
+                self.assertIsNot(Step3p5MLP.forward, original_mlp_forward)
 
                 forward_batch = types.SimpleNamespace(
                     forward_mode=types.SimpleNamespace(name="DECODE")
                 )
                 model = Step3p5ForCausalLM()
                 for rows in (1, 2, 4):
-                    gate_up = torch.arange(
+                    x = torch.arange(
                         rows * 8,
                         dtype=torch.bfloat16,
                     ).reshape(rows, 8)
-                    actual = model.forward(gate_up, None, forward_batch)
-                    expected = original_helper(gate_up, 16.0)
-                    torch.testing.assert_close(actual, expected)
+                    limited, plain = model.forward(x, None, forward_batch)
+                    torch.testing.assert_close(limited, x * 2)
+                    torch.testing.assert_close(plain, x * 2)
 
                 model.forward(
                     torch.full((2, 8), 2.0, dtype=torch.bfloat16),
@@ -186,23 +222,28 @@ class Ticket12RealSglangHookIntegrationTest(unittest.TestCase):
                     forward_batch,
                 )
 
-                state = json.loads(
-                    (run_dir / "capture-state.json").read_text(encoding="utf-8")
-                )
-                self.assertEqual(state["saved_sample_count"], 3)
+                state_path = run_dir / "capture-state.json"
+                state = json.loads(state_path.read_text(encoding="utf-8"))
+                self.assertEqual(state["saved_shape_count"], 3)
                 self.assertEqual(state["repeated_call_count"], 1)
                 self.assertEqual(state["skipped_call_count"], 1)
-                self.assertEqual(len(state["skipped_signatures"]), 1)
                 self.assertTrue(
                     all(
                         sample["signature"]["execution_phase"] == "decode"
                         for sample in state["samples"]
                     )
                 )
+                self.assertTrue(
+                    all(
+                        sample["signature"]["model_instance_path"]
+                        == "model.layers.43.share_expert"
+                        for sample in state["samples"]
+                    )
+                )
+                self.assertNotIn("model.layers.42", repr(state))
         finally:
-            ops.step_swiglu_with_limit = original_helper
-            step3p5.step_swiglu_with_limit = original_helper
-            Step3p5ForCausalLM.forward = original_forward
+            Step3p5MLP.forward = original_mlp_forward
+            Step3p5ForCausalLM.forward = original_model_forward
             hooks.HookRegistry.reset()
             plugin._reset_for_tests()
             for name in reversed(MODULE_NAMES):

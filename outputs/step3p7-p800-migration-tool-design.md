@@ -1,9 +1,10 @@
 # Step-3.7-Flash 到 KLX P800 的 Spec 驱动算子迁移工具方案
 
-> 文档状态：方案设计，不是实现说明或实机通过报告
+> 文档状态：revision 4 方案设计；本地实现与测试不等于 CUDA/P800 实机通过
 > 设计日期：2026-07-13
 > 运行模式纠正：2026-07-17，target-only eager，不启用 EAGLE 或其他投机解码
-> 源码依据：SGLang `6274831d9fef7bba04eb59302caac24563a974c9`、SGLang-Kunlun `4731f8051b7d0bf2f03cf88e237e7e5fba80a5a9`
+> 算子边界纠正：2026-07-17，直接使用原始 `Step3p5MLP.forward`，TP8 模型中验证 rank 0，不新增模型函数
+> 源码依据：SGLang `49e384ce9d304648e9959666ecb8ce8cd98d0deb`、SGLang-Kunlun `546ad8c682392922792bbbfe53a8bf575545f118`
 > 背景材料：[自动化适配-推理](https://ku.baidu-int.com/knowledge/HFVrC7hq1Q/vMri-fRViV/G4ag4GvOr4/hro1tO5i3e6uj0)
 
 ## 1. 结论
@@ -27,8 +28,8 @@
 - 固定 SGLang、SGLang-Kunlun、checkpoint 配置和 Demo 输入模式。
 - 完整扫描实际 target 模型路径，不只扫描最后要修的一个算子。
 - 记录扫描到的 CUDA/Kunlun 实现关系及所有缺口。
-- 在唯一一次 CUDA Capture Session 中，为需要采集的缺口取得可离线重放的 Golden Sample。
-- 选择一个无权重、边界清楚、P800 baseline 真实失败的 Semantic Operator。
+- 在唯一一次 CUDA Capture Session 中，为需要采集的缺口取得可在已加载模型中重放的 Golden Sample。
+- 选择原始模型边界清楚、权重可由同一 checkpoint 提供、P800 baseline 真实失败的 Semantic Operator。
 - 对该算子最多覆盖三个实际采到的 shape，且全部通过固定精度门槛。
 - 自动修复最多五轮；最终补丁、命令、日志和逐样本结果可追溯。
 
@@ -64,9 +65,9 @@
 | Working State | Spec 中 Agent 可更新的部分；记录当前阶段、活动算子、Run 指针和唯一下一动作 |
 | Migration Agent | 唯一做判断的 Agent，负责读 Spec、分析源码、生成修复和推进状态 |
 | Deterministic Tool | 四个职责单一的脚本；做采集、重放比较、交接校验或工作区保护，不做语义决策 |
-| Semantic Operator | 可以单独采集输入输出、离线重放，并在 SGLang 调用点独立替换的最小语义单元 |
+| Semantic Operator | 可以单独采集输入输出、在所需模型状态中重放，并在 SGLang 调用点 Hook 的最小语义单元 |
 | Operator Gap | CUDA 行为明确，但 P800 上缺失、无法执行或不能满足相同行为的 Semantic Operator |
-| Golden Sample | 一次真实 CUDA 算子调用的边界输入、期望输出、必要参数和重放元数据 |
+| Golden Sample | 一次真实 CUDA 算子调用的边界输入、期望输出、必要参数和重放元数据；本 Demo 固定为 TP8 rank 0 |
 | Run | 一次扫描、采集、校验、baseline 或修复尝试的不可变证据目录 |
 | Repair Boundary | 只允许一个 Semantic Operator 的 Python、P800 Torch 或已有 xspeedgate/kunlun_ops 实现及其测试 |
 
@@ -85,7 +86,7 @@ flowchart LR
     R --> A
 
     subgraph CUDA["CUDA 机器：只访问一次"]
-      CG["采集 Golden"] --> SR["新进程 self-replay"]
+      CG["采集 rank 0 Golden"] --> SR["已加载 TP8 模型内 self-replay"]
       SR --> HB["生成并校验交接包"]
     end
 
@@ -175,7 +176,7 @@ Contract 与 Working State 使用明确的注释边界。人工修改 Contract �
 {
   "schema": "migration-spec/v0",
   "spec_id": "step3p7-flash-p800-demo",
-  "contract_revision": 3,
+  "contract_revision": 4,
   "model": "Step-3.7-Flash",
   "source": {
     "sglang_revision": "<approved revision>",
@@ -189,6 +190,11 @@ Contract 与 Working State 使用明确的注释边界。人工修改 Contract �
     "target_entry": "Step3p7ForConditionalGeneration.forward",
     "draft_entry": null
   },
+  "operator_boundary": {
+    "id": "Step3p5MLP.forward",
+    "activation_guard": "self.limit is not None",
+    "tp_rank": 0
+  },
   "runtime": {
     "tensor_parallel_size": 8,
     "dtype": "bfloat16",
@@ -200,7 +206,7 @@ Contract 与 Working State 使用明确的注释边界。人工修改 Contract �
   },
   "demo_input_mode": "<approved mode>",
   "limits": {
-    "max_samples_per_operator": 3,
+    "max_shapes_per_operator": 3,
     "max_repair_attempts": 5
   },
   "precision_gate": {
@@ -228,7 +234,7 @@ Contract 与 Working State 使用明确的注释边界。人工修改 Contract �
 {
   "spec_binding": {
     "spec_id": "step3p7-flash-p800-demo",
-    "contract_revision": 3,
+    "contract_revision": 4,
     "contract_data_sha256": "<sha256>"
   }
 }
@@ -241,7 +247,7 @@ Contract 与 Working State 使用明确的注释边界。人工修改 Contract �
 - 目标、Demo Closure 和非目标。
 - Skill 调用参数中的模型名，以及 SGLang/SGLang-Kunlun revision、checkpoint、配置摘要、TP8、BF16、target-only eager 和输入模式。CUDA 与 P800 使用同一组启动参数：不传量化或投机解码参数，不额外传 MTP 开关，不显式传 attention backend；运行后解析出的两端实际 backend 只作为 Run 证据保存。
 - eager 的含义是 decode 与 prefill CUDA Graph backend 都为 `disabled`。不使用 `--debug-cuda-graph` 或 `cuda_graph_tc_compiler=eager` 代替，因为它们仍属于 CUDA Graph 路径。
-- 只允许一个 CUDA Capture Session；每个算子最多三个样本。
+- 只允许一个 CUDA Capture Session；`Step3p5MLP.forward` 只验证 TP8 rank 0，最多三个 shape。
 - `max_repair_attempts = 5`，baseline 不计数，通过轮计数。
 - Precision Gate 固定使用 `torch.testing.assert_close`、`atol=0.01`、`rtol=0.02`。
 - Repair Boundary 和人工跨机器复制边界。
@@ -301,7 +307,7 @@ Contract 与 Working State 使用明确的注释边界。人工修改 Contract �
 
 | 当前状态 | 条件 | 下一状态或动作 |
 |---|---|---|
-| `ACTIVE / SCAN` | target、draft 均扫描完成，无未决边界，存在采集候选 | `ACTIVE / CUDA_CAPTURE` |
+| `ACTIVE / SCAN` | target-only eager 扫描完成，无未决边界，存在采集候选 | `ACTIVE / CUDA_CAPTURE` |
 | `ACTIVE / SCAN` | 调用关系或边界无法可靠确定 | `NEEDS_HUMAN / SCAN` |
 | `ACTIVE / SCAN` | 固定范围内没有可用于 Demo 的候选 | `BLOCKED / SCAN` |
 | `ACTIVE / CUDA_CAPTURE` | 唯一 Session、self-replay 和 bundle CUDA 端校验均通过 | `WAITING / HANDOFF` |
@@ -323,8 +329,8 @@ Contract 与 Working State 使用明确的注释边界。人工修改 Contract �
 |---|---|---|---|
 | 0 | 源码侧 | 创建并人工批准 Contract | `ACTIVE / SCAN` |
 | 1 | 源码侧 | 扫描 target-only eager 路径，形成完整 Scan Run 和 gap queue | `ACTIVE / CUDA_CAPTURE` |
-| 2 | CUDA | 唯一 Session 按签名采集，每算子最多三个样本 | 仍为 `ACTIVE / CUDA_CAPTURE` |
-| 3 | CUDA | 新进程 self-replay 全部 Golden Samples | Golden Run `SEALED` |
+| 2 | CUDA | TP8 模型中直接 Hook 原始 `Step3p5MLP.forward`，rank 0 最多采集三个 shape | 仍为 `ACTIVE / CUDA_CAPTURE` |
+| 3 | CUDA | 已加载同一 checkpoint 的 TP8 模型在 rank 0 self-replay 全部 Golden Samples | Golden Run `SEALED` |
 | 4 | CUDA | 用下一状态 Spec 构建并校验 bundle，原子进入交接点 | `WAITING / HANDOFF` |
 | 5 | 人工 | 把 bundle 从 CUDA 机器复制到 P800 | 仍为 `WAITING / HANDOFF` |
 | 6 | P800 | 校验 manifest，初始化运行工作区 | `ACTIVE / P800_REPAIR` |
@@ -350,7 +356,7 @@ Step3p7ForConditionalGeneration.forward
 
 源码中，Step-3.7 把 `Step3p5ForCausalLM` 作为语言模型，并通过多模态通用流程进入它。Contract 不启用投机解码，所以扫描到 target 的 Attention、MLP/MoE 和 logits 边界后停止，不进入 `Step3p5MTP`。
 
-Worker、Runner、采样树、批次调度和 CUDA Graph 管理只用于证明怎样进入模型，不进入算子枚举。扫描进入模型后，沿当前配置和输入实际激活的 `forward` 分支下钻；到达具有明确输入输出、可离线重放且有独立替换点的 Semantic Operator 后停止继续拆分。
+Worker、Runner、采样树、批次调度和 CUDA Graph 管理只用于证明怎样进入模型，不进入算子枚举。扫描进入模型后，沿当前配置和输入实际激活的 `forward` 分支下钻；到达具有明确输入输出、可在所需模型状态中重放且可被 Hook 的 Semantic Operator 后停止继续拆分。
 
 ### 9.2 为什么不实现 `scan.py`
 
@@ -423,29 +429,29 @@ runs/scan-001/
 
 签名不包含 Tensor 数值和输出。同一算子在唯一 Session 中：已出现签名只增加重复计数；前三个新签名保存 Tensor；第四个及以后只记签名和未保留计数。若只观察到一个或两个真实形态，就只验收这些样本，不能用随机 shape 补满三个。
 
-### 10.4 Golden Run 与 self-replay
+### 10.4 Golden Run 与模型内 self-replay
 
 ```text
 runs/golden-001/
 ├── result.json
 ├── capture.log
+├── capture-state.json
 ├── samples/
-│   └── <operator-id>/<sample-id>/
-│       ├── metadata.json
-│       ├── inputs.<tensor-format>
-│       └── expected-outputs.<tensor-format>
+│   ├── <signature-id-1>.pt
+│   ├── <signature-id-2>.pt
+│   └── <signature-id-3>.pt
 └── self-replay/
     ├── result.json
     └── replay.log
 ```
 
-Capture 结束后，必须在仍可使用 CUDA 的同一次 Session 内启动全新进程，从落盘字节重建输入并执行算子。所有保留样本通过 Contract Precision Gate 后，Golden Run 才能标记为 `SEALED`。这样可以提前发现“采到了 Tensor，但换进程读不回来”或“调用上下文不完整”的问题。
+每份样本只包含 rank 0 的 `x`、CUDA `output`、`limit`、模型层路径和布局元数据。权重不进入样本，由同一 checkpoint 在当前 rank 加载。Capture 结束后，必须在仍可使用 CUDA 的同一次 Session 内，让已加载同一 checkpoint 的 TP8 模型在相同 `Step3p5MLP` 实例上重放 `x`。所有保留样本通过 Contract Precision Gate 后，Golden Run 才能标记为 `SEALED`。不能把 MLP 退化成无权重函数调用。
 
 当前源码在 active CUDA Graph capture 时会跳过 Tensor dump，因此 Contract 明确把 decode 与 prefill CUDA Graph 都设为 `disabled`，并选择允许安全落盘的函数边界。不能在 active graph capture 中强行复制 Tensor。
 
-### 10.5 Tensor 序列化暂不写死
+### 10.5 Tensor 序列化
 
-逻辑数据和校验要求已经固定，但 `torch.save`、safetensors、NumPy 或其他底层格式暂不在方案阶段决定。实现前必须用 CUDA 与 P800 的实际 Torch 环境验证：两端都能读写；dtype、shape、必要 stride/layout 能按约定重建；异常文件能被拒绝；版本信息可记录。验证后再把选定格式作为实现约束固化，不能仅因 SGLang 调试代码当前使用 `torch.save` 就直接假设跨设备兼容。
+当前最小实现使用 `torch.save` 保存 CPU BF16 `x/output`，读取时使用 `torch.load(..., weights_only=True)`。格式仍必须在真实 CUDA 与 P800 修改版 Torch 环境中完成一次人工复制后的 round-trip：两端都能读写，dtype、shape 和必要布局能按约定重建，异常文件能被拒绝，并记录两端 Torch 版本。本地测试通过不能替代这项实机证据。
 
 ## 11. 阶段三：Handoff Bundle
 
@@ -516,8 +522,8 @@ P800 校验 bundle 后，对候选算子的全部 Golden Samples 依次重放：
 | 组件 | 负责 | 不负责 |
 |---|---|---|
 | Migration Agent | 读 Spec、扫描源码、判断边界与缺口、选择候选、形成单一修复假设、生成补丁、更新 Working State | 修改 Contract、放宽门槛、自动跨机器复制 |
-| `capture_golden.py` | CUDA 函数边界打桩、调用签名去重、保存最多三个样本、记录采集环境 | 判断哪个算子是真缺口、决定第二次 Session |
-| `replay_compare.py` | CUDA 新进程 self-replay；P800 baseline/repair replay；固定精度比较 | 选择容差、选择下一轮假设、更新 Spec |
+| `capture_golden.py` | 直接 Hook 原始 `Step3p5MLP.forward`、rank 0 过滤、调用签名去重、保存最多三个 shape、记录采集环境 | 修改 SGLang 模型源码、判断哪个算子是真缺口、决定第二次 Session |
+| `replay_compare.py` | 准备和收口已加载 TP8 模型内的 rank 0 self-replay；P800 baseline/repair replay；固定精度比较 | 选择容差、选择下一轮假设、更新 Spec |
 | `handoff_bundle.py` | 构建 manifest；CUDA/P800 两端校验文件集合、大小与 SHA-256 | 上传、下载、SSH、凭证管理 |
 | `workspace_guard.py` | 校验固定干净基线、保存完整 patch、失败恢复、验证通过补丁是唯一修改 | 建分支、commit、push、清理未知用户修改 |
 
@@ -610,61 +616,57 @@ P800 actual output 只在本次 replay 进程内存中使用，不额外保存 T
 
 ## 15. 首选候选：特殊 SwiGLU
 
-### 15.1 当前源码事实
+### 15.1 原始算子边界
 
-当前固定源码中，带 `limit` 的表达式内联在 `Step3p5MLP.forward`：
-
-```python
-gate_up, _ = self.gate_up_proj(x)
-gate, up = gate_up.chunk(2, dim=-1)
-gate = F.silu(gate)
-gate = gate.clamp(min=None, max=self.limit)
-up = up.clamp(min=-self.limit, max=self.limit)
-output, _ = self.down_proj(gate * up)
-```
-
-因此无权重边界只能是：输入 `gate_up: [..., 2D]` 和标量 `limit`，输出 `gate * up: [..., D]`。它不包含 `gate_up_proj`、`down_proj`、权重或内部 `gate/up` Tensor。
-
-### 15.2 helper seam 是前置重构，不是修复
-
-当前表达式没有独立函数入口。Demo 实现前应由人工批准一次纯 Python 重构：把上述 `chunk + silu + clamp + mul` 原样抽成模块级普通 helper，并让 CUDA 与 P800 使用同一份已经包含该 helper 的固定 SGLang revision。
-
-重要边界：
-
-- helper 抽取不改变语义，不算 Operator Gap，也不消耗 repair attempt；
-- Contract 固定的 `sglang_revision` 必须是抽取之后的新 revision，不能继续填写本文用于分析的旧 commit；
-- P800 修复只实现 Kunlun replacement，不把 helper 抽取混入候选 patch；
-- SGLang 的 HookRegistry 已支持 fully-qualified 普通函数 `REPLACE`，也会传播已导入的旧绑定，因此该 helper 可以同时成为打桩和替换入口。
-
-以下仅表示目标接口形状，不是已实现代码：
+当前固定源码直接使用模型原始 `Step3p5MLP.forward`：
 
 ```python
-def step_swiglu_with_limit(gate_up, limit):
-    gate, up = gate_up.chunk(2, dim=-1)
-    gate = F.silu(gate).clamp(max=limit)
-    up = up.clamp(min=-limit, max=limit)
-    return gate * up
+def forward(self, x):
+    if self.limit is not None:
+        gate_up, _ = self.gate_up_proj(x)
+        gate, up = gate_up.chunk(2, dim=-1)
+        gate = F.silu(gate)
+        gate = gate.clamp(min=None, max=self.limit)
+        up = up.clamp(min=-self.limit, max=self.limit)
+        output, _ = self.down_proj(gate * up)
+    ...
+    return output
 ```
+
+边界输入是 `x`，边界输出是 `output`。它覆盖 `gate_up_proj`、特殊 SwiGLU 和 `down_proj`，因此重放依赖同一 checkpoint、TP8 和当前 rank 的权重分片。Golden Sample 不保存权重，也不保存 `gate_up`、`gate`、`up` 等内部 Tensor。
+
+扫描器可以继续深入这个方法判断 CUDA/Kunlun 的差异，但最终缺口归到 `Step3p5MLP.forward`。不得为了打桩修改 SGLang 源码，不得新增模型算子函数，也不得把内部表达式升级成独立算子。
+
+### 15.2 为什么最小 Demo 只保存 rank 0
+
+特殊 SwiGLU 位于 MoE 层的 `share_expert`，创建时使用 `reduce_results=False`。因此 `Step3p5MLP.forward` 返回当前 TP rank 的局部结果，后续才与 MoE 输出相加并进行 all-reduce。该边界包含 TP 分片权重，但在这个配置下不包含必须由八个 rank 同时完成的归约。
+
+为保持最小工具，Contract 固定 `operator_boundary.tp_rank=0`：
+
+- CUDA 与 P800 都加载相同 checkpoint 的 TP8 模型；
+- 只有 rank 0 保存和重放，其他 rank 不额外落盘或比较；
+- 每种 shape 保存一份 `x` 和一份 rank 0 CUDA `output`；
+- 这个 Demo 证明原始算子边界的自动化流程，不声称八个权重分片全部通过。
 
 ### 15.3 成为 Demo 对象的三个条件
 
 特殊 SwiGLU 只有同时满足以下事实才有资格进入修复：
 
-1. 固定 checkpoint 的加载后配置证明，实际 target 或 draft 路径对应层的 `swiglu_limits_shared[layer_id]` 存在且非零。
-2. 唯一 CUDA Session 已在 helper 边界采到一至三个真实 Golden Samples。
-3. P800 baseline 对同一批样本至少有一个执行或精度失败。
+1. 固定 checkpoint 的加载后配置证明，target 路径对应 `Step3p5MLP` 实例的 `self.limit` 非空。
+2. 唯一 CUDA Session 已在原始 `Step3p5MLP.forward` 边界采到 rank 0 的一至三个真实 shape。
+3. P800 rank 0 baseline 在已加载同一 checkpoint 的对应实例上至少有一个执行或精度失败。
 
-若配置未激活，它不属于本次实际路径；若 baseline 全部通过，它不是 correctness gap。两种情况都改选同一 Session 已采集的下一个无权重候选，不重新访问 CUDA，也不伪造失败。
+若配置未激活，它不属于本次实际路径；若 baseline 全部通过，它不是 correctness gap。此时只能改选同一 Session 已采集的其他候选；没有其他候选时应如实记录“没有真实 gap”并停止，不重新访问 CUDA，也不伪造失败。
 
 ### 15.4 三个 shape 的纸面表示
 
-| Sample | 输入 | CUDA 期望输出 | 必要标量 |
-|---|---|---|---|
-| `sample-001` | `gate_up: [T1, 2D]` | `[T1, D]` | `limit=L1` |
-| `sample-002` | `gate_up: [T2, 2D]` | `[T2, D]` | `limit=L2` |
-| `sample-003` | `gate_up: [T3, 2D]` | `[T3, D]` | `limit=L3` |
+| Sample | 模型实例 | rank | 输入 | CUDA 期望输出 | 必要标量 |
+|---|---|---|---|---|---|
+| `sample-001` | `<layer-path>` | `0/8` | `x: [T1, H]` | `output: [T1, H]` | `limit=L1` |
+| `sample-002` | `<layer-path>` | `0/8` | `x: [T2, H]` | `output: [T2, H]` | `limit=L2` |
+| `sample-003` | `<layer-path>` | `0/8` | `x: [T3, H]` | `output: [T3, H]` | `limit=L3` |
 
-`T1/T2/T3/D/L1/L2/L3` 都是符号，不是模型事实。真实值必须来自 Capture Session 的 `metadata.json`。
+`T1/T2/T3/H/L1/L2/L3` 都是符号，不是模型事实。真实值和模型层路径必须来自 Capture Session。
 
 ## 16. 最小产物契约
 
@@ -703,10 +705,10 @@ runs/repair-003/
 只有以下条件全部成立，Working State 才能写为 `PASS / DONE`：
 
 1. Contract 已由人批准，所有必填值已填写，四个脚本使用的 Contract Data 绑定一致。
-2. 固定 checkpoint 与输入模式下，target 和 draft 实际模型路径均扫描完成；每个结论都有源码或运行证据。
+2. 固定 checkpoint 与输入模式下，target-only eager 实际模型路径扫描完成；每个结论都有源码或运行证据。
 3. 所有发现的 Operator Gap 都进入 gap queue，所有 `CAPTURE_REQUIRED` 项均纳入唯一 CUDA Session；任何一项无法按 Contract 采集时都必须停止，不能静默遗漏后继续写 PASS。
-4. 唯一 CUDA Session 为每个算子最多保留三个不同真实调用形态，输入和 CUDA 输出均已保存。
-5. Golden Run 在新 CUDA 进程中全部 self-replay 通过，bundle 在 CUDA 与 P800 两端校验通过。
+4. 唯一 CUDA Session 为 `Step3p5MLP.forward` 最多保留三个不同真实 shape，rank 0 的 `x` 和 CUDA `output` 均已保存，权重与内部 Tensor 未进入样本。
+5. Golden Run 在已加载同一 checkpoint 的 CUDA TP8 模型 rank 0 上全部 self-replay 通过，bundle 在 CUDA 与 P800 两端校验通过。
 6. 被选作 Demo 的算子在 P800 baseline 中真实失败；没有用“缺少专用优化”代替失败证据。
 7. 修复没有越过 Repair Boundary；baseline 不计数，修复不超过五轮，通过轮计数。
 8. 该算子的所有已采集样本均通过结构、shape、dtype、有限值和固定 `torch.testing.assert_close` 门槛。
@@ -720,12 +722,13 @@ runs/repair-003/
 | 项目 | 当前状态 | 方案处理 |
 |---|---|---|
 | Tensor 序列化格式 | 未决定 | 实现前在真实 CUDA/P800 做一次跨端读写验证，再固化格式 |
-| 最终 SGLang revision | 当前分析 commit 尚无 helper | 先完成并评审 helper 纯重构，再把新 revision 写入 Contract |
+| 最终 SGLang revision | revision 4 已固定原始 CUDA `49e384ce...` 与 Kunlun `546ad8c68...` | 两端都使用原始 `Step3p5MLP.forward`，不得增加模型函数 |
 | 实际 checkpoint 是否激活特殊 SwiGLU | 未取得加载后配置证据 | SCAN 阶段读取并保存 config 摘要；未激活则换候选 |
 | 特殊 SwiGLU 是否在 P800 真失败 | 未验证 | 只由 P800 baseline 决定；全通过则不能进入修复 |
 | `torch.testing` 在 P800 可用 | 用户已实机确认 | 直接使用；Run 仍记录实际 Torch 版本和比较参数 |
 | CUDA Graph 未按 Contract 关闭 | 现有 SGLang dump 会跳过 | 启动前校验 decode/prefill 都是 `disabled`；不能在 graph capture 内强行采集 |
-| helper 的 plugin 替换可达性 | CUDA 与 Kunlun 固定 revision 均已实跑 replacement smoke | revision 变化后重跑聚焦测试，不能沿用旧结果 |
+| 原始 MLP Hook 可达性 | 本地已用固定源码的真实 `HookRegistry` 验证 | N 卡 preflight 重跑同一聚焦测试，正式证据仍需实机 |
+| rank 0 代表性范围 | 不覆盖另外七个权重分片 | 当前 Demo 明确只证明 rank 0；需要完整 TP8 时另行扩展 Contract |
 | 一次 Session 只取前三个签名 | 可能漏掉后出现的形态 | 这是最小 Demo 的已知限制；记录未保留签名数，后续再扩展 |
 | 一次 CUDA Session 失败 | Contract 不允许第二次 | 保存失败证据并 `BLOCKED`，由人决定是否修订 Contract |
 | Golden 数据体积或敏感性 | 取决于真实 Tensor | 只采边界输入/输出，禁止 prompt、KV、凭证；交接前检查清单 |
@@ -736,7 +739,7 @@ runs/repair-003/
 ### 19.1 前置确认
 
 1. 获取真实 Step-3.7-Flash BF16 checkpoint 标识、加载后 config 和 Demo 输入模式；CUDA/P800 使用同一组启动参数，不显式指定 attention backend，并在各自启动后把实际解析结果写入运行证据。
-2. 人工批准特殊 SwiGLU helper 纯重构，形成 CUDA/P800 共用的新固定 SGLang revision。
+2. 固定原始 CUDA/Kunlun revision，并确认 `Step3p5MLP.forward` 是两端共同的 Hook 边界。
 3. 确定 SGLang-Kunlun 固定 revision；Precision Gate 使用已批准的 `atol=0.01`、`rtol=0.02`。
 4. 在 CUDA/P800 验证候选 Tensor 序列化格式，记录 Torch 版本和 round-trip 结果。
 
@@ -750,9 +753,9 @@ runs/repair-003/
 
 ### 19.3 实现 CUDA 单次采集链
 
-实现 `capture_golden.py`、签名去重、最多三个样本、全新进程 self-replay；再实现 `handoff_bundle.py` 的 build/verify。
+实现 `capture_golden.py` 对原始 MLP 的 Hook、rank 0 过滤、签名去重和最多三个 shape；实现已加载 TP8 模型内的 rank 0 self-replay；再实现 `handoff_bundle.py` 的 build/verify。
 
-完成标准：一个无权重测试 helper 能在 CUDA 采集、落盘、新进程重放，并经过模拟复制后的 manifest 校验。
+完成标准：原始 `Step3p5MLP.forward` 能在 TP8 CUDA 模型 rank 0 采集、落盘并使用 checkpoint 权重重放，且经过模拟复制后的 manifest 校验。
 
 ### 19.4 实现 P800 比较与工作区保护
 
@@ -770,7 +773,7 @@ runs/repair-003/
 
 只有最小 Demo 在真实环境稳定后，才按顺序扩展：
 
-1. 从一个缺口扩到 gap queue 中其他无权重算子。
+1. 从一个缺口扩到 gap queue 中其他能够由同一 checkpoint 重建状态的算子。
 2. 根据真实覆盖需求放宽每算子三个样本限制，而不是直接采全部调用。
 3. 为确实需要权重或状态的算子单独设计安全、可重放的数据契约。
 4. 增加 layer/module 对齐，覆盖 residual、position ids、mask、KV cache 和 dtype cast。
@@ -781,7 +784,7 @@ runs/repair-003/
 
 ## 21. 源码依据
 
-CUDA 路径行号对应 SGLang `6274831d9fef7bba04eb59302caac24563a974c9`；Kunlun 路径行号对应 SGLang-Kunlun `4731f8051b7d0bf2f03cf88e237e7e5fba80a5a9`。这些证据说明当前设计为什么选择该扫描根、边界和工具行为；它们不证明真实 P800 已经失败或修复成功。
+CUDA 路径行号对应原始 SGLang `49e384ce9d304648e9959666ecb8ce8cd98d0deb`；Kunlun 路径行号对应原始 SGLang-Kunlun `546ad8c682392922792bbbfe53a8bf575545f118`。这些证据说明当前设计为什么选择该扫描根、边界和工具行为；它们不证明真实 P800 已经失败或修复成功。
 
 | 设计结论 | 代码证据 |
 |---|---|
@@ -790,9 +793,9 @@ CUDA 路径行号对应 SGLang `6274831d9fef7bba04eb59302caac24563a974c9`；Kunl
 | CausalLM 进入主体模型，主体逐层调用 DecoderLayer，层内调用 Attention 与 MLP/MoE | `python/sglang/srt/models/step3p5.py:855-881,719-773,594-658` |
 | 不传 speculative algorithm 时值为 `None`；EAGLE 属于投机解码算法而不是 eager | `python/sglang/srt/server_args.py:1446-1449` |
 | decode 与 prefill 都支持把 CUDA Graph backend 设为 `disabled` | `python/sglang/srt/server_args.py:1925-1937,1959-1966` |
-| 特殊 SwiGLU 的现有内联表达式和无权重边界 | `python/sglang/srt/models/step3p5.py:95-107` |
+| 特殊 SwiGLU 的原始 MLP 边界 | `python/sglang/srt/models/step3p5.py:58-107`；shared expert 的 `reduce_results=False` 见 `549-558` |
 | 特殊分支由 `swiglu_limits_shared[layer_id]` 是否非零激活 | `python/sglang/srt/models/step3p5.py:498-505` |
-| HookRegistry 接受 fully-qualified target 与 `REPLACE`，并传播已导入绑定 | `python/sglang/srt/plugins/hook_registry.py:83-104,182-205,268-300` |
+| HookRegistry 接受 fully-qualified class method target 与 `AROUND` Hook | `python/sglang/srt/plugins/hook_registry.py:83-104,182-205,268-300` |
 | SGLang-Kunlun 已有普通函数 replacement 示例 | `sglang-kunlun/sglang_kunlun/hooks/utils/common.py:54-58` |
 | SGLang-Kunlun 已替换普通 SwiGLU JIT 符号为 `kunlun_ops.swiglu` | `sglang-kunlun/sglang_kunlun/kernels/kernel_ops.py:329-358` |
 | 通用 SGLang dump 会递归保留 Tensor 与 list/tuple/dict/非 Tensor 结构 | `python/sglang/kernel_api_logging.py:244-276` |
@@ -812,9 +815,9 @@ CUDA 路径行号对应 SGLang `6274831d9fef7bba04eb59302caac24563a974c9`；Kunl
 - 运行状态：一个 `migration-spec.md`；细节证据放 `runs/`。
 - 固定约束接口：Contract 内专用 JSON 区块；结果绑定 `spec_id + contract_revision + Contract Data SHA-256`。
 - 脚本：四个，不增加 `scan.py` 或顶层编排 CLI。
-- CUDA：一个 Capture Session；每算子最多三个去重样本；保存边界输入和 CUDA 输出，不保存内部 Tensor。
+- CUDA：一个 Capture Session；在 TP8 模型 rank 0 为原始 MLP 最多保存三个去重 shape；保存 `x` 和 CUDA `output`，不保存权重或内部 Tensor。
 - 交接：工具生成/校验，人工复制。
 - P800：baseline 先证明真实 gap；最多五轮；一轮一个假设；失败回基线。
 - 比较：直接使用用户已验证可用的 `torch.testing.assert_close`；容差不可覆盖。
-- 首选算子：特殊 SwiGLU，但必须先有人工批准的 helper seam、实际配置激活和 P800 baseline 失败。
+- 首选算子：激活特殊 SwiGLU 分支的原始 `Step3p5MLP.forward`；必须有实际配置激活和 P800 rank 0 baseline 失败，不能新增模型算子函数。
 - 停止：需要新 C++/Kernel、五轮耗尽、无真实 gap、未知工作区修改或证据不足时，不扩大范围，按事实进入 `BLOCKED` 或 `NEEDS_HUMAN`。

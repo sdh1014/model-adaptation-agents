@@ -54,7 +54,7 @@ The single CUDA-side execution that gathers all required Golden Samples, retaini
 _Avoid_: One sample total, repeated CUDA visits
 
 **Golden Sample**:
-A self-replay-verified record of one Semantic Operator invocation, including the exact inputs, expected outputs, and execution context required for offline P800 replay.
+A self-replay-verified record of one Semantic Operator invocation, including the exact inputs, expected outputs, and execution context required to replay it inside the necessary loaded model state.
 _Avoid_: Output-only snapshot, arbitrary hidden-state dump
 
 **Precision Gate**:

@@ -20,11 +20,11 @@ json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False).enco
 {
   "schema": "migration-spec/v0",
   "spec_id": "step3p7-flash-p800-demo",
-  "contract_revision": 3,
+  "contract_revision": 4,
   "model": "Step-3.7-Flash",
   "source": {
-    "sglang_revision": "6274831d9fef7bba04eb59302caac24563a974c9",
-    "sglang_kunlun_revision": "4731f8051b7d0bf2f03cf88e237e7e5fba80a5a9"
+    "sglang_revision": "49e384ce9d304648e9959666ecb8ce8cd98d0deb",
+    "sglang_kunlun_revision": "546ad8c682392922792bbbfe53a8bf575545f118"
   },
   "checkpoint": {
     "id": "stepfun-ai/Step-3.7-Flash@5f6244077ac62e04eec3f320501ff8c2b293373a",
@@ -33,6 +33,11 @@ json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False).enco
   "model_path": {
     "target_entry": "Step3p7ForConditionalGeneration.forward",
     "draft_entry": null
+  },
+  "operator_boundary": {
+    "id": "Step3p5MLP.forward",
+    "activation_guard": "self.limit is not None",
+    "tp_rank": 0
   },
   "runtime": {
     "tensor_parallel_size": 8,
@@ -45,7 +50,7 @@ json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False).enco
   },
   "demo_input_mode": "text-only",
   "limits": {
-    "max_samples_per_operator": 3,
+    "max_shapes_per_operator": 3,
     "max_repair_attempts": 5
   },
   "precision_gate": {
@@ -77,8 +82,8 @@ json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False).enco
 - 模型名由 Skill 调用参数写入 Contract Data；本 Demo 的值必须是 `Step-3.7-Flash`。
 - SGLang 与 SGLang-Kunlun revision、checkpoint、配置摘要、target 入口、TP8、BF16、target-only eager 和 Demo 输入模式全部由 Contract Data 固定。CUDA 与 P800 使用同一组启动参数；不传量化或投机解码参数，不额外传 MTP 开关，也不显式传 attention backend。运行后解析出的两端实际 backend 必须分别进入 Scan/Capture 证据。
 - eager 固定为 decode 与 prefill 的 CUDA Graph backend 都是 `disabled`。`draft_entry: null` 与 `speculative_algorithm: null` 表示不加载 draft 路径，不得把 eager 解释为 EAGLE。
-- 正式 `sglang_revision` 必须已经包含人类批准的特殊 SwiGLU helper 纯重构；CUDA 与 P800 使用同一固定源码。这个前置重构不算 P800 repair attempt。
-- CUDA 只允许一个 Capture Session；每个算子最多保存三个去重后的真实调用形态。
+- Demo 直接使用原始源码中的 `Step3p5MLP.forward`，激活条件固定为 `self.limit is not None`。不得要求或新增特殊 SwiGLU helper，也不得把内部 `gate_up`、`gate`、`up` 或表达式升级为独立 Demo 算子。
+- CUDA 只允许一个 Capture Session；TP8 模型中只保存 rank 0 的边界输入 `x` 和 CUDA `output`，每个算子最多保存三个去重后的真实 shape。权重由两端同一 checkpoint 的当前 rank 分片提供，不进入 Golden Sample。
 - `max_repair_attempts` 固定为五；baseline 不计数，通过轮计数。
 - Precision Gate 本 Demo 固定为 `atol=0.01`、`rtol=0.02`。
 
@@ -89,8 +94,8 @@ json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False).enco
 1. Contract 已由人批准，全部必填值已填写，所有工具结果都绑定同一 Contract Data。
 2. target-only eager 实际路径扫描完成，每条结论都有源码或运行证据。
 3. 所有发现的 Operator Gap 都进入 gap queue，所有 `CAPTURE_REQUIRED` 项都纳入唯一 CUDA Capture Session。
-4. 每个算子最多三个不同真实调用形态的边界输入和 CUDA 输出已保存。
-5. Golden Run 在新 CUDA 进程中全部 self-replay 通过，bundle 在 CUDA 与 P800 两端校验通过。
+4. `Step3p5MLP.forward` 的 rank 0 边界输入 `x` 和 CUDA `output` 已保存，最多三个不同真实 shape；Golden Sample 不包含权重和内部 Tensor。
+5. Golden Run 在已加载同一 checkpoint 的 CUDA TP8 模型 rank 0 上全部 self-replay 通过，bundle 在 CUDA 与 P800 两端校验通过。
 6. 被选作 Demo 的算子在 P800 baseline 中至少有一个样本执行或精度失败。
 7. 修复没有超出 Repair Boundary；baseline 不计数，修复不超过五轮。
 8. 该算子的全部已保存样本都通过固定 Precision Gate。
@@ -99,7 +104,7 @@ json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False).enco
 
 ### Non-goals
 
-- 不要求关闭其他 Operator Gap 或覆盖第四种以后 shape。
+- 不要求关闭其他 Operator Gap、覆盖第四种以后 shape，或证明 TP8 的全部八个权重分片都通过。
 - 不迁移 DecoderLayer、完成模型组网、服务拉起、回复质量或 E2E logits 对齐。
 - 不做吞吐、延迟或大 batch 性能优化。
 - 不自动跨机器复制、管理凭证或新增 C++、自定义 Kernel、底层算子注册。
@@ -173,6 +178,7 @@ json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False).enco
 | `1` | 批准 Step-3.7-Flash TP8 BF16 EAGLE Demo Contract | 用户确认两端同命令、不显式指定 backend、不额外启用 MTP，并批准 atol=0.01、rtol=0.02；源码 revision 与 checkpoint config 由固定证据补齐 |
 | `2` | 本轮 Demo 只推进 `activation.step_swiglu_with_limit`；`norm.gemma_rms`、`moe.topk_sigmoid_bias`、`moe.bf16_clamped` 保留在 gap queue 作为后续工作 | 用户批准特殊 SwiGLU 先完成 N 卡 Golden 采集验证；唯一 CUDA Session 启动时同时记录实际 CUDA attention 与 MoE backend，其他缺口不阻塞本轮验证 |
 | `3` | 纠正为 target-only eager：不启用投机解码，不加载 draft 路径，decode 与 prefill 都禁用 CUDA Graph | 用户澄清此前的 EAGLE 是术语误解；两端仍使用同一组启动参数，其他 TP8、BF16、样本、容差、权限和修复边界不变 |
+| `4` | 直接以原始 `Step3p5MLP.forward` 为 Demo 算子，在 TP8 模型中只采集和重放 rank 0；不新增 helper | 用户要求保持模型原始算子边界；源码确认特殊 shared expert 的 `down_proj` 使用 `reduce_results=False`，归约发生在该边界之后，因此 rank 0 足以验证最小流程，完整八 rank 验证留待后续扩展 |
 
 <!-- HUMAN-OWNED CONTRACT: END -->
 
@@ -184,21 +190,21 @@ Agent 每次动作前完整读取 Contract 与本区；每次动作结束后立�
 
 ### Current
 
-- `observed_contract_revision`: `3`
-- `state_revision`: `8`
+- `observed_contract_revision`: `4`
+- `state_revision`: `11`
 - `status`: `ACTIVE`
 - `phase`: `CUDA_CAPTURE`
 - `execution_site`: `CUDA`
-- `active_operator`: `activation.step_swiglu_with_limit`
-- `last_completed_action`: `target_only_eager_scan_completed`
-- `last_run`: `runs/scan-003`
-- `next_action`: `在 CUDA 机器运行 revision 3 capture_golden.py preflight，验证 scan-003、HookRegistry 打桩和 capture candidate 读回`
+- `active_operator`: `Step3p5MLP.forward`
+- `last_completed_action`: `original_mlp_target_scan_completed`
+- `last_run`: `runs/scan-004`
+- `next_action`: `在 CUDA 机器运行 revision 4 capture_golden.py preflight，验证 scan-004、原始 Step3p5MLP.forward Hook 和 rank 0 样本格式`
 
 规则：`ACTIVE` 时 `next_action` 必须恰好一条；`WAITING` 时必须是一条人工动作；`PASS`、`BLOCKED`、`NEEDS_HUMAN` 时必须为 `none`。
 
 ### Scan
 
-- `scan_run`: `runs/scan-003`
+- `scan_run`: `runs/scan-004`
 - `target_coverage`: `COMPLETE`
 - `draft_coverage`: `NOT_APPLICABLE`
 - `operator_counts`: `{ready: 8, capture_required: 1, needs_human: 4}`
@@ -207,12 +213,12 @@ Agent 每次动作前完整读取 Contract 与本区；每次动作结束后立�
 
 | operator_id | scan_verdict | golden | demo_role | repair | evidence |
 |---|---|---|---|---|---|
-| `activation.step_swiglu_with_limit` | `CAPTURE_REQUIRED` | `PLANNED` | 首选流程验证候选 | 待 P800 baseline 证明真实失败 | `runs/scan-003/result.json` |
-| `norm.gemma_rms` | `NEEDS_HUMAN` | `NOT_PLANNED` | 后续缺口 | 现行边界禁止保存 norm weight | `runs/scan-003/result.json` |
-| `moe.topk_sigmoid_bias` | `NEEDS_HUMAN` | `NOT_PLANNED` | 后续缺口 | 现行边界禁止保存 router bias | `runs/scan-003/result.json` |
-| `moe.bf16_clamped` | `NEEDS_HUMAN` | `NOT_PLANNED` | 后续缺口 | 当前替换边界包含 expert weights | `runs/scan-003/result.json` |
+| `Step3p5MLP.forward` | `CAPTURE_REQUIRED` | `PLANNED` | 首选流程验证候选 | 待 P800 rank 0 baseline 证明真实失败 | `runs/scan-004/result.json` |
+| `norm.gemma_rms` | `NEEDS_HUMAN` | `NOT_PLANNED` | 后续缺口 | 现行边界禁止保存 norm weight | `runs/scan-004/result.json` |
+| `moe.topk_sigmoid_bias` | `NEEDS_HUMAN` | `NOT_PLANNED` | 后续缺口 | 现行边界禁止保存 router bias | `runs/scan-004/result.json` |
+| `moe.bf16_clamped` | `NEEDS_HUMAN` | `NOT_PLANNED` | 后续缺口 | 当前替换边界包含 expert weights | `runs/scan-004/result.json` |
 
-完整 target-only operator 列表、计数和未决的 attention backend 运行证据保存在 `scan-003`；Spec 的 gap queue 只保留特殊 SwiGLU 与三个已确认后续缺口。旧 `scan-002` 保留为 revision 1 的 EAGLE 历史证据，不再作为当前 preflight 输入。
+完整 target-only operator 列表、计数和未决的 attention backend 运行证据保存在 `scan-004`；Spec 的 gap queue 只保留原始 MLP 边界与三个已确认后续缺口。旧 `scan-003` 保留为 revision 3 的 helper 历史证据，不再作为当前 preflight 输入。
 
 ### CUDA Capture
 
@@ -245,9 +251,9 @@ baseline replay 不算修复尝试。每轮修改源码前递增 `attempts_used`
 
 | item | status | evidence |
 |---|---|---|
-| Contract approved and tool bindings match | `PASS` | `runs/spec-binding-002/result.json` |
-| target-only eager scan complete | `PASS` | `runs/scan-003/result.json` |
-| gap queue complete | `PASS` | `runs/scan-003/result.json` |
+| Contract approved and tool bindings match | `PASS` | `runs/spec-binding-003/result.json` |
+| target-only eager scan complete | `PASS` | `runs/scan-004/result.json` |
+| gap queue complete | `PASS` | `runs/scan-004/result.json` |
 | one CUDA Session and at most three samples per operator | `PENDING` | `null` |
 | CUDA self-replay passed | `PENDING` | `null` |
 | bundle verified on CUDA and P800 | `PENDING` | `null` |
@@ -277,5 +283,8 @@ baseline replay 不算修复尝试。每轮修改源码前递增 `attempts_used`
 | `6` | 对齐 Contract revision 3，撤销旧 EAGLE preflight，并回到 SCAN 重新绑定 target-only eager 范围 | `migration-spec.md#human-decisions`、`.scratch/step3p7-p800-migration-tool/issues/17-correct-eager-runtime-contract.md` |
 | `7` | revision 3 Spec 绑定自检通过，进入 target-only eager 扫描 | `runs/spec-binding-002/result.json` |
 | `8` | `scan-003` 封存 13 个 target Semantic Operator；进入 revision 3 CUDA preflight | `runs/scan-003/result.json` |
+| `9` | 对齐 Contract revision 4，恢复原始 `Step3p5MLP.forward` 边界并把 Demo 精度范围收紧到 TP8 rank 0 | `migration-spec.md#human-decisions`、`.scratch/step3p7-p800-migration-tool/issues/19-restore-step3p5-mlp-boundary.md` |
+| `10` | revision 4 Spec 绑定自检通过 | `runs/spec-binding-003/result.json` |
+| `11` | `scan-004` 以原始 MLP 边界替代 helper，保留完整 target-only eager 算子清单；进入 rank 0 CUDA preflight | `runs/scan-004/result.json` |
 
 <!-- AGENT-WRITABLE WORKING STATE: END -->

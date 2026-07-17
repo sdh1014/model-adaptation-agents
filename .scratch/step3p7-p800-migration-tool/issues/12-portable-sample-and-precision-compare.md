@@ -2,7 +2,7 @@
 
 Type: task
 Status: ready-for-human
-Blocked by: 18
+Blocked by: 20
 
 ## What to build
 
@@ -41,6 +41,10 @@ Golden Sample 只保存边界输入 Tensor、CUDA 期望输出 Tensor、容器�
 2026-07-17 纠正：此前把 eager 误写为 EAGLE。旧 revision 2 / `scan-002` preflight 已取消且从未执行；本票据先由 Ticket 18 阻塞，待 revision 3 的 target-only eager `scan-003` 封存后，再按更新后的 runbook 执行 N 卡 preflight。
 
 Ticket 18 已完成，`runs/scan-003` 与 revision 3 绑定通过，本票据现已解除扫描阻塞。下一人工动作仍是在真实 N 卡 SGLang 环境按更新后的 runbook 执行 `runs/cuda-preflight-001`；本地准备通过不等于 N 卡 preflight 通过。
+
+2026-07-17 范围更新：用户决定保留模型原始 `Step3p5MLP.forward` 边界。revision 3 的旧 preflight 因此取消且从未执行；本票据改由 Ticket 20 阻塞，待 revision 4 的模型内重放实现完成后再进入实机验证。
+
+Ticket 20 已完成并解除阻塞。revision 4 在 TP8 模型中只采集和重放 rank 0，最多三种 shape；样本保存 `x/output/limit` 与必要元数据，不保存权重或内部 Tensor。下一人工动作是按当前 runbook 在真实 N 卡运行 `scan-004` preflight；本地测试不等于 CUDA/P800 round-trip 已通过。
 
 本地可执行性复核继续补强，但不替代上述 N 卡动作：
 

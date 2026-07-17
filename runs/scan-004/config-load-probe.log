@@ -1,0 +1,15 @@
+evidence_origin=runs/scan-003/config-load-probe.log
+original_probe_sglang_revision=6274831d9fef7bba04eb59302caac24563a974c9
+contract_sglang_revision=49e384ce9d304648e9959666ecb8ce8cd98d0deb
+reuse_basis=revision delta only extracts and then restores the inline Step3p5 MLP expression; checkpoint configuration code is unchanged
+python=/tmp/step3p7-ticket11-py312/bin/python
+transformers_version=5.13.1
+method=reuse fixed-checkpoint Step3p7Config loaded evidence
+result=PASS
+torch_dtype=torch.bfloat16
+quantization_config=None
+num_hidden_layers=45
+target_layer_ids=0..44
+target_dense_layers=0,1,2
+target_moe_layers=3..44
+draft_path_enabled=false

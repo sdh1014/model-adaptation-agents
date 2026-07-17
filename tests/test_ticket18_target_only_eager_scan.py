@@ -18,6 +18,9 @@ HISTORICAL_RUN_SHA256 = {
     "runs/scan-002/result.json": (
         "cbe87935248e0f80eed199c5843d1236908bb2b46dcc0014f33bb14fb684926d"
     ),
+    "runs/scan-003/result.json": (
+        "6cedbde0105bcadc5de1b26c96d3c46aeef6cd72f82e37b7a34a02d9ea7572b5"
+    ),
 }
 
 
@@ -117,15 +120,15 @@ class Ticket18TargetOnlyEagerScanTest(unittest.TestCase):
                 ).hexdigest()
                 self.assertEqual(actual, expected_digest)
 
-    def test_spec_points_to_scan_003_and_cuda_preflight(self):
+    def test_spec_supersedes_scan_003_with_revision_4_cuda_preflight(self):
         spec = (ROOT / "migration-spec.md").read_text(encoding="utf-8")
-        self.assertIn("- `scan_run`: `runs/scan-003`", spec)
-        self.assertIn("- `last_run`: `runs/scan-003`", spec)
+        self.assertIn("- `scan_run`: `runs/scan-004`", spec)
+        self.assertIn("- `last_run`: `runs/scan-004`", spec)
         self.assertIn("- `draft_coverage`: `NOT_APPLICABLE`", spec)
         self.assertIn("- `phase`: `CUDA_CAPTURE`", spec)
         self.assertIn(
-            "`next_action`: `在 CUDA 机器运行 revision 3 capture_golden.py "
-            "preflight，验证 scan-003、HookRegistry 打桩和 capture candidate 读回`",
+            "`next_action`: `在 CUDA 机器运行 revision 4 capture_golden.py "
+            "preflight，验证 scan-004、原始 Step3p5MLP.forward Hook 和 rank 0 样本格式`",
             spec,
         )
 

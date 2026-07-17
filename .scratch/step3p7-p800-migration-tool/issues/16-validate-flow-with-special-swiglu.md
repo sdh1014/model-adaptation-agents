@@ -8,7 +8,7 @@ Blocked by: 14, 15
 
 人工把交接包复制到 P800 后，先完成目的端完整性校验，再优先使用特殊 SwiGLU 的一至三个 Golden Samples 验证 `恢复 Spec -> baseline replay -> 精度比较 -> 有限轮修复 -> 最终结论` 的完整流程。
 
-特殊 SwiGLU 只有在固定配置中实际激活、已经采到真实调用，并且 P800 baseline 至少有一个执行或精度失败时，才能作为被修复的真实 Operator Gap。helper 抽取、缺少专用 Kunlun Kernel或潜在性能较慢都不能当作缺口证据。
+特殊 SwiGLU 只有在固定配置中实际激活、原始 `Step3p5MLP.forward` 已经采到真实调用，并且 P800 rank 0 baseline 至少有一个执行或精度失败时，才能作为被修复的真实 Operator Gap。缺少专用 Kunlun Kernel 或潜在性能较慢都不能当作缺口证据。
 
 如果特殊 SwiGLU baseline 全部通过，应如实记录它不是 correctness gap。此时它已经验证采集、交接、重放和比较链路，但还没有验证修复链路；Agent 应从同一份已采集 gap queue 中选择下一个 baseline 真实失败的无权重候选完成修复验证，不回 CUDA。
 
