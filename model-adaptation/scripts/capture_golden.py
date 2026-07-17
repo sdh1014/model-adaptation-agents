@@ -114,9 +114,12 @@ def validate_scan_candidate(
     contract: Dict[str, Any],
     scan_result: Dict[str, Any],
     operator_id: str,
+    expected_binding: Dict[str, Any],
 ) -> Dict[str, Any]:
     if scan_result.get("scan_complete") is not True:
         raise ToolError("Scan Run is not complete")
+    if scan_result.get("spec_binding") != expected_binding:
+        raise ToolError("Scan Run spec_binding does not match Contract Data")
 
     source = scan_result.get("source")
     if not isinstance(source, dict):
@@ -161,7 +164,12 @@ def prepare_capture_config(
     binding = load_spec_binding(spec_path)
     contract = load_contract_data(spec_path)
     scan_result = read_json_object(scan_result_path, "Scan Run result")
-    operator = validate_scan_candidate(contract, scan_result, operator_id)
+    operator = validate_scan_candidate(
+        contract,
+        scan_result,
+        operator_id,
+        binding.as_result_dict(),
+    )
 
     actual_revision = resolve_git_revision(sglang_worktree)
     expected_revision = contract["source"]["sglang_revision"]

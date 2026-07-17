@@ -31,3 +31,5 @@ Blocked by:
 - Skill 首次批准后会先封存 `runs/spec-binding-001`，再把唯一下一动作推进到 target/draft 扫描；新会话通过 Spec 的 `last_run` 恢复。
 - `python3 -m unittest discover -s tests -p 'test*.py' -v` 共 8 项通过；Python 语法检查和 `git diff --check` 通过。
 - 两轮双轴代码审查完成，最终 Standards 与 Ticket 10 两个维度均无剩余可操作问题。
+
+2026-07-17 追溯说明：本票据实现的 Spec 绑定机制仍然有效，但当时封存的 revision 1 与 `runs/spec-binding-001` 含有把 eager 误写为 EAGLE 的旧 Contract。当前执行 Contract 已由 Ticket 17 纠正为 revision 3，并封存在 `runs/spec-binding-002`；旧 Run 只保留为历史证据。

@@ -1,5 +1,7 @@
 # PROTOTYPE — 单文件 `migration-spec.md`
 
+> 历史说明（2026-07-17）：本纸面原型中的 EAGLE/draft 范围已被 Contract revision 3 的 target-only eager 决策取代。文件只保留为早期设计推演，不得作为当前运行输入；当前事实以根目录 `migration-spec.md` 和 `runs/scan-003` 为准。
+>
 > 要验证的问题：一次对话上下文全部丢失后，新 Agent 是否能只读取这一个文件，恢复不变目标、当前阶段、活动算子、证据位置和唯一下一动作；同时，Agent 是否会在权限、一次性 CUDA 采集或 Contract 固定的修复上限处正确停止。
 >
 > 这是供人工评审的纸面 logic prototype，不是最终 Schema，也不是工具实现。

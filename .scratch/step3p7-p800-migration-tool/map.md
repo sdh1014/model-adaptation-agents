@@ -37,6 +37,8 @@
 - [走查一个 SwiGLU 三 Shape 的端到端纸面 Demo](issues/06-walkthrough-swiglu-demo.md)：固定源码包含 helper seam；baseline 按全部样本判断真实 gap；Contract 最多五轮且通过轮计数；Working State 只保留 `last_run` 与 `passing_run` 两类修复指针。
 - [决定单 Agent 入口与最小脚本表面](issues/09-decide-entrypoint-and-tools.md)：同一个自然语言 Skill 负责初始化和恢复；四个脚本分别处理 Golden 采集、replay/compare、交接校验和工作区保护，并通过 `--spec + --run-dir + result.json` 与 Agent 交接。Spec 的 Contract 内嵌脚本专用 JSON 区块，固定约束不可由命令行覆盖，动态动作参数不写入 Contract。
 - [产出 Spec 驱动 P800 算子迁移工具方案设计文档](issues/07-write-solution-design.md)：最终中文方案已保存到 `outputs/step3p7-p800-migration-tool-design.md`，完整合成单 Agent、Spec、四个脚本、一次 CUDA Golden、人工交接、P800 五轮修复、特殊 SwiGLU Demo 和源码证据；未进入工具实现。
+- [纠正 eager 运行模式与 Spec 绑定](issues/17-correct-eager-runtime-contract.md)：Contract revision 3 明确为 target-only eager，不启用投机解码、不加载 draft，并同时禁用 decode/prefill CUDA Graph；新结果必须绑定 revision 3，旧 Run 仅作历史证据。
+- [按 target-only eager 范围重新封存算子扫描](issues/18-rescan-target-only-eager-operator-gaps.md)：`runs/scan-003` 重新确认 target 路径的 13 个算子与缺口，Spec 已进入 `ACTIVE / CUDA_CAPTURE`，下一步是 revision 3 的真实 N 卡 preflight。
 
 ## Not yet specified
 

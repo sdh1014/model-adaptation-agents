@@ -24,6 +24,10 @@ _Avoid_: Multi-agent coordinator, deterministic runner
 A small script invoked by the Migration Agent to capture, replay, or compare data without deciding scope, changing acceptance criteria, or selecting the next migration action.
 _Avoid_: Autonomous agent, workflow engine
 
+**Eager Mode**:
+The SGLang execution boundary in which both decode and prefill CUDA Graph backends are disabled. It does not enable a speculative algorithm or a draft model path.
+_Avoid_: EAGLE, debug CUDA Graph
+
 **Operator Gap**:
 A model-path operation whose CUDA implementation exists but whose Kunlun implementation is absent or cannot reproduce the required behavior on P800.
 _Avoid_: Generic support matrix, source-code difference

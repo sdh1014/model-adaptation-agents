@@ -1,6 +1,6 @@
 # CUDA 采集 preflight
 
-本步骤让 Claude Code 在 N 卡机器上验证三件事：`scan-002` 选择的特殊 SwiGLU 边界仍与固定源码一致；SGLang 的通用 Hook 能打到真实 helper；候选样本能由另一个进程读回并用固定精度门槛重放。
+本步骤让 Claude Code 在 N 卡机器上验证三件事：revision 3 的 target-only eager `scan-003` 选择的特殊 SwiGLU 边界仍与固定源码一致；SGLang 的通用 Hook 能打到真实 helper；候选样本能由另一个进程读回并用固定精度门槛重放。
 
 preflight 使用小型合成 BF16 tensor，不启动模型、不读取 checkpoint，也不消耗唯一正式 CUDA Capture Session。
 
@@ -42,7 +42,7 @@ python model-adaptation/scripts/capture_golden.py \
   --mode preflight \
   --spec migration-spec.md \
   --run-dir runs/cuda-preflight-001 \
-  --scan-result runs/scan-002/result.json \
+  --scan-result runs/scan-003/result.json \
   --operator-id activation.step_swiglu_with_limit \
   --sglang-worktree "$SGLANG_WORKTREE"
 ```
@@ -81,7 +81,8 @@ python -m sglang.launch_server \
   --model-path "$MODEL_PATH" \
   --tp-size 8 \
   --dtype bfloat16 \
-  --speculative-algorithm EAGLE
+  --cuda-graph-backend-decode disabled \
+  --cuda-graph-backend-prefill disabled
 ```
 
-不要追加量化参数、MTP 开关、`--enable-multi-layer-eagle`、`--attention-backend`、`--prefill-attention-backend`、`--decode-attention-backend` 或 MoE backend 参数。CUDA 正式采集时只额外设置 `MODEL_ADAPTATION_CAPTURE_CONFIG` 环境变量；它不是 SGLang 启动参数。实际解析出的 attention 与 MoE backend 从启动日志记录，不回写成 Contract 参数。
+不要追加 `--speculative-algorithm`、量化参数、MTP 开关、`--enable-multi-layer-eagle`、`--attention-backend`、`--prefill-attention-backend`、`--decode-attention-backend` 或 MoE backend 参数。这里的 eager 表示 decode 与 prefill 都禁用 CUDA Graph，不使用仍经过 graph capture/replay 路径的 `--debug-cuda-graph`。CUDA 正式采集时只额外设置 `MODEL_ADAPTATION_CAPTURE_CONFIG` 环境变量；它不是 SGLang 启动参数。实际解析出的 attention 与 MoE backend 从启动日志记录，不回写成 Contract 参数。

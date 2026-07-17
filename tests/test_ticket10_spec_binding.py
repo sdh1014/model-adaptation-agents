@@ -14,7 +14,7 @@ SPEC_TEMPLATE = (
 )
 MODEL_ADAPTATION_SKILL = REPO_ROOT / "model-adaptation" / "SKILL.md"
 EXPECTED_CONTRACT_SHA256 = (
-    "79043633b4069ffc93ae94fa52629a73fb74b614647078f808c369caff9dfdc5"
+    "9ee412b66d22e66c0d6904f3cfbf2b5fae9c8311cb32ad0668f2ffc37a0251db"
 )
 
 
@@ -34,13 +34,15 @@ def approved_contract() -> dict:
         },
         "model_path": {
             "target_entry": "Step3p7ForConditionalGeneration.forward",
-            "draft_entry": "Step3p5MTP.forward",
+            "draft_entry": None,
         },
         "runtime": {
             "tensor_parallel_size": 8,
             "dtype": "bfloat16",
             "quantization": None,
-            "speculative_algorithm": "EAGLE",
+            "speculative_algorithm": None,
+            "cuda_graph_backend_decode": "disabled",
+            "cuda_graph_backend_prefill": "disabled",
             "attention_backend": None,
         },
         "demo_input_mode": "text-only",
@@ -95,6 +97,26 @@ def run_tool(*args: str) -> subprocess.CompletedProcess:
 
 
 class Ticket10SpecBindingTest(unittest.TestCase):
+    def test_target_only_eager_contract_runs_without_speculative_decoding(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            spec_path = workspace / "migration-spec.md"
+            run_dir = workspace / "runs" / "synthetic-eager"
+            write_spec(spec_path, approved_contract())
+
+            completed = run_tool(
+                "--spec",
+                str(spec_path),
+                "--run-dir",
+                str(run_dir),
+                "--mode",
+                "synthetic",
+            )
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            result = json.loads((run_dir / "result.json").read_text(encoding="utf-8"))
+            self.assertTrue(result["passed"])
+
     def test_approved_spec_runs_synthetic_comparison_with_contract_binding(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = Path(temp_dir)
@@ -171,6 +193,14 @@ class Ticket10SpecBindingTest(unittest.TestCase):
             self.assertIn("- `status`: `NEEDS_HUMAN`", draft)
             self.assertIn("- `phase`: `SCAN`", draft)
             self.assertIn("- `next_action`: `none`", draft)
+
+    def test_template_defines_target_only_eager_runtime(self) -> None:
+        template = SPEC_TEMPLATE.read_text(encoding="utf-8")
+
+        self.assertIn('"draft_entry": null', template)
+        self.assertIn('"speculative_algorithm": null', template)
+        self.assertIn('"cuda_graph_backend_decode": "disabled"', template)
+        self.assertIn('"cuda_graph_backend_prefill": "disabled"', template)
 
     def test_business_failure_is_a_result_but_contract_drift_is_a_tool_failure(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -306,7 +336,7 @@ class Ticket10SpecBindingTest(unittest.TestCase):
         self.assertIn("`next_action: 运行 Spec 绑定自检`", skill)
         self.assertIn("`last_completed_action: spec_binding_smoke_passed`", skill)
         self.assertIn("`last_run: runs/spec-binding-001`", skill)
-        self.assertIn("`next_action: 完成 target/draft 扫描并生成 Scan Run`", skill)
+        self.assertIn("`next_action: 完成 target-only eager 扫描并生成 Scan Run`", skill)
 
     def test_binding_smoke_run_is_recoverable_from_the_same_spec(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -352,7 +382,7 @@ class Ticket10SpecBindingTest(unittest.TestCase):
                     "phase: SCAN",
                     "last_completed_action: spec_binding_smoke_passed",
                     "last_run: runs/spec-binding-001",
-                    "next_action: 完成 target/draft 扫描并生成 Scan Run",
+                    "next_action: 完成 target-only eager 扫描并生成 Scan Run",
                 ]
             )
             write_spec(spec_path, approved_contract(), recovered_working_state)
@@ -378,7 +408,8 @@ class Ticket10SpecBindingTest(unittest.TestCase):
             restored_spec = spec_path.read_text(encoding="utf-8")
             self.assertIn("last_run: runs/spec-binding-001", restored_spec)
             self.assertIn(
-                "next_action: 完成 target/draft 扫描并生成 Scan Run", restored_spec
+                "next_action: 完成 target-only eager 扫描并生成 Scan Run",
+                restored_spec,
             )
 
     def test_reversed_contract_markers_are_a_clean_tool_failure(self) -> None:
@@ -448,7 +479,9 @@ class Ticket10SpecBindingTest(unittest.TestCase):
             )
             self.assertFalse(run_dir.exists())
 
-    def test_tp8_bf16_eagle_runtime_profile_is_required_and_fixed(self) -> None:
+    def test_tp8_bf16_target_only_eager_runtime_profile_is_required_and_fixed(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = Path(temp_dir)
             spec_path = workspace / "migration-spec.md"
@@ -474,7 +507,8 @@ class Ticket10SpecBindingTest(unittest.TestCase):
             self.assertEqual(missing.returncode, 2)
             self.assertIn("runtime.tensor_parallel_size", missing.stderr)
             self.assertIn("runtime.dtype", missing.stderr)
-            self.assertIn("runtime.speculative_algorithm", missing.stderr)
+            self.assertIn("runtime.cuda_graph_backend_decode", missing.stderr)
+            self.assertIn("runtime.cuda_graph_backend_prefill", missing.stderr)
 
             wrong_dtype = approved_contract()
             wrong_dtype["runtime"]["dtype"] = "float16"
@@ -537,7 +571,7 @@ class Ticket10SpecBindingTest(unittest.TestCase):
             )
 
             wrong_speculative_algorithm = approved_contract()
-            wrong_speculative_algorithm["runtime"]["speculative_algorithm"] = "MTP"
+            wrong_speculative_algorithm["runtime"]["speculative_algorithm"] = "EAGLE"
             write_spec(spec_path, wrong_speculative_algorithm)
             rejected = run_tool(
                 "--spec",
@@ -552,10 +586,60 @@ class Ticket10SpecBindingTest(unittest.TestCase):
 
             self.assertEqual(rejected.returncode, 2)
             self.assertIn(
-                "runtime.speculative_algorithm must be 'EAGLE'", rejected.stderr
+                "runtime.speculative_algorithm must be None", rejected.stderr
             )
             self.assertFalse(
                 (workspace / "runs" / "wrong-speculative-algorithm").exists()
+            )
+
+            wrong_decode_graph_backend = approved_contract()
+            wrong_decode_graph_backend["runtime"][
+                "cuda_graph_backend_decode"
+            ] = "full"
+            write_spec(spec_path, wrong_decode_graph_backend)
+            rejected = run_tool(
+                "--spec",
+                str(spec_path),
+                "--run-dir",
+                str(workspace / "runs" / "decode-graph-enabled"),
+                "--mode",
+                "synthetic",
+                "--case",
+                str(case_path),
+            )
+
+            self.assertEqual(rejected.returncode, 2)
+            self.assertIn(
+                "runtime.cuda_graph_backend_decode must be 'disabled'",
+                rejected.stderr,
+            )
+            self.assertFalse(
+                (workspace / "runs" / "decode-graph-enabled").exists()
+            )
+
+            wrong_prefill_graph_backend = approved_contract()
+            wrong_prefill_graph_backend["runtime"][
+                "cuda_graph_backend_prefill"
+            ] = "tc_piecewise"
+            write_spec(spec_path, wrong_prefill_graph_backend)
+            rejected = run_tool(
+                "--spec",
+                str(spec_path),
+                "--run-dir",
+                str(workspace / "runs" / "prefill-graph-enabled"),
+                "--mode",
+                "synthetic",
+                "--case",
+                str(case_path),
+            )
+
+            self.assertEqual(rejected.returncode, 2)
+            self.assertIn(
+                "runtime.cuda_graph_backend_prefill must be 'disabled'",
+                rejected.stderr,
+            )
+            self.assertFalse(
+                (workspace / "runs" / "prefill-graph-enabled").exists()
             )
 
             explicit_attention_backend = approved_contract()

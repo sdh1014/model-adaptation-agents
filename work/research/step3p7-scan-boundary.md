@@ -1,5 +1,7 @@
 # Step-3.7 Flash 真实扫描入口与语义算子边界
 
+> 历史说明（2026-07-17）：本文研究的是早期 EAGLE/draft 假设，已被 Contract revision 3 的 target-only eager 范围取代。源码分析本身保留为历史证据；当前扫描结论以 `runs/scan-003/result.json` 为准。
+
 ## 结论
 
 Migration Agent 不能只从一个固定 Python 类开始扫描。它应先读取本次运行绑定的模型配置，再分别建立两棵模型内调用树：

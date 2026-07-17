@@ -8,7 +8,7 @@
 
 ### Contract Data
 
-四个 Deterministic Tool 只解析下面两个标记之间的 JSON，不解析 Contract 的其他 Markdown，也不读取或修改 Working State。未决的必填值为 `null` 时，本 Contract 尚不可执行；`runtime.quantization` 与 `runtime.attention_backend` 的 `null` 是本 Demo 有意固定的“命令不传该参数”，不是占位。
+四个 Deterministic Tool 只解析下面两个标记之间的 JSON，不解析 Contract 的其他 Markdown，也不读取或修改 Working State。未决的必填值为 `null` 时，本 Contract 尚不可执行；`model_path.draft_entry`、`runtime.quantization`、`runtime.speculative_algorithm` 与 `runtime.attention_backend` 的 `null` 是本 Demo 有意固定的“命令不传或路径不启用”，不是占位。
 
 脚本启动时只读取一次这个 JSON，并把规范化 JSON 的 SHA-256 与 `spec_id`、`contract_revision` 写入 `result.json`。规范化方式固定为：
 
@@ -32,13 +32,15 @@ json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False).enco
   },
   "model_path": {
     "target_entry": "Step3p7ForConditionalGeneration.forward",
-    "draft_entry": "Step3p5MTP.forward"
+    "draft_entry": null
   },
   "runtime": {
     "tensor_parallel_size": 8,
     "dtype": "bfloat16",
     "quantization": null,
-    "speculative_algorithm": "EAGLE",
+    "speculative_algorithm": null,
+    "cuda_graph_backend_decode": "disabled",
+    "cuda_graph_backend_prefill": "disabled",
     "attention_backend": null
   },
   "demo_input_mode": null,
@@ -64,17 +66,17 @@ json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False).enco
 
 - `human_owner`: `TBD`
 
-`schema`、`spec_id` 与 `contract_revision` 的唯一机器可读值位于 Contract Data，不在 Markdown 正文维护副本。首次批准前必须填写 `human_owner` 和 Contract Data 中全部未决占位，把 `contract_revision` 设为 `1`，并记录初始 Human Decision。不得把有意固定为 `null` 的两个 runtime 参数改成伪造的实现名。
+`schema`、`spec_id` 与 `contract_revision` 的唯一机器可读值位于 Contract Data，不在 Markdown 正文维护副本。首次批准前必须填写 `human_owner` 和 Contract Data 中全部未决占位，把 `contract_revision` 设为 `1`，并记录初始 Human Decision。不得把有意固定为 `null` 的 draft、量化、投机解码或 attention 参数改成伪造的实现名。
 
 ### Goal
 
-扫描固定版本 Step-3.7-Flash 的实际 target 与 EAGLE draft 模型路径，记录 CUDA 与 Kunlun 的全部 Operator Gap；在一次 CUDA Capture Session 中采集所需 Golden Samples，由人工把 Handoff Bundle 复制到 P800；随后在最多五轮修复内关闭一个 P800 baseline 真实失败的算子，最多验收三种实际 shape。
+在 target-only eager 模式下扫描固定版本 Step-3.7-Flash 的实际模型路径，记录 CUDA 与 Kunlun 的全部 Operator Gap；在一次 CUDA Capture Session 中采集所需 Golden Samples，由人工把 Handoff Bundle 复制到 P800；随后在最多五轮修复内关闭一个 P800 baseline 真实失败的算子，最多验收三种实际 shape。
 
 ### Fixed inputs
 
 - 模型名由 Skill 调用参数写入 Contract Data；本 Demo 的值必须是 `Step-3.7-Flash`。
-- SGLang 与 SGLang-Kunlun revision、checkpoint、配置摘要、target/draft 入口、TP8、BF16、EAGLE 和 Demo 输入模式全部由 Contract Data 固定。CUDA 与 P800 使用同一组启动参数；不传量化参数、不额外传 MTP 开关，也不显式传 attention backend。`attention_backend: null` 固定的是命令边界，运行后解析出的两端实际 backend 必须分别进入 Scan/Capture 证据。
-- 对 Step-3.7 指定 EAGLE 后，SGLang 会自动启用 multi-layer EAGLE，并把 draft 架构改写为 `Step3p5MTP`；因此“不额外传 MTP 开关”不等于跳过 draft 路径。
+- SGLang 与 SGLang-Kunlun revision、checkpoint、配置摘要、target 入口、TP8、BF16、target-only eager 和 Demo 输入模式全部由 Contract Data 固定。CUDA 与 P800 使用同一组启动参数；不传量化或投机解码参数，不额外传 MTP 开关，也不显式传 attention backend。运行后解析出的两端实际 backend 必须分别进入 Scan/Capture 证据。
+- eager 固定为 decode 与 prefill 的 CUDA Graph backend 都是 `disabled`。`draft_entry: null` 与 `speculative_algorithm: null` 表示不加载 draft 路径，不得把 eager 解释为 EAGLE。
 - 正式 `sglang_revision` 必须已经包含人类批准的特殊 SwiGLU helper 纯重构；CUDA 与 P800 使用同一固定源码。这个前置重构不算 P800 repair attempt。
 - CUDA 只允许一个 Capture Session；每个算子最多保存三个去重后的真实调用形态。
 - `max_repair_attempts` 固定为五；baseline 不计数，通过轮计数。
@@ -85,7 +87,7 @@ json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False).enco
 只有以下条件全部有证据，Working State 才能写为 `PASS / DONE`：
 
 1. Contract 已由人批准，全部必填值已填写，所有工具结果都绑定同一 Contract Data。
-2. target 与 draft 实际路径均扫描完成，每条结论都有源码或运行证据。
+2. target-only eager 实际路径扫描完成，每条结论都有源码或运行证据。
 3. 所有发现的 Operator Gap 都进入 gap queue，所有 `CAPTURE_REQUIRED` 项都纳入唯一 CUDA Capture Session。
 4. 每个算子最多三个不同真实调用形态的边界输入和 CUDA 输出已保存。
 5. Golden Run 在新 CUDA 进程中全部 self-replay 通过，bundle 在 CUDA 与 P800 两端校验通过。
@@ -138,7 +140,7 @@ json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False).enco
 
 | From | Guard | To | Working State 必须同步记录 |
 |---|---|---|---|
-| `ACTIVE / SCAN` | target、draft 均扫描完成；没有未决边界；至少有一个采集候选 | `ACTIVE / CUDA_CAPTURE` | Scan Run、覆盖计数、gap queue、唯一下一动作 |
+| `ACTIVE / SCAN` | target-only eager 扫描完成；没有未决边界；至少有一个采集候选 | `ACTIVE / CUDA_CAPTURE` | Scan Run、覆盖计数、gap queue、唯一下一动作 |
 | `ACTIVE / SCAN` | 实际调用或 Semantic Operator 边界不能可靠确定 | `NEEDS_HUMAN / SCAN` | stop reason、证据、一个人类问题 |
 | `ACTIVE / SCAN` | 固定范围内没有 Demo 候选 | `BLOCKED / SCAN` | 原因和 Scan Run |
 | `ACTIVE / CUDA_CAPTURE` | 唯一 Session 完成；self-replay 和 CUDA 端 bundle 校验通过 | `WAITING / HANDOFF` | Golden Run、bundle、manifest、人工复制动作 |
@@ -196,7 +198,7 @@ Agent 每次动作前完整读取 Contract 与本区；每次动作结束后立�
 
 - `scan_run`: `null`
 - `target_coverage`: `PENDING`
-- `draft_coverage`: `PENDING`
+- `draft_coverage`: `NOT_APPLICABLE`
 - `operator_counts`: `{ready: 0, capture_required: 0, needs_human: 0}`
 
 #### Gap queue
@@ -239,7 +241,7 @@ baseline replay 不算修复尝试。每轮修改源码前递增 `attempts_used`
 | item | status | evidence |
 |---|---|---|
 | Contract approved and tool bindings match | `PENDING` | `null` |
-| target/draft scan complete | `PENDING` | `null` |
+| target-only eager scan complete | `PENDING` | `null` |
 | gap queue complete | `PENDING` | `null` |
 | one CUDA Session and at most three samples per operator | `PENDING` | `null` |
 | CUDA self-replay passed | `PENDING` | `null` |

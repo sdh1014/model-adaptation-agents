@@ -1,5 +1,7 @@
 # Step-3.7-Flash TP8 BF16 算子扫描记录
 
+> 历史说明（2026-07-17）：本文与 `runs/scan-002` 记录的是已被纠正的 EAGLE/draft 范围，不得用于当前 CUDA preflight。Contract revision 3 的 target-only eager 结果见 `runs/scan-003/result.json`。
+
 ## 扫描输入
 
 本记录只覆盖已经确认的最小 Demo 分支：

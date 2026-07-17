@@ -2,7 +2,7 @@
 
 Type: task
 Status: ready-for-human
-Blocked by: 10
+Blocked by: 18
 
 ## What to build
 
@@ -37,6 +37,10 @@ Golden Sample 只保存边界输入 Tensor、CUDA 期望输出 Tensor、容器�
 - 本地 28 个测试全部通过；其中新增测试直接加载固定 SGLang revision 的真实 `HookRegistry` 与 `step3p5_ops.py`，确认两个 Hook、imported binding 传播、target `decode` 上下文和 `3 保存 + 1 重复 + 1 跳过签名`。无 CUDA 的本机只验证了 preflight 失败路径会生成可信证据且 `consumes_capture_session=false`。
 
 下一人工动作是在真实 N 卡 SGLang 环境执行 `runs/cuda-preflight-001`，把 runbook 列出的六个文件带回审查。只有该结果通过后才继续正式模型采集。候选 `torch.save` 格式仍未在 P800 修改版 Torch 完成读回，因此本票据仍不满足跨端 acceptance criteria，`replay_compare.py` 的正式 Golden compare 路径也不在本轮提前宣称完成。
+
+2026-07-17 纠正：此前把 eager 误写为 EAGLE。旧 revision 2 / `scan-002` preflight 已取消且从未执行；本票据先由 Ticket 18 阻塞，待 revision 3 的 target-only eager `scan-003` 封存后，再按更新后的 runbook 执行 N 卡 preflight。
+
+Ticket 18 已完成，`runs/scan-003` 与 revision 3 绑定通过，本票据现已解除扫描阻塞。下一人工动作仍是在真实 N 卡 SGLang 环境按更新后的 runbook 执行 `runs/cuda-preflight-001`；本地准备通过不等于 N 卡 preflight 通过。
 
 本地可执行性复核继续补强，但不替代上述 N 卡动作：
 

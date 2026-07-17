@@ -168,11 +168,14 @@ class Ticket11ScanArtifactTest(unittest.TestCase):
             active["shared_swiglu_nonzero_limits"], {"43": 16, "44": 16}
         )
 
-    def test_spec_points_to_corrected_immutable_scan(self):
+    def test_historical_scan_is_superseded_without_rewrite(self):
         spec = (ROOT / "migration-spec.md").read_text()
-        self.assertIn("- `scan_run`: `runs/scan-002`", spec)
-        self.assertIn("- `last_run`: `runs/scan-002`", spec)
+        current_scan = json.loads(
+            (ROOT / "runs" / "scan-003" / "result.json").read_text()
+        )
+        self.assertIn("- `scan_run`: `runs/scan-003`", spec)
         self.assertEqual(self.result["supersedes"], "runs/scan-001")
+        self.assertEqual(current_scan["supersedes"], "runs/scan-002")
 
     def test_eagle_defaults_cover_all_three_draft_weight_layers(self):
         eagle = self.result["eagle_draft_resolution"]

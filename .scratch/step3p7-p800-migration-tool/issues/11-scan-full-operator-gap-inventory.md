@@ -41,3 +41,5 @@ Blocked by: 10
 - `migration-spec.md` 已绑定 `runs/spec-binding-001` 与 `runs/scan-002`，Working State 如实停在 `NEEDS_HUMAN / SCAN`，没有消耗 CUDA Capture Session。
 
 Ticket 11 的完整扫描与证据封存已经完成。后续是否允许特殊 SwiGLU Demo 先行、将三个不可重放缺口留待后续，是一次新的 Contract 决策，不属于本票据漏扫。
+
+2026-07-17 追溯说明：本票据中的 EAGLE/draft 范围来自已被纠正的术语误解。`runs/scan-002` 不再作为当前执行输入；Ticket 18 已按 revision 3 重新封存 target-only eager 的 `runs/scan-003`。旧扫描与本段原始结论不改写，只作为历史证据。

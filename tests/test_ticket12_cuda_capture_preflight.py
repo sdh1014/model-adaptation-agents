@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -48,11 +49,11 @@ def create_sglang_fixture(root: Path) -> tuple[Path, str]:
     return source, revision
 
 
-def write_spec(path: Path, revision: str) -> None:
+def write_spec(path: Path, revision: str) -> dict:
     contract = {
         "schema": "migration-spec/v0",
         "spec_id": "step3p7-flash-p800-demo",
-        "contract_revision": 2,
+        "contract_revision": 3,
         "model": "Step-3.7-Flash",
         "source": {
             "sglang_revision": revision,
@@ -64,13 +65,15 @@ def write_spec(path: Path, revision: str) -> None:
         },
         "model_path": {
             "target_entry": "Step3p7ForConditionalGeneration.forward",
-            "draft_entry": "Step3p5MTP.forward",
+            "draft_entry": None,
         },
         "runtime": {
             "tensor_parallel_size": 8,
             "dtype": "bfloat16",
             "quantization": None,
-            "speculative_algorithm": "EAGLE",
+            "speculative_algorithm": None,
+            "cuda_graph_backend_decode": "disabled",
+            "cuda_graph_backend_prefill": "disabled",
             "attention_backend": None,
         },
         "demo_input_mode": "text-only",
@@ -100,12 +103,28 @@ def write_spec(path: Path, revision: str) -> None:
         ),
         encoding="utf-8",
     )
+    return contract
 
 
-def write_scan_result(path: Path, revision: str) -> None:
+def spec_binding(contract: dict) -> dict:
+    canonical = json.dumps(
+        contract,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    return {
+        "spec_id": contract["spec_id"],
+        "contract_revision": contract["contract_revision"],
+        "contract_data_sha256": hashlib.sha256(canonical).hexdigest(),
+    }
+
+
+def write_scan_result(path: Path, revision: str, binding: dict) -> None:
     path.write_text(
         json.dumps(
             {
+                "spec_binding": binding,
                 "scan_complete": True,
                 "source": {
                     "sglang_revision": revision,
@@ -148,8 +167,8 @@ class Ticket12CudaCapturePreflightTest(unittest.TestCase):
             spec = workspace / "migration-spec.md"
             scan_result = workspace / "scan-result.json"
             run_dir = workspace / "runs" / "golden-001"
-            write_spec(spec, revision)
-            write_scan_result(scan_result, revision)
+            contract = write_spec(spec, revision)
+            write_scan_result(scan_result, revision, spec_binding(contract))
 
             completed = run_command(
                 sys.executable,
@@ -198,8 +217,8 @@ class Ticket12CudaCapturePreflightTest(unittest.TestCase):
             spec = workspace / "migration-spec.md"
             scan_result = workspace / "scan-result.json"
             run_dir = workspace / "runs" / "cuda-preflight-001"
-            write_spec(spec, revision)
-            write_scan_result(scan_result, revision)
+            contract = write_spec(spec, revision)
+            write_scan_result(scan_result, revision, spec_binding(contract))
 
             completed = run_command(
                 sys.executable,
@@ -234,8 +253,12 @@ class Ticket12CudaCapturePreflightTest(unittest.TestCase):
             spec = workspace / "migration-spec.md"
             scan_result = workspace / "scan-result.json"
             run_dir = workspace / "runs" / "golden-001"
-            write_spec(spec, expected_revision)
-            write_scan_result(scan_result, expected_revision)
+            contract = write_spec(spec, expected_revision)
+            write_scan_result(
+                scan_result,
+                expected_revision,
+                spec_binding(contract),
+            )
 
             completed = run_command(
                 sys.executable,
@@ -256,6 +279,43 @@ class Ticket12CudaCapturePreflightTest(unittest.TestCase):
 
             self.assertEqual(completed.returncode, 2)
             self.assertIn("worktree revision does not match", completed.stderr)
+            self.assertFalse(run_dir.exists())
+
+    def test_scan_from_old_contract_is_rejected_before_creating_run(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            source, revision = create_sglang_fixture(workspace)
+            spec = workspace / "migration-spec.md"
+            scan_result = workspace / "scan-result.json"
+            run_dir = workspace / "runs" / "golden-001"
+            contract = write_spec(spec, revision)
+            old_binding = spec_binding(contract)
+            old_binding["contract_revision"] = 2
+            old_binding["contract_data_sha256"] = "0" * 64
+            write_scan_result(scan_result, revision, old_binding)
+
+            completed = run_command(
+                sys.executable,
+                str(CAPTURE_GOLDEN),
+                "--spec",
+                str(spec),
+                "--run-dir",
+                str(run_dir),
+                "--mode",
+                "prepare",
+                "--scan-result",
+                str(scan_result),
+                "--operator-id",
+                OPERATOR_ID,
+                "--sglang-worktree",
+                str(source),
+            )
+
+            self.assertEqual(completed.returncode, 2)
+            self.assertIn(
+                "Scan Run spec_binding does not match Contract Data",
+                completed.stderr,
+            )
             self.assertFalse(run_dir.exists())
 
 

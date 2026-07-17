@@ -2,7 +2,7 @@
 
 Type: task
 Status: ready-for-agent
-Blocked by: 11, 13
+Blocked by: 13, 18
 
 ## What to build
 
@@ -14,7 +14,7 @@ Session 结束后，在新的 CUDA 进程中对全部 Golden Samples 自回放�
 
 ## Acceptance criteria
 
-- Session 开始前，target/draft 扫描完成，所有采集候选都有 hook target、运行命令、边界说明和代码证据。
+- Session 开始前，target-only eager 扫描完成，所有采集候选都有 hook target、运行命令、边界说明和代码证据。
 - 所有无法安全采集或仍为 `NEEDS_HUMAN` 的项都在 Session 前处理；Session 开始后不能为了补遗漏再创建第二次 Session。
 - 每个候选算子最多保存三个不同签名，重复次数和被跳过的新形态数量有记录。
 - 去重签名不包含 Tensor 数值或输出，但包含算子、执行路径、输入结构、shape、dtype、layout、stride 和必要非 Tensor 参数。
@@ -26,3 +26,5 @@ Session 结束后，在新的 CUDA 进程中对全部 Golden Samples 自回放�
 ## Comments
 
 特殊 SwiGLU 是首选验证样例，但唯一 CUDA Session 必须覆盖完整扫描中所有符合 Contract 的采集候选。
+
+2026-07-17 纠正：本票据只消费 Contract revision 3 的 target-only eager 扫描结果 `runs/scan-003`；不得使用旧 EAGLE 范围的 `scan-002` 启动唯一 CUDA Capture Session。

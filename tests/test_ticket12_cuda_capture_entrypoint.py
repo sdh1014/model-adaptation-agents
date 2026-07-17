@@ -9,9 +9,23 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 HOOK_INTEGRATION_TEST = (
     REPO_ROOT / "tests" / "test_ticket12_real_sglang_hook_integration.py"
 )
+RUNBOOK = (
+    REPO_ROOT
+    / "model-adaptation"
+    / "references"
+    / "cuda-capture-validation.md"
+)
 
 
 class Ticket12CudaCaptureEntrypointTest(unittest.TestCase):
+    def test_runbook_uses_target_only_eager_launch_arguments(self) -> None:
+        runbook = RUNBOOK.read_text(encoding="utf-8")
+
+        self.assertIn("--scan-result runs/scan-003/result.json", runbook)
+        self.assertIn("--cuda-graph-backend-decode disabled", runbook)
+        self.assertIn("--cuda-graph-backend-prefill disabled", runbook)
+        self.assertNotIn("--speculative-algorithm EAGLE", runbook)
+
     def test_runbook_command_rejects_empty_sglang_worktree(self) -> None:
         environment = os.environ.copy()
         environment["SGLANG_WORKTREE"] = ""

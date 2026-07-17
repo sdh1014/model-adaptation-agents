@@ -1,0 +1,15 @@
+{
+  "action": "synthetic",
+  "evidence": [
+    "synthetic-case.json",
+    "replay.log"
+  ],
+  "passed": true,
+  "spec_binding": {
+    "contract_data_sha256": "c7c59b8dfa5900fa889f7229004774af80939376e4c520a56fd3b7e154a07e1b",
+    "contract_revision": 3,
+    "spec_id": "step3p7-flash-p800-demo"
+  },
+  "summary": "Synthetic expected and actual values match.",
+  "tool": "replay_compare.py"
+}
