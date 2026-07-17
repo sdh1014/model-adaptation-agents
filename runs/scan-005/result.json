@@ -1,0 +1,768 @@
+{
+  "tool": "migration-agent",
+  "action": "scan",
+  "scan_id": "scan-005",
+  "spec_binding": {
+    "spec_id": "step3p7-flash-p800-demo",
+    "contract_revision": 5,
+    "contract_data_sha256": "f683ea62427279da3c899a3ef0afcfa1d16298b7424154664c7e3fac9b13d938"
+  },
+  "supersedes": "runs/scan-004",
+  "historical_inputs": [
+    {
+      "path": "runs/scan-004/result.json",
+      "sha256": "6b0d7531937a06a116a323d3211a9a3cfb29b7233f2f067e421ca3cd22cb01c5"
+    },
+    {
+      "path": "runs/spec-binding-003/result.json",
+      "sha256": "7498fa0888d8584cd3e5cbd3f46bc425da49d7d7918d57d00bab66829f571122"
+    }
+  ],
+  "source": {
+    "sglang_revision": "49e384ce9d304648e9959666ecb8ce8cd98d0deb",
+    "sglang_kunlun_revision": "546ad8c682392922792bbbfe53a8bf575545f118",
+    "checkpoint_id": "stepfun-ai/Step-3.7-Flash@5f6244077ac62e04eec3f320501ff8c2b293373a",
+    "checkpoint_config_sha256": "8d740ba5819e574b7a606ea7aa6d7d381142ed5cc77cab96dde2892c10414042",
+    "checkpoint_config_evidence_reused_from": "runs/scan-004/checkpoint-config-summary.json",
+    "research_evidence": "work/research/step3p7-kernel-gap-inventory.md"
+  },
+  "scan_scope": {
+    "model_paths": [
+      "target"
+    ],
+    "granularity": "kernel-call",
+    "input_modes": [
+      "text-only",
+      "single-image"
+    ]
+  },
+  "runtime_profile": {
+    "tensor_parallel_size": 8,
+    "dtype": "bfloat16",
+    "quantization": null,
+    "speculative_algorithm": null,
+    "cuda_graph_backend_decode": "disabled",
+    "cuda_graph_backend_prefill": "disabled",
+    "attention_backend_argument": null,
+    "same_launch_arguments_on_cuda_and_p800": true,
+    "cuda_runtime_backend_confirmation": "REQUIRED_DURING_CAPTURE",
+    "p800_runtime_gap_confirmation": "REQUIRED_DURING_BASELINE"
+  },
+  "entrypoints": {
+    "text-only": {
+      "entry": "Step3p7ForConditionalGeneration.forward",
+      "chain": [
+        "Step3p7ForConditionalGeneration.forward",
+        "general_mm_embed_routine(text-only)",
+        "Step3p5ForCausalLM.forward",
+        "Step3p5Model.forward"
+      ]
+    },
+    "single-image": {
+      "entry": "Step3p7ForConditionalGeneration.forward",
+      "chain": [
+        "Step3p7ForConditionalGeneration.forward",
+        "general_mm_embed_routine(single-image)",
+        "Step3VisionEncoder.forward",
+        "VisionAttention.forward"
+      ]
+    }
+  },
+  "operator_counts": {
+    "ready": 7,
+    "capture_required": 4,
+    "needs_human": 0,
+    "total": 11
+  },
+  "operators": [
+    {
+      "operator_id": "sgl_kernel.gemma_rmsnorm",
+      "model_path": [
+        "target"
+      ],
+      "input_mode": "text-only",
+      "activation_guard": "Step3p5Attention q_norm and k_norm with residual=None",
+      "call_chain": [
+        "Step3p7ForConditionalGeneration.forward",
+        "general_mm_embed_routine(text-only)",
+        "Step3p5ForCausalLM.forward",
+        "Step3p5Model.forward",
+        "Step3p5DecoderLayer.forward",
+        "Step3p5Attention.forward_prepare_native",
+        "q_norm/k_norm(GemmaRMSNorm.forward_cuda)",
+        "sgl_kernel.gemma_rmsnorm"
+      ],
+      "kernel_call": {
+        "symbol": "sgl_kernel.gemma_rmsnorm",
+        "kind": "cuda-extension",
+        "capture_seam": "sglang.srt.layers.layernorm.gemma_rmsnorm"
+      },
+      "boundary": {
+        "inputs": [
+          "x"
+        ],
+        "parameters": [
+          "weight"
+        ],
+        "non_tensor_args": [
+          "eps"
+        ],
+        "outputs": [
+          "output"
+        ]
+      },
+      "cuda_impl": [
+        "sglang:python/sglang/srt/layers/layernorm.py:89-94",
+        "sglang:python/sglang/srt/layers/layernorm.py:648-719",
+        "sglang:python/sglang/srt/models/step3p5.py:377-378,433-440"
+      ],
+      "kunlun_impl": [
+        "sglang-kunlun:sglang_kunlun/platform/device.py:8-17 dispatches MultiPlatformOp through forward_cuda",
+        "sglang-kunlun:sglang_kunlun/bootstrap/sgl_kernel_stub.py:196-207 binds rmsnorm but not gemma_rmsnorm",
+        "sglang-kunlun:sglang_kunlun/kernels/sgl_kernel_kunlun/layernorm.py:8-29 provides ordinary rmsnorm"
+      ],
+      "kunlun_equivalence": "MISSING_CALL_BINDING_WITH_REUSABLE_RMSNORM_PRIMITIVE",
+      "parameter_capture": {
+        "direct_parameter_tensors": [
+          "weight"
+        ],
+        "full_checkpoint": false,
+        "module_state_dict": false
+      },
+      "replay_replace_check": "Standalone replay needs x, the directly consumed 1-D weight, eps, and one output. No TP collective or model instance is required.",
+      "verdict": "CAPTURE_REQUIRED"
+    },
+    {
+      "operator_id": "sgl_kernel.gemma_fused_add_rmsnorm",
+      "model_path": [
+        "target"
+      ],
+      "input_mode": "text-only",
+      "activation_guard": "Step3p5 decoder norm with residual present",
+      "call_chain": [
+        "Step3p7ForConditionalGeneration.forward",
+        "general_mm_embed_routine(text-only)",
+        "Step3p5ForCausalLM.forward",
+        "Step3p5Model.forward",
+        "Step3p5DecoderLayer.forward",
+        "GemmaRMSNorm.forward_cuda",
+        "sgl_kernel.gemma_fused_add_rmsnorm"
+      ],
+      "kernel_call": {
+        "symbol": "sgl_kernel.gemma_fused_add_rmsnorm",
+        "kind": "cuda-extension",
+        "capture_seam": "sglang.srt.layers.layernorm.gemma_fused_add_rmsnorm"
+      },
+      "boundary": {
+        "inputs": [
+          "x",
+          "residual"
+        ],
+        "parameters": [
+          "weight"
+        ],
+        "non_tensor_args": [
+          "eps"
+        ],
+        "outputs": [
+          "mutated_x",
+          "mutated_residual"
+        ]
+      },
+      "cuda_impl": [
+        "sglang:python/sglang/srt/layers/layernorm.py:89-94",
+        "sglang:python/sglang/srt/layers/layernorm.py:671-687"
+      ],
+      "kunlun_impl": [
+        "sglang-kunlun:sglang_kunlun/platform/device.py:8-17 dispatches MultiPlatformOp through forward_cuda",
+        "sglang-kunlun:sglang_kunlun/bootstrap/sgl_kernel_stub.py:196-207 binds fused_add_rmsnorm but not gemma_fused_add_rmsnorm",
+        "sglang-kunlun:sglang_kunlun/kernels/sgl_kernel_kunlun/layernorm.py:32-56 provides ordinary fused_add_rmsnorm"
+      ],
+      "kunlun_equivalence": "MISSING_CALL_BINDING_WITH_REUSABLE_FUSED_RMSNORM_PRIMITIVE",
+      "parameter_capture": {
+        "direct_parameter_tensors": [
+          "weight"
+        ],
+        "full_checkpoint": false,
+        "module_state_dict": false
+      },
+      "replay_replace_check": "Replay is independent but must preserve two in-place outputs, so it is larger than gemma_rmsnorm.",
+      "verdict": "CAPTURE_REQUIRED"
+    },
+    {
+      "operator_id": "sgl_kernel.topk_sigmoid",
+      "model_path": [
+        "target"
+      ],
+      "input_mode": "text-only",
+      "activation_guard": "MoE layers 3-44 with scoring_func=sigmoid, correction_bias present, top_k=8, renormalize=true",
+      "call_chain": [
+        "Step3p7ForConditionalGeneration.forward",
+        "general_mm_embed_routine(text-only)",
+        "Step3p5ForCausalLM.forward",
+        "Step3p5Model.forward",
+        "Step3p5DecoderLayer.forward",
+        "Step3p5MoEMLP.forward_normal",
+        "TopK.forward_cuda",
+        "select_experts",
+        "fused_topk",
+        "sgl_kernel.topk_sigmoid"
+      ],
+      "kernel_call": {
+        "symbol": "sgl_kernel.topk_sigmoid",
+        "kind": "cuda-extension",
+        "capture_seam": "sglang.srt.layers.moe.topk.topk_sigmoid"
+      },
+      "boundary": {
+        "inputs": [
+          "gating_output"
+        ],
+        "parameters": [
+          "correction_bias"
+        ],
+        "non_tensor_args": [
+          "renormalize"
+        ],
+        "outputs": [
+          "topk_weights",
+          "topk_ids"
+        ]
+      },
+      "cuda_impl": [
+        "sglang:python/sglang/srt/models/step3p5.py:118-160,208-241",
+        "sglang:python/sglang/srt/layers/moe/topk.py:176-182,453-515,733-810,1729-1811"
+      ],
+      "kunlun_impl": [
+        "sglang-kunlun:sglang_kunlun/hooks/layers/moe/topk.py:60-193 still calls upstream fused_topk for this configuration",
+        "sglang-kunlun:sglang_kunlun/bootstrap/sgl_kernel_stub.py:158-172 binds fast_topk and moe_fused_gate but not topk_sigmoid"
+      ],
+      "kunlun_equivalence": "MISSING",
+      "parameter_capture": {
+        "direct_parameter_tensors": [
+          "correction_bias"
+        ],
+        "full_checkpoint": false,
+        "module_state_dict": false
+      },
+      "replay_replace_check": "Standalone replay is possible, but weights and ids are separate outputs and ids require exact ordering/equality.",
+      "verdict": "CAPTURE_REQUIRED"
+    },
+    {
+      "operator_id": "sglang.srt.layers.attention.triton_ops.prefill_attention._fwd_kernel",
+      "model_path": [
+        "target"
+      ],
+      "input_mode": "single-image",
+      "activation_guard": "single-image vision encoder and CUDA multimodal backend resolves to triton_attn",
+      "call_chain": [
+        "Step3p7ForConditionalGeneration.forward",
+        "general_mm_embed_routine(single-image)",
+        "Step3VisionEncoder.forward",
+        "VisionAttention.forward",
+        "VisionTritonAttention.forward",
+        "context_attention_fwd",
+        "prefill_attention._fwd_kernel"
+      ],
+      "kernel_call": {
+        "symbol": "sglang.srt.layers.attention.triton_ops.prefill_attention._fwd_kernel",
+        "kind": "triton",
+        "capture_seam": "sglang.srt.layers.attention.triton_ops.prefill_attention.context_attention_fwd"
+      },
+      "boundary": {
+        "inputs": [
+          "q",
+          "k",
+          "v",
+          "b_start_loc",
+          "b_seq_len"
+        ],
+        "parameters": [],
+        "non_tensor_args": [
+          "max_input_len",
+          "is_causal",
+          "sm_scale"
+        ],
+        "outputs": [
+          "output"
+        ]
+      },
+      "cuda_impl": [
+        "sglang:python/sglang/srt/layers/attention/vision.py:337-409,1065-1108,1306-1320",
+        "sglang:python/sglang/srt/layers/attention/triton_ops/prefill_attention.py:34-219"
+      ],
+      "kunlun_impl": [
+        "sglang-kunlun:sglang_kunlun/platform/device.py:8-17 and pre_shim.py:193-208 expose a CUDA-like device",
+        "no VisionAttention or context_attention_fwd replacement exists in the fixed Kunlun plugin"
+      ],
+      "kunlun_equivalence": "MISSING_FOR_TRITON_ATTN_BRANCH",
+      "parameter_capture": {
+        "direct_parameter_tensors": [],
+        "full_checkpoint": false,
+        "module_state_dict": false
+      },
+      "replay_replace_check": "No model weights are needed, but q/k/v plus sequence metadata and backend-dependent layouts make this boundary larger and conditional.",
+      "verdict": "CAPTURE_REQUIRED"
+    },
+    {
+      "operator_id": "sgl_kernel.rmsnorm",
+      "model_path": [
+        "target"
+      ],
+      "input_mode": "single-image",
+      "activation_guard": "vision RMSNorm path",
+      "call_chain": [
+        "Step3p7ForConditionalGeneration.forward",
+        "general_mm_embed_routine(single-image)",
+        "Step3VisionEncoder.forward",
+        "VisionAttention.forward",
+        "RMSNorm.forward_cuda",
+        "sgl_kernel.rmsnorm"
+      ],
+      "kernel_call": {
+        "symbol": "sgl_kernel.rmsnorm",
+        "kind": "cuda-extension",
+        "capture_seam": "sglang.srt.layers.layernorm.rmsnorm"
+      },
+      "boundary": {
+        "inputs": [
+          "x"
+        ],
+        "parameters": [
+          "weight"
+        ],
+        "non_tensor_args": [
+          "eps"
+        ],
+        "outputs": [
+          "output"
+        ]
+      },
+      "cuda_impl": [
+        "sglang:python/sglang/srt/layers/layernorm.py:89-94"
+      ],
+      "kunlun_impl": [
+        "sglang-kunlun:sglang_kunlun/bootstrap/sgl_kernel_stub.py:196-207",
+        "sglang-kunlun:sglang_kunlun/kernels/sgl_kernel_kunlun/layernorm.py:8-29"
+      ],
+      "kunlun_equivalence": "PRESENT",
+      "parameter_capture": {
+        "direct_parameter_tensors": [
+          "weight"
+        ],
+        "full_checkpoint": false,
+        "module_state_dict": false
+      },
+      "replay_replace_check": "The fixed Kunlun plugin binds the existing call to kunlun_ops.rmsnorm.",
+      "verdict": "READY"
+    },
+    {
+      "operator_id": "sgl_kernel.silu_and_mul",
+      "model_path": [
+        "target"
+      ],
+      "input_mode": "text-only",
+      "activation_guard": "dense layers and shared experts using ordinary SwiGLU",
+      "call_chain": [
+        "Step3p7ForConditionalGeneration.forward",
+        "general_mm_embed_routine(text-only)",
+        "Step3p5ForCausalLM.forward",
+        "Step3p5DecoderLayer.forward",
+        "SiluAndMul.forward_cuda",
+        "sgl_kernel.silu_and_mul"
+      ],
+      "kernel_call": {
+        "symbol": "sgl_kernel.silu_and_mul",
+        "kind": "cuda-extension",
+        "capture_seam": "sglang.srt.layers.activation.silu_and_mul"
+      },
+      "boundary": {
+        "inputs": [
+          "gate_up"
+        ],
+        "parameters": [],
+        "non_tensor_args": [],
+        "outputs": [
+          "output"
+        ]
+      },
+      "cuda_impl": [
+        "sglang:python/sglang/srt/layers/activation.py:90-107"
+      ],
+      "kunlun_impl": [
+        "sglang-kunlun:sglang_kunlun/bootstrap/sgl_kernel_stub.py:196-207",
+        "sglang-kunlun:sglang_kunlun/kernels/sgl_kernel_kunlun/elementwise.py"
+      ],
+      "kunlun_equivalence": "PRESENT",
+      "parameter_capture": {
+        "direct_parameter_tensors": [],
+        "full_checkpoint": false,
+        "module_state_dict": false
+      },
+      "replay_replace_check": "The fixed Kunlun plugin binds the same call to an existing implementation.",
+      "verdict": "READY"
+    },
+    {
+      "operator_id": "sglang.jit_kernel.rope.apply_rope_with_cos_sin_cache_inplace",
+      "model_path": [
+        "target"
+      ],
+      "input_mode": "text-only",
+      "activation_guard": "Step3p5 full and sliding attention rotary embedding",
+      "call_chain": [
+        "Step3p7ForConditionalGeneration.forward",
+        "general_mm_embed_routine(text-only)",
+        "Step3p5ForCausalLM.forward",
+        "Step3p5Attention.forward_prepare_native",
+        "RotaryEmbedding.forward_cuda",
+        "apply_rope_with_cos_sin_cache_inplace"
+      ],
+      "kernel_call": {
+        "symbol": "sglang.jit_kernel.rope.apply_rope_with_cos_sin_cache_inplace",
+        "kind": "sglang-jit",
+        "capture_seam": "sglang.srt.layers.rotary_embedding.RotaryEmbedding.forward_cuda"
+      },
+      "boundary": {
+        "inputs": [
+          "positions",
+          "query",
+          "key",
+          "cos_sin_cache"
+        ],
+        "parameters": [],
+        "non_tensor_args": [
+          "is_neox_style"
+        ],
+        "outputs": [
+          "rotated_query",
+          "rotated_key"
+        ]
+      },
+      "cuda_impl": [
+        "sglang:python/sglang/srt/layers/rotary_embedding/base.py:42,364-386"
+      ],
+      "kunlun_impl": [
+        "sglang-kunlun:sglang_kunlun/kernels/kernel_ops.py:1386-1415 registers the same JIT symbol",
+        "sglang-kunlun:sglang_kunlun/hooks/layers/rotary_embedding.py:12-51 also replaces the method with xspeedgate_ops"
+      ],
+      "kunlun_equivalence": "PRESENT_AND_HIGHER_LEVEL_BYPASS",
+      "parameter_capture": {
+        "direct_parameter_tensors": [],
+        "full_checkpoint": false,
+        "module_state_dict": false
+      },
+      "replay_replace_check": "Kunlun has both a registered JIT replacement and a method-level xspeedgate path.",
+      "verdict": "READY"
+    },
+    {
+      "operator_id": "sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe_triton_kernels.fused_moe_kernel",
+      "model_path": [
+        "target"
+      ],
+      "input_mode": "text-only",
+      "activation_guard": "unquantized routed MoE CUDA runner resolves to Triton",
+      "call_chain": [
+        "Step3p7ForConditionalGeneration.forward",
+        "general_mm_embed_routine(text-only)",
+        "Step3p5ForCausalLM.forward",
+        "Step3p5MoEMLP.forward_normal",
+        "UnquantizedFusedMoEMethod.apply",
+        "invoke_fused_moe_kernel",
+        "fused_moe_kernel"
+      ],
+      "kernel_call": {
+        "symbol": "sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe_triton_kernels.fused_moe_kernel",
+        "kind": "triton",
+        "capture_seam": "sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe_triton_kernels.invoke_fused_moe_kernel"
+      },
+      "boundary": {
+        "inputs": [
+          "hidden_states",
+          "topk_weights",
+          "topk_ids"
+        ],
+        "parameters": [
+          "expert_weight"
+        ],
+        "non_tensor_args": [
+          "kernel_config"
+        ],
+        "outputs": [
+          "output"
+        ]
+      },
+      "cuda_impl": [
+        "sglang:python/sglang/srt/layers/moe/moe_runner/triton_utils/fused_moe_triton_kernels.py:324-907"
+      ],
+      "kunlun_impl": [
+        "sglang-kunlun:sglang_kunlun/hooks/layers/quantization/unquant.py:32-155 replaces UnquantizedFusedMoEMethod.apply with kunlun_ops before this kernel"
+      ],
+      "kunlun_equivalence": "BYPASSED_BY_HIGHER_LEVEL_IMPLEMENTATION",
+      "parameter_capture": {
+        "direct_parameter_tensors": [
+          "expert_weight"
+        ],
+        "full_checkpoint": false,
+        "module_state_dict": false
+      },
+      "replay_replace_check": "The upstream Triton symbol is not called on Kunlun; its absence is not an Operator Gap.",
+      "verdict": "READY"
+    },
+    {
+      "operator_id": "sglang.srt.layers.attention.triton_ops.extend_attention._fwd_kernel",
+      "model_path": [
+        "target"
+      ],
+      "input_mode": "text-only",
+      "activation_guard": "text prefill/extend when the CUDA attention backend resolves to Triton",
+      "call_chain": [
+        "Step3p7ForConditionalGeneration.forward",
+        "general_mm_embed_routine(text-only)",
+        "Step3p5ForCausalLM.forward",
+        "RadixAttention.forward",
+        "TritonAttnBackend.forward_extend",
+        "extend_attention._fwd_kernel"
+      ],
+      "kernel_call": {
+        "symbol": "sglang.srt.layers.attention.triton_ops.extend_attention._fwd_kernel",
+        "kind": "triton",
+        "capture_seam": "sglang.srt.layers.attention.triton_ops.extend_attention.extend_attention_fwd"
+      },
+      "boundary": {
+        "inputs": [
+          "q",
+          "k",
+          "v",
+          "kv_cache",
+          "metadata"
+        ],
+        "parameters": [],
+        "non_tensor_args": [
+          "sm_scale",
+          "sliding_window"
+        ],
+        "outputs": [
+          "output"
+        ]
+      },
+      "cuda_impl": [
+        "sglang:python/sglang/srt/layers/attention/triton_ops/extend_attention.py:240-715"
+      ],
+      "kunlun_impl": [
+        "sglang-kunlun:sglang_kunlun/hooks/layers/attention/kunlun_backend.py:948-1235 calls kunlun_ops.prefill_attention and carries the SWA window"
+      ],
+      "kunlun_equivalence": "BYPASSED_BY_KUNLUN_ATTENTION_BACKEND",
+      "parameter_capture": {
+        "direct_parameter_tensors": [],
+        "full_checkpoint": false,
+        "module_state_dict": false
+      },
+      "replay_replace_check": "Kunlun selects its attention backend above the Triton call, so the missing Triton symbol is not a gap.",
+      "verdict": "READY"
+    },
+    {
+      "operator_id": "sglang.srt.layers.attention.triton_ops.decode_attention._fwd_grouped_kernel_stage1",
+      "model_path": [
+        "target"
+      ],
+      "input_mode": "text-only",
+      "activation_guard": "text decode, CUDA Triton backend, TP8 GQA",
+      "call_chain": [
+        "Step3p7ForConditionalGeneration.forward",
+        "general_mm_embed_routine(text-only)",
+        "Step3p5ForCausalLM.forward",
+        "RadixAttention.forward",
+        "TritonAttnBackend.forward_decode",
+        "decode_attention._fwd_grouped_kernel_stage1"
+      ],
+      "kernel_call": {
+        "symbol": "sglang.srt.layers.attention.triton_ops.decode_attention._fwd_grouped_kernel_stage1",
+        "kind": "triton",
+        "capture_seam": "sglang.srt.layers.attention.triton_ops.decode_attention.decode_attention_fwd"
+      },
+      "boundary": {
+        "inputs": [
+          "q",
+          "kv_cache",
+          "metadata"
+        ],
+        "parameters": [],
+        "non_tensor_args": [
+          "sm_scale",
+          "sliding_window"
+        ],
+        "outputs": [
+          "mid_out",
+          "mid_logsumexp"
+        ]
+      },
+      "cuda_impl": [
+        "sglang:python/sglang/srt/layers/attention/triton_ops/decode_attention.py:253-521"
+      ],
+      "kunlun_impl": [
+        "sglang-kunlun:sglang_kunlun/hooks/layers/attention/kunlun_backend.py:1478-1618 calls kunlun_ops.speculative_attention for ordinary decode and carries the SWA window"
+      ],
+      "kunlun_equivalence": "BYPASSED_BY_KUNLUN_ATTENTION_BACKEND",
+      "parameter_capture": {
+        "direct_parameter_tensors": [],
+        "full_checkpoint": false,
+        "module_state_dict": false
+      },
+      "replay_replace_check": "Kunlun does not enter the upstream Triton decode backend.",
+      "verdict": "READY"
+    },
+    {
+      "operator_id": "sglang.srt.layers.attention.triton_ops.decode_attention._fwd_kernel_stage2",
+      "model_path": [
+        "target"
+      ],
+      "input_mode": "text-only",
+      "activation_guard": "text decode, CUDA Triton backend, split-KV merge",
+      "call_chain": [
+        "Step3p7ForConditionalGeneration.forward",
+        "general_mm_embed_routine(text-only)",
+        "Step3p5ForCausalLM.forward",
+        "RadixAttention.forward",
+        "TritonAttnBackend.forward_decode",
+        "decode_attention._fwd_kernel_stage2"
+      ],
+      "kernel_call": {
+        "symbol": "sglang.srt.layers.attention.triton_ops.decode_attention._fwd_kernel_stage2",
+        "kind": "triton",
+        "capture_seam": "sglang.srt.layers.attention.triton_ops.decode_attention.decode_attention_fwd"
+      },
+      "boundary": {
+        "inputs": [
+          "mid_out",
+          "mid_logsumexp"
+        ],
+        "parameters": [],
+        "non_tensor_args": [],
+        "outputs": [
+          "output"
+        ]
+      },
+      "cuda_impl": [
+        "sglang:python/sglang/srt/layers/attention/triton_ops/decode_attention.py:523-713"
+      ],
+      "kunlun_impl": [
+        "sglang-kunlun:sglang_kunlun/hooks/layers/attention/kunlun_backend.py:1478-1618 bypasses both upstream decode stages"
+      ],
+      "kunlun_equivalence": "BYPASSED_BY_KUNLUN_ATTENTION_BACKEND",
+      "parameter_capture": {
+        "direct_parameter_tensors": [],
+        "full_checkpoint": false,
+        "module_state_dict": false
+      },
+      "replay_replace_check": "Kunlun does not enter the upstream Triton decode backend.",
+      "verdict": "READY"
+    }
+  ],
+  "gap_queue": [
+    {
+      "operator_id": "sgl_kernel.gemma_rmsnorm",
+      "verdict": "CAPTURE_REQUIRED",
+      "runtime_status": "STATIC_GAP_CANDIDATE",
+      "demo_role": "SELECTED"
+    },
+    {
+      "operator_id": "sgl_kernel.gemma_fused_add_rmsnorm",
+      "verdict": "CAPTURE_REQUIRED",
+      "runtime_status": "STATIC_GAP_CANDIDATE",
+      "demo_role": "DEFERRED"
+    },
+    {
+      "operator_id": "sgl_kernel.topk_sigmoid",
+      "verdict": "CAPTURE_REQUIRED",
+      "runtime_status": "STATIC_GAP_CANDIDATE",
+      "demo_role": "DEFERRED"
+    },
+    {
+      "operator_id": "sglang.srt.layers.attention.triton_ops.prefill_attention._fwd_kernel",
+      "verdict": "CAPTURE_REQUIRED",
+      "runtime_status": "CONDITIONAL_STATIC_GAP_CANDIDATE",
+      "demo_role": "DEFERRED"
+    }
+  ],
+  "selection": {
+    "evaluated_after_scan": true,
+    "active_operator": "sgl_kernel.gemma_rmsnorm",
+    "candidates": [
+      {
+        "operator_id": "sgl_kernel.gemma_rmsnorm",
+        "input_mode": "text-only",
+        "reachability": "UNCONDITIONAL_ON_FIXED_TEXT_PATH",
+        "saved_direct_parameters": [
+          "weight"
+        ],
+        "output_complexity": "one tensor",
+        "tp_dependency": "none",
+        "repair_surface": "reuse existing Kunlun ordinary RMSNorm with Gemma weight semantics",
+        "decision": "SELECTED"
+      },
+      {
+        "operator_id": "sgl_kernel.gemma_fused_add_rmsnorm",
+        "input_mode": "text-only",
+        "reachability": "UNCONDITIONAL_ON_FIXED_TEXT_PATH",
+        "saved_direct_parameters": [
+          "weight"
+        ],
+        "output_complexity": "two in-place tensors",
+        "tp_dependency": "none",
+        "repair_surface": "reuse existing Kunlun fused RMSNorm with Gemma weight semantics",
+        "decision": "DEFERRED_LARGER_INPLACE_BOUNDARY"
+      },
+      {
+        "operator_id": "sgl_kernel.topk_sigmoid",
+        "input_mode": "text-only",
+        "reachability": "UNCONDITIONAL_ON_FIXED_TEXT_PATH",
+        "saved_direct_parameters": [
+          "correction_bias"
+        ],
+        "output_complexity": "float weights plus exact integer ids",
+        "tp_dependency": "none at kernel call",
+        "repair_surface": "PyTorch sigmoid, biased topk, gather, renormalize, and ordering compatibility",
+        "decision": "DEFERRED_MORE_OUTPUT_SEMANTICS"
+      },
+      {
+        "operator_id": "sglang.srt.layers.attention.triton_ops.prefill_attention._fwd_kernel",
+        "input_mode": "single-image",
+        "reachability": "CONDITIONAL_ON_CUDA_MM_BACKEND",
+        "saved_direct_parameters": [],
+        "output_complexity": "attention output plus sequence metadata inputs",
+        "tp_dependency": "rank-local q/k/v layout",
+        "repair_surface": "map vision attention metadata and layout to Kunlun attention",
+        "decision": "DEFERRED_LARGER_CONDITIONAL_BOUNDARY"
+      }
+    ],
+    "reason": "gemma_rmsnorm is reached by every text layer q/k normalization, has one output, no TP collective, one directly consumed 1-D parameter, and an existing Kunlun RMSNorm primitive. P800 baseline must still confirm the runtime gap."
+  },
+  "capture_plan": [
+    {
+      "operator_id": "sgl_kernel.gemma_rmsnorm",
+      "hook_target": "sglang.srt.layers.layernorm.gemma_rmsnorm",
+      "max_distinct_shapes": 3,
+      "tp_rank": 0,
+      "replay_mode": "standalone-kernel-call",
+      "saved_inputs": [
+        "x"
+      ],
+      "saved_parameters": [
+        "weight"
+      ],
+      "saved_non_tensor_args": [
+        "eps"
+      ],
+      "saved_outputs": [
+        "output"
+      ],
+      "save_direct_parameter_tensors": true,
+      "save_full_checkpoint": false,
+      "save_module_state_dict": false,
+      "adapter_status": "NOT_IMPLEMENTED"
+    }
+  ],
+  "scan_complete": true,
+  "evidence": [
+    "scan.log"
+  ]
+}

@@ -20,7 +20,7 @@ json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False).enco
 {
   "schema": "migration-spec/v0",
   "spec_id": "step3p7-flash-p800-demo",
-  "contract_revision": 4,
+  "contract_revision": 5,
   "model": "Step-3.7-Flash",
   "source": {
     "sglang_revision": "49e384ce9d304648e9959666ecb8ce8cd98d0deb",
@@ -34,10 +34,15 @@ json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False).enco
     "target_entry": "Step3p7ForConditionalGeneration.forward",
     "draft_entry": null
   },
-  "operator_boundary": {
-    "id": "Step3p5MLP.forward",
-    "activation_guard": "self.limit is not None",
-    "tp_rank": 0
+  "scan_scope": {
+    "model_paths": [
+      "target"
+    ],
+    "granularity": "kernel-call",
+    "input_modes": [
+      "text-only",
+      "single-image"
+    ]
   },
   "runtime": {
     "tensor_parallel_size": 8,
@@ -48,7 +53,15 @@ json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False).enco
     "cuda_graph_backend_prefill": "disabled",
     "attention_backend": null
   },
-  "demo_input_mode": "text-only",
+  "sample_policy": {
+    "capture_tp_rank": 0,
+    "save_inputs": true,
+    "save_expected_outputs": true,
+    "save_direct_parameter_tensors": true,
+    "parameter_scope": "selected-kernel-call-current-rank",
+    "save_full_checkpoint": false,
+    "save_module_state_dict": false
+  },
   "limits": {
     "max_shapes_per_operator": 3,
     "max_repair_attempts": 5
@@ -75,15 +88,17 @@ json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False).enco
 
 ### Goal
 
-在 target-only eager 模式下扫描固定版本 Step-3.7-Flash 的实际模型路径，记录 CUDA 与 Kunlun 的全部 Operator Gap；在一次 CUDA Capture Session 中采集所需 Golden Samples，由人工把 Handoff Bundle 复制到 P800；随后在最多五轮修复内关闭一个 P800 baseline 真实失败的算子，最多验收三种实际 shape。
+在 target-only eager 模式下，以现有 kernel/device-compute 调用为边界扫描固定版本 Step-3.7-Flash 的文本与单图实际路径，记录 CUDA 与 Kunlun 的 Operator Gap。扫描完成后从 gap queue 选择最小 Demo；在一次 CUDA Capture Session 中采集最多三种真实 shape，由人工把 Handoff Bundle 复制到 P800；随后在最多五轮修复内关闭一个 P800 baseline 真实失败的 kernel 调用。
 
 ### Fixed inputs
 
 - 模型名由 Skill 调用参数写入 Contract Data；本 Demo 的值必须是 `Step-3.7-Flash`。
-- SGLang 与 SGLang-Kunlun revision、checkpoint、配置摘要、target 入口、TP8、BF16、target-only eager 和 Demo 输入模式全部由 Contract Data 固定。CUDA 与 P800 使用同一组启动参数；不传量化或投机解码参数，不额外传 MTP 开关，也不显式传 attention backend。运行后解析出的两端实际 backend 必须分别进入 Scan/Capture 证据。
+- SGLang 与 SGLang-Kunlun revision、checkpoint、配置摘要、target 入口、TP8、BF16、target-only eager 和扫描输入模式全部由 Contract Data 固定。CUDA 与 P800 使用同一组启动参数；不传量化或投机解码参数，不额外传 MTP 开关，也不显式传 attention backend。运行后解析出的两端实际 backend 必须分别进入 Scan/Capture 证据。
 - eager 固定为 decode 与 prefill 的 CUDA Graph backend 都是 `disabled`。`draft_entry: null` 与 `speculative_algorithm: null` 表示不加载 draft 路径，不得把 eager 解释为 EAGLE。
-- Demo 直接使用原始源码中的 `Step3p5MLP.forward`，激活条件固定为 `self.limit is not None`。不得要求或新增特殊 SwiGLU helper，也不得把内部 `gate_up`、`gate`、`up` 或表达式升级为独立 Demo 算子。
-- CUDA 只允许一个 Capture Session；TP8 模型中只保存 rank 0 的边界输入 `x` 和 CUDA `output`，每个算子最多保存三个去重后的真实 shape。权重由两端同一 checkpoint 的当前 rank 分片提供，不进入 Golden Sample。
+- 扫描边界是源码中已经存在、可直接调用和替换的 kernel/device-compute 调用。CUDA extension、Triton、SGLang JIT、第三方 kernel 和真实不兼容的 Torch 调用都在范围内；不得为打桩新增 helper、自定义算子函数或整层 wrapper。
+- Contract 不保存或预选 `active_operator`。只有 `scan-005` 完成 CUDA/Kunlun 证据与候选比较后，Working State 才能从 gap queue 写入一个活动 kernel 调用。
+- 扫描同时覆盖 `text-only` 和固定最小 `single-image` 请求。输入模式是扫描范围，不表示唯一 CUDA Session 要采集所有候选；最小 Demo 只采集选中的活动算子。
+- CUDA 只允许一个 Capture Session；TP8 中只保存 rank 0，每个算子最多保存三个去重后的真实 shape。Golden Sample 保存重放所需的输入、CUDA 期望输出和必要非 Tensor 参数；可以保存当前 kernel 调用直接使用的当前 rank 参数 Tensor，但不得保存完整 checkpoint、module `state_dict` 或无关参数。
 - `max_repair_attempts` 固定为五；baseline 不计数，通过轮计数。
 - Precision Gate 本 Demo 固定为 `atol=0.01`、`rtol=0.02`。
 
@@ -93,9 +108,9 @@ json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False).enco
 
 1. Contract 已由人批准，全部必填值已填写，所有工具结果都绑定同一 Contract Data。
 2. target-only eager 实际路径扫描完成，每条结论都有源码或运行证据。
-3. 所有发现的 Operator Gap 都进入 gap queue，所有 `CAPTURE_REQUIRED` 项都纳入唯一 CUDA Capture Session。
-4. `Step3p5MLP.forward` 的 rank 0 边界输入 `x` 和 CUDA `output` 已保存，最多三个不同真实 shape；Golden Sample 不包含权重和内部 Tensor。
-5. Golden Run 在已加载同一 checkpoint 的 CUDA TP8 模型 rank 0 上全部 self-replay 通过，bundle 在 CUDA 与 P800 两端校验通过。
+3. 所有发现的 Operator Gap 都进入 gap queue；活动算子是在扫描完成后按最小可重放/可修复边界从队列选择，而不是由 Contract 预设。
+4. 活动 kernel 调用的 rank 0 输入、必要的直接参数 Tensor 和 CUDA 期望输出已保存，最多三个不同真实 shape；Golden Sample 不包含完整 checkpoint、module state 或无关 Tensor。
+5. Golden Run 在 CUDA rank 0 上按该 kernel 的实际调用签名 self-replay 通过，bundle 在 CUDA 与 P800 两端校验通过。
 6. 被选作 Demo 的算子在 P800 baseline 中至少有一个样本执行或精度失败。
 7. 修复没有超出 Repair Boundary；baseline 不计数，修复不超过五轮。
 8. 该算子的全部已保存样本都通过固定 Precision Gate。
@@ -104,7 +119,7 @@ json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False).enco
 
 ### Non-goals
 
-- 不要求关闭其他 Operator Gap、覆盖第四种以后 shape，或证明 TP8 的全部八个权重分片都通过。
+- 不要求首个 Demo 关闭其他 Operator Gap、覆盖第四种以后 shape，或证明 TP8 的全部八个 rank 都通过；扩展到全部缺口属于后续工作。
 - 不迁移 DecoderLayer、完成模型组网、服务拉起、回复质量或 E2E logits 对齐。
 - 不做吞吐、延迟或大 batch 性能优化。
 - 不自动跨机器复制、管理凭证或新增 C++、自定义 Kernel、底层算子注册。
@@ -114,7 +129,7 @@ json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False).enco
 - 比较器、`atol`、`rtol` 和结构要求从 Contract Data 读取，Agent 和命令行不得覆盖或放宽。
 - 输出容器结构、Tensor 叶子路径、shape 和 dtype 必须一致；非 Tensor 叶子按原值相等。
 - CUDA expected 与 P800 actual 的所有数字 Tensor 都必须是有限值。
-- 对应 Tensor 保持原 dtype 复制到 CPU，然后显式使用 Contract Data 的容差调用 `torch.testing.assert_close`。
+- 对应 Tensor 保持原 dtype 复制到 CPU，然后显式调用 `torch.testing.assert_close`；浮点 Tensor 使用 Contract Data 的容差，整数和布尔 Tensor 必须精确相等。
 - `check_stride` 为 `false`；输出 stride 不属于本 Demo 的通过门槛。
 - 每个 Golden Sample 必须单独通过。P800 actual output 只在内存中比较，不保存 actual Tensor。
 
@@ -124,7 +139,7 @@ json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False).enco
 - Migration Agent 不得修改已批准 Contract、修改 Precision Gate、自动跨机器复制、取得新凭证或扩大到完整模型。
 - Deterministic Tool 只解析 Contract Data，并接收当前动作的显式参数；它们不得读取或修改 Working State。
 - 工具负责生成和校验 Handoff Bundle，人工负责复制；P800 必须先校验 manifest 才能读取 Golden Tensor。
-- P800 修复只允许活动 Semantic Operator 的 Python、P800 可执行的 PyTorch、已有 xspeedgate/kunlun_ops 能力和聚焦测试。
+- P800 修复只允许活动 kernel 调用的 Python、P800 可执行的 PyTorch、已有 xspeedgate/kunlun_ops 能力和聚焦测试。
 - 工具不创建或切换分支，不 commit、不 push，也不清理未知用户修改。
 
 ### State model
@@ -146,13 +161,12 @@ json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False).enco
 | From | Guard | To | Working State 必须同步记录 |
 |---|---|---|---|
 | `ACTIVE / SCAN` | target-only eager 扫描完成；没有未决边界；至少有一个采集候选 | `ACTIVE / CUDA_CAPTURE` | Scan Run、覆盖计数、gap queue、唯一下一动作 |
-| `ACTIVE / SCAN` | 实际调用或 Semantic Operator 边界不能可靠确定 | `NEEDS_HUMAN / SCAN` | stop reason、证据、一个人类问题 |
+| `ACTIVE / SCAN` | 实际 kernel 调用、两端等价路径或保存边界不能可靠确定 | `NEEDS_HUMAN / SCAN` | stop reason、证据、一个人类问题 |
 | `ACTIVE / SCAN` | 固定范围内没有 Demo 候选 | `BLOCKED / SCAN` | 原因和 Scan Run |
 | `ACTIVE / CUDA_CAPTURE` | 唯一 Session 完成；self-replay 和 CUDA 端 bundle 校验通过 | `WAITING / HANDOFF` | Golden Run、bundle、manifest、人工复制动作 |
 | `ACTIVE / CUDA_CAPTURE` | Session 已消耗且无法形成有效 Golden | `BLOCKED / CUDA_CAPTURE` | 失败 Run；禁止重开 Session |
 | `WAITING / HANDOFF` | bundle 在 P800 通过 manifest 校验 | `ACTIVE / P800_REPAIR` | P800 验证 Run、baseline replay 下一动作 |
-| `ACTIVE / P800_REPAIR` | 当前候选 baseline 全部通过 | 保持 `ACTIVE / P800_REPAIR`，换下一候选 | baseline Run；不增加尝试次数 |
-| `ACTIVE / P800_REPAIR` | 所有候选 baseline 都通过 | `BLOCKED / P800_REPAIR` | “没有真实 gap”和全部 baseline Run |
+| `ACTIVE / P800_REPAIR` | 活动候选 baseline 全部通过 | `BLOCKED / P800_REPAIR` | “首选静态候选不是实机 correctness gap”和 baseline Run；不得重访 CUDA |
 | `ACTIVE / P800_REPAIR` | baseline 至少一个样本失败 | 保持 `ACTIVE / P800_REPAIR` | 活动算子、baseline Run、`attempts_used: 0`、单一假设 |
 | `ACTIVE / P800_REPAIR` | 本轮失败且尚未达到第五轮 | 保持 `ACTIVE / P800_REPAIR` | 失败 Run、恢复基线、下一条单一假设 |
 | `ACTIVE / P800_REPAIR` | 全部样本通过且 Demo Closure 完整 | `PASS / DONE` | `passing_run`、最终 patch、closure 证据 |
@@ -179,6 +193,7 @@ json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False).enco
 | `2` | 本轮 Demo 只推进 `activation.step_swiglu_with_limit`；`norm.gemma_rms`、`moe.topk_sigmoid_bias`、`moe.bf16_clamped` 保留在 gap queue 作为后续工作 | 用户批准特殊 SwiGLU 先完成 N 卡 Golden 采集验证；唯一 CUDA Session 启动时同时记录实际 CUDA attention 与 MoE backend，其他缺口不阻塞本轮验证 |
 | `3` | 纠正为 target-only eager：不启用投机解码，不加载 draft 路径，decode 与 prefill 都禁用 CUDA Graph | 用户澄清此前的 EAGLE 是术语误解；两端仍使用同一组启动参数，其他 TP8、BF16、样本、容差、权限和修复边界不变 |
 | `4` | 直接以原始 `Step3p5MLP.forward` 为 Demo 算子，在 TP8 模型中只采集和重放 rank 0；不新增 helper | 用户要求保持模型原始算子边界；源码确认特殊 shared expert 的 `down_proj` 使用 `reduce_results=False`，归约发生在该边界之后，因此 rank 0 足以验证最小流程，完整八 rank 验证留待后续扩展 |
+| `5` | Contract 不再预选 MLP；固定 kernel-call 扫描范围、文本/单图输入和直接参数保存规则，扫描完成后再选择活动算子 | 用户要求扫描 CUDA 已实现而 Kunlun 缺失的实际 kernel 调用，Triton 只是一种实现；允许保存当前调用直接使用的参数 Tensor，但禁止完整权重，并要求比较 topk、视觉 attention 与其他真实缺口后选择最小 Demo |
 
 <!-- HUMAN-OWNED CONTRACT: END -->
 
@@ -190,35 +205,35 @@ Agent 每次动作前完整读取 Contract 与本区；每次动作结束后立�
 
 ### Current
 
-- `observed_contract_revision`: `4`
-- `state_revision`: `11`
+- `observed_contract_revision`: `5`
+- `state_revision`: `14`
 - `status`: `ACTIVE`
 - `phase`: `CUDA_CAPTURE`
-- `execution_site`: `CUDA`
-- `active_operator`: `Step3p5MLP.forward`
-- `last_completed_action`: `original_mlp_target_scan_completed`
-- `last_run`: `runs/scan-004`
-- `next_action`: `在 CUDA 机器运行 revision 4 capture_golden.py preflight，验证 scan-004、原始 Step3p5MLP.forward Hook 和 rank 0 样本格式`
+- `execution_site`: `SOURCE`
+- `active_operator`: `sgl_kernel.gemma_rmsnorm`
+- `last_completed_action`: `kernel_level_scan_and_demo_selection_completed`
+- `last_run`: `runs/scan-005`
+- `next_action`: `实现 Ticket 22 的 sgl_kernel.gemma_rmsnorm capture/replay adapter；本地测试通过前不得运行 CUDA preflight`
 
 规则：`ACTIVE` 时 `next_action` 必须恰好一条；`WAITING` 时必须是一条人工动作；`PASS`、`BLOCKED`、`NEEDS_HUMAN` 时必须为 `none`。
 
 ### Scan
 
-- `scan_run`: `runs/scan-004`
+- `scan_run`: `runs/scan-005`
 - `target_coverage`: `COMPLETE`
 - `draft_coverage`: `NOT_APPLICABLE`
-- `operator_counts`: `{ready: 8, capture_required: 1, needs_human: 4}`
+- `operator_counts`: `{ready: 7, capture_required: 4, needs_human: 0}`
 
 #### Gap queue
 
 | operator_id | scan_verdict | golden | demo_role | repair | evidence |
 |---|---|---|---|---|---|
-| `Step3p5MLP.forward` | `CAPTURE_REQUIRED` | `PLANNED` | 首选流程验证候选 | 待 P800 rank 0 baseline 证明真实失败 | `runs/scan-004/result.json` |
-| `norm.gemma_rms` | `NEEDS_HUMAN` | `NOT_PLANNED` | 后续缺口 | 现行边界禁止保存 norm weight | `runs/scan-004/result.json` |
-| `moe.topk_sigmoid_bias` | `NEEDS_HUMAN` | `NOT_PLANNED` | 后续缺口 | 现行边界禁止保存 router bias | `runs/scan-004/result.json` |
-| `moe.bf16_clamped` | `NEEDS_HUMAN` | `NOT_PLANNED` | 后续缺口 | 当前替换边界包含 expert weights | `runs/scan-004/result.json` |
+| `sgl_kernel.gemma_rmsnorm` | `CAPTURE_REQUIRED` | `PLANNED` | 首选最小 Demo | 缺少 Gemma symbol；待 P800 baseline 证明真实失败 | `runs/scan-005/result.json` |
+| `sgl_kernel.gemma_fused_add_rmsnorm` | `CAPTURE_REQUIRED` | `NOT_PLANNED` | 后续缺口 | 双 in-place 输出比首选边界复杂 | `runs/scan-005/result.json` |
+| `sgl_kernel.topk_sigmoid` | `CAPTURE_REQUIRED` | `NOT_PLANNED` | 对比候选 | 权重与 ids 双输出、排序语义比首选复杂 | `runs/scan-005/result.json` |
+| `sglang.srt.layers.attention.triton_ops.prefill_attention._fwd_kernel` | `CAPTURE_REQUIRED` | `NOT_PLANNED` | 图像对比候选 | 只在单图视觉路径激活，metadata 和布局更多 | `runs/scan-005/result.json` |
 
-完整 target-only operator 列表、计数和未决的 attention backend 运行证据保存在 `scan-004`；Spec 的 gap queue 只保留原始 MLP 边界与三个已确认后续缺口。旧 `scan-003` 保留为 revision 3 的 helper 历史证据，不再作为当前 preflight 输入。
+完整 kernel 调用清单、两端证据和候选排序保存在 `scan-005`。首选 `sgl_kernel.gemma_rmsnorm` 是因为它在固定文本路径必达，只需 `x`、直接参数 `weight`、标量 `eps` 和单个输出，无 TP 通信，并可复用 Kunlun 已有普通 RMSNorm 能力。这个选择仍是静态缺口候选，必须由 P800 baseline 证明实际失败。`scan-004` 及更早 Run 只作历史证据，不再作为当前 preflight 输入。
 
 ### CUDA Capture
 
@@ -251,9 +266,9 @@ baseline replay 不算修复尝试。每轮修改源码前递增 `attempts_used`
 
 | item | status | evidence |
 |---|---|---|
-| Contract approved and tool bindings match | `PASS` | `runs/spec-binding-003/result.json` |
-| target-only eager scan complete | `PASS` | `runs/scan-004/result.json` |
-| gap queue complete | `PASS` | `runs/scan-004/result.json` |
+| Contract approved and tool bindings match | `PASS` | `runs/spec-binding-004/result.json` |
+| target-only eager kernel scan complete | `PASS` | `runs/scan-005/result.json` |
+| gap queue and Demo selection complete | `PASS` | `runs/scan-005/result.json` |
 | one CUDA Session and at most three samples per operator | `PENDING` | `null` |
 | CUDA self-replay passed | `PENDING` | `null` |
 | bundle verified on CUDA and P800 | `PENDING` | `null` |
@@ -286,5 +301,8 @@ baseline replay 不算修复尝试。每轮修改源码前递增 `attempts_used`
 | `9` | 对齐 Contract revision 4，恢复原始 `Step3p5MLP.forward` 边界并把 Demo 精度范围收紧到 TP8 rank 0 | `migration-spec.md#human-decisions`、`.scratch/step3p7-p800-migration-tool/issues/19-restore-step3p5-mlp-boundary.md` |
 | `10` | revision 4 Spec 绑定自检通过 | `runs/spec-binding-003/result.json` |
 | `11` | `scan-004` 以原始 MLP 边界替代 helper，保留完整 target-only eager 算子清单；进入 rank 0 CUDA preflight | `runs/scan-004/result.json` |
+| `12` | 对齐 Contract revision 5，取消预选 MLP，回到 kernel-call 扫描范围 | `migration-spec.md#human-decisions`、`.scratch/step3p7-p800-migration-tool/issues/21-kernel-level-scan-and-demo-selection.md` |
+| `13` | revision 5 Spec 绑定自检通过 | `runs/spec-binding-004/result.json` |
+| `14` | `scan-005` 比较文本与单图实际 kernel 缺口，选择 `sgl_kernel.gemma_rmsnorm` 作为最小 Demo；旧 MLP adapter 不可消费 revision 5 | `runs/scan-005/result.json` |
 
 <!-- AGENT-WRITABLE WORKING STATE: END -->

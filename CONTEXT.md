@@ -29,21 +29,21 @@ The SGLang execution boundary in which both decode and prefill CUDA Graph backen
 _Avoid_: EAGLE, debug CUDA Graph
 
 **Operator Gap**:
-A model-path operation whose CUDA implementation exists but whose Kunlun implementation is absent or cannot reproduce the required behavior on P800.
+A kernel call on the fixed model path whose CUDA implementation exists but whose Kunlun path is absent or cannot reproduce the required behavior on P800. A missing same-name symbol is not enough when Kunlun bypasses it with an equivalent higher-level implementation.
 _Avoid_: Generic support matrix, source-code difference
 
-**Semantic Operator**:
-The smallest model-path computation with explicit replayable inputs and outputs that can be replaced independently at its SGLang call site. It may contain several basic PyTorch operations.
-_Avoid_: Every tensor primitive, entire decoder layer
+**Kernel Call**:
+The smallest existing device-compute call on the fixed model path with explicit replayable inputs and outputs. It can be a CUDA extension, Triton kernel, SGLang JIT call, third-party kernel, or an actually incompatible Torch call. Scanning and capture use the existing call site and never introduce a helper just to create a boundary.
+_Avoid_: Metadata-only tensor expression, helper invented for capture, entire model layer
 
 **READY**:
-A scanned semantic operator whose P800-executable implementation and required behavior can both be established from available evidence.
+A scanned kernel call whose P800-executable implementation or equivalent Kunlun bypass and required behavior can both be established from available evidence.
 
 **CAPTURE_REQUIRED**:
-A scanned semantic operator that lacks a Kunlun implementation, depends on a CUDA-only path, or cannot be judged semantically from source alone and therefore requires CUDA Golden Capture.
+A scanned kernel call that lacks a Kunlun implementation, depends on a CUDA-only path, or cannot be judged from source alone and therefore requires CUDA Golden Capture.
 
 **NEEDS_HUMAN**:
-A scanned path whose call relationship or semantic operator boundary cannot be determined reliably by the agent.
+A scanned path whose call relationship, Kunlun equivalence, or replay boundary cannot be determined reliably by the agent.
 
 **CUDA Golden Capture**:
 The one-time collection of replayable operator inputs and expected outputs from an instrumented SGLang CUDA run for the identified Operator Gaps.
@@ -54,7 +54,7 @@ The single CUDA-side execution that gathers all required Golden Samples, retaini
 _Avoid_: One sample total, repeated CUDA visits
 
 **Golden Sample**:
-A self-replay-verified record of one Semantic Operator invocation, including the exact inputs, expected outputs, and execution context required to replay it inside the necessary loaded model state.
+A self-replay-verified record of one Kernel Call invocation. It contains exact inputs, expected outputs, necessary non-Tensor arguments, and may contain parameter Tensors directly consumed by that call. It never contains a complete checkpoint, module state_dict, or unrelated parameters.
 _Avoid_: Output-only snapshot, arbitrary hidden-state dump
 
 **Precision Gate**:
@@ -78,7 +78,7 @@ The repeated process on the P800 machine that replays captured inputs, creates o
 _Avoid_: CUDA-P800 online loop
 
 **Repair Boundary**:
-The agent's permitted repair scope: one Semantic Operator implemented through P800-executable Python, PyTorch, or existing xspeedgate operations, plus its focused replay test.
+The agent's permitted repair scope: one Kernel Call implemented through P800-executable Python, PyTorch, or existing xspeedgate/kunlun_ops operations, plus its focused replay test.
 _Avoid_: Decoder-layer changes, model assembly, new native-kernel registration
 
 **BLOCKED**:

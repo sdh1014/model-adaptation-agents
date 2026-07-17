@@ -1,0 +1,8 @@
+{
+  "actual": {
+    "spec_binding_smoke": "ready"
+  },
+  "expected": {
+    "spec_binding_smoke": "ready"
+  }
+}

@@ -120,15 +120,15 @@ class Ticket18TargetOnlyEagerScanTest(unittest.TestCase):
                 ).hexdigest()
                 self.assertEqual(actual, expected_digest)
 
-    def test_spec_supersedes_scan_003_with_revision_4_cuda_preflight(self):
+    def test_spec_advances_from_historical_scan_to_revision_5_kernel_adapter(self):
         spec = (ROOT / "migration-spec.md").read_text(encoding="utf-8")
-        self.assertIn("- `scan_run`: `runs/scan-004`", spec)
-        self.assertIn("- `last_run`: `runs/scan-004`", spec)
+        self.assertIn("- `scan_run`: `runs/scan-005`", spec)
+        self.assertIn("- `last_run`: `runs/scan-005`", spec)
         self.assertIn("- `draft_coverage`: `NOT_APPLICABLE`", spec)
         self.assertIn("- `phase`: `CUDA_CAPTURE`", spec)
         self.assertIn(
-            "`next_action`: `在 CUDA 机器运行 revision 4 capture_golden.py "
-            "preflight，验证 scan-004、原始 Step3p5MLP.forward Hook 和 rank 0 样本格式`",
+            "`next_action`: `实现 Ticket 22 的 sgl_kernel.gemma_rmsnorm "
+            "capture/replay adapter；本地测试通过前不得运行 CUDA preflight`",
             spec,
         )
 

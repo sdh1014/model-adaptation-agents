@@ -14,6 +14,7 @@ from _lib.spec_contract import (
     canonical_json_bytes,
     load_contract_data,
     load_spec_binding,
+    uses_kernel_scan_contract,
 )
 from model_adaptation_capture.contracts import (
     OPERATOR_ID,
@@ -34,6 +35,14 @@ DEFAULT_SYNTHETIC_CASE = {
     "expected": {"spec_binding_smoke": "ready"},
     "actual": {"spec_binding_smoke": "ready"},
 }
+
+
+def require_loaded_model_mlp_adapter(contract: Dict[str, Any]) -> None:
+    if uses_kernel_scan_contract(contract):
+        raise ToolError(
+            "kernel capture/replay adapter is not implemented for revision 5; "
+            "do not fall back to the revision 4 loaded-model MLP replay"
+        )
 
 
 def read_synthetic_case(case_path: Optional[Path]) -> Dict[str, Any]:
@@ -263,6 +272,7 @@ def run_prepare_model_replay(
 ) -> None:
     binding = load_spec_binding(spec_path)
     contract = load_contract_data(spec_path)
+    require_loaded_model_mlp_adapter(contract)
     tp_size = contract["runtime"]["tensor_parallel_size"]
     tp_rank = contract["operator_boundary"]["tp_rank"]
     max_shapes = contract["limits"]["max_shapes_per_operator"]
@@ -345,6 +355,7 @@ def run_prepare_model_replay(
 def run_finalize_model_replay(spec_path: Path, run_dir: Path) -> None:
     binding = load_spec_binding(spec_path)
     contract = load_contract_data(spec_path)
+    require_loaded_model_mlp_adapter(contract)
     try:
         checkpoint = checkpoint_metadata(
             contract["checkpoint"]["id"],

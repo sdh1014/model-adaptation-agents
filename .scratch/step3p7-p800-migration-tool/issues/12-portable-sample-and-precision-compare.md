@@ -2,13 +2,13 @@
 
 Type: task
 Status: ready-for-human
-Blocked by: 20
+Blocked by: 22
 
 ## What to build
 
 使用一个无权重的合成算子样本，在实际 CUDA Torch 和 P800 修改版 Torch 环境中验证可移植的数据格式，再把验证通过的格式用于 Golden Sample。
 
-Golden Sample 只保存边界输入 Tensor、CUDA 期望输出 Tensor、容器结构和重放必需的非 Tensor 参数。默认不保存权重、内部中间 Tensor、完整 batch、KV cache 或运行时对象。
+Golden Sample 保存 kernel 边界输入 Tensor、CUDA 期望输出 Tensor、容器结构和重放必需的非 Tensor 参数。revision 5 允许保存当前 kernel 调用直接使用的参数 Tensor；不保存完整 checkpoint、module `state_dict`、无关参数、完整 batch、KV cache 或运行时对象。
 
 完成 `replay_compare.py` 的最小可信比较路径：先检查容器结构、shape、dtype 和有限值，再使用 Contract 固定的 `torch.testing.assert_close`、`atol` 和 `rtol` 判定。P800 actual output 只在当前进程内存中参与比较，不额外保存。
 
@@ -53,3 +53,8 @@ Ticket 20 已完成并解除阻塞。revision 4 在 TP8 模型中只采集和重
 - 隔离 wheel 安装和 runbook 使用的 editable 安装都能发现唯一的 `model_adaptation_capture -> model_adaptation_capture.plugin:register` entry point。完整 SGLang loader 仍必须在依赖齐全的 N 卡 SGLang Python 中验证；本机环境缺少 `orjson`，没有把该失败写成插件或算子结论。
 - Claude Code 2.1.191 的只读 headless smoke 确认项目 `.claude/skills` 被加载且发现唯一项目 Skill；该 smoke 禁用了 Bash，并在形成最终回复前达到预算上限，因此只作为 Skill 发现证据，不作为 CUDA preflight 通过证据。
 - runbook 现在要求调用者显式设置非空 `SGLANG_WORKTREE`；空值会硬失败，不再可能退回默认目录后以 `skipped` 退出。
+
+2026-07-17 revision 5 更新：Ticket 21 已用 `scan-005` 选择
+`sgl_kernel.gemma_rmsnorm`，本票据现在由 Ticket 22 的 kernel adapter 阻塞。旧
+`scan-004` MLP preflight 不再是当前人工动作。跨端格式验证要覆盖直接参数
+`weight`，同时证明完整 checkpoint 和 module state 会被拒绝。

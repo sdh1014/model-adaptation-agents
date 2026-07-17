@@ -1,0 +1,38 @@
+scan_id=scan-005
+contract_revision=5
+contract_data_sha256=f683ea62427279da3c899a3ef0afcfa1d16298b7424154664c7e3fac9b13d938
+scope=target-only,kernel-call,text-only+single-image,TP8,BF16,eager
+cuda_revision=49e384ce9d304648e9959666ecb8ce8cd98d0deb
+kunlun_revision=546ad8c682392922792bbbfe53a8bf575545f118
+checkpoint=stepfun-ai/Step-3.7-Flash@5f6244077ac62e04eec3f320501ff8c2b293373a
+
+method=static source call-chain audit
+cuda_worktree=/tmp/sglang-step3p7-cuda-original
+kunlun_worktree=/tmp/sglang-step3p7-kunlun-original
+prior_config_evidence=runs/scan-004/checkpoint-config-summary.json
+research_evidence=work/research/step3p7-kernel-gap-inventory.md
+
+rule=enumerate existing device-compute calls reached by the fixed model and input modes
+rule=compare the CUDA call with an exact or higher-level Kunlun execution path
+rule=missing same-name symbol alone is not a gap when Kunlun bypasses the CUDA call
+rule=do not create helper functions, custom operators, or layer wrappers as scan boundaries
+rule=direct parameter tensors consumed by a selected call may be captured
+rule=full checkpoint,module state_dict,and unrelated parameters may not be captured
+
+candidate=sgl_kernel.gemma_rmsnorm verdict=CAPTURE_REQUIRED
+candidate=sgl_kernel.gemma_fused_add_rmsnorm verdict=CAPTURE_REQUIRED
+candidate=sgl_kernel.topk_sigmoid verdict=CAPTURE_REQUIRED
+candidate=sglang.srt.layers.attention.triton_ops.prefill_attention._fwd_kernel verdict=CAPTURE_REQUIRED
+
+ready=sgl_kernel.rmsnorm reason=kunlun stub binds existing kunlun implementation
+ready=sgl_kernel.silu_and_mul reason=kunlun stub binds existing kunlun implementation
+ready=apply_rope_with_cos_sin_cache_inplace reason=kunlun registers the JIT symbol and replaces the rotary method
+ready=fused_moe_kernel reason=kunlun replaces UnquantizedFusedMoEMethod.apply above the CUDA kernel
+ready=text_attention_triton_kernels reason=kunlun attention backend bypasses upstream Triton kernels
+
+selection_evaluated_after_scan=true
+active_operator=sgl_kernel.gemma_rmsnorm
+selection_reason=unconditional text path,one tensor output,no TP communication,one direct 1-D parameter,and existing Kunlun RMSNorm primitive
+runtime_gap_status=STATIC_GAP_CANDIDATE
+next_required_evidence=P800 baseline after capture/replay adapter implementation
+scan_complete=true

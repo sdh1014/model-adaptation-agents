@@ -7,155 +7,247 @@ disable-model-invocation: true
 
 # Input
 
-把用户传给 Skill 的完整参数作为模型名。当前 Demo 只接受精确参数 `Step-3.7-Flash`。
+把用户传给 Skill 的完整参数作为模型名。当前 Demo 只接受精确参数
+`Step-3.7-Flash`。
 
-参数缺失或不同于 `Step-3.7-Flash` 时，报告正确调用方式 `$model-adaptation Step-3.7-Flash` 并停止，不修改 Migration Spec。Spec 已存在时，参数必须与 Contract Data 的 `model` 一致；不一致时同样停止，不把调用错误写成迁移状态。
+参数缺失或不同于 `Step-3.7-Flash` 时，报告正确调用方式
+`$model-adaptation Step-3.7-Flash` 并停止。Spec 已存在时，参数还必须与
+Contract Data 的 `model` 一致。
 
 # Outcome
 
-从迁移工作区中的 `migration-spec.md` 启动或恢复工作，只按其中唯一的 `next_action` 推进，直到当前执行到达 `WAITING`、`PASS`、`BLOCKED` 或 `NEEDS_HUMAN`。
+从工作区中的 `migration-spec.md` 启动或恢复工作，只执行其中唯一的
+`next_action`，直到状态到达 `WAITING`、`PASS`、`BLOCKED` 或
+`NEEDS_HUMAN`。
 
 `migration-spec.md` 是恢复执行的唯一状态来源：
 
-- `Contract` 保存人类批准的目标、输入、门槛、权限和停止规则；批准后本 Skill 不得修改。
-- `Working State` 保存 Agent 可更新的当前阶段、Run 指针和唯一下一动作。
-- `runs/` 保存不可变的命令、日志、补丁和结果；聊天记录不能代替这些内容。
+- `Contract` 保存人类批准的扫描范围、运行参数、样本规则、精度门槛和权限边界；
+  批准后本 Skill 不得修改。
+- `Working State` 保存当前阶段、gap queue、扫描完成后选出的
+  `active_operator`、Run 指针和唯一下一动作。
+- `runs/` 保存不可变证据；聊天记录不能替代它。
 
-每次动作前完整重读 Spec。一次性采集或源码修改按对应分支先记录动作已开始；动作结束后先封存 Run，再更新完成状态。只要状态仍是 `ACTIVE`，就重新读取 Spec 并继续下一轮，不凭记忆接着做。
+每次动作前完整重读 Spec。动作完成后先封存 Run，再更新 Working State。只要状态
+仍是 `ACTIVE`，就重新读取 Spec 后继续，不凭对话记忆恢复。
 
 # Process
 
 ## 1. 找到或创建 Spec
 
-默认使用当前迁移工作区的 `migration-spec.md`；用户给出其他路径时使用该路径。存在多个候选且无法从用户输入唯一确定时，停止并询问路径，不自行合并。
+默认使用当前工作区的 `migration-spec.md`。如果文件不存在：
 
-如果文件不存在：
+1. 完整读取
+   [references/migration-spec-template.md](references/migration-spec-template.md)。
+2. 复制模板为工作区的 `migration-spec.md`。
+3. 只用用户明确提供的值和可引用源码证据填写 Contract；不要猜 checkpoint、
+   revision、输入模式或容差。
+4. 只要有必填值未确定，就保持 `NEEDS_HUMAN / SCAN`、
+   `next_action: none`，只写一个需要人回答的问题，然后停止。
 
-1. 完整读取 [references/migration-spec-template.md](references/migration-spec-template.md)。只在这个分支加载模板。
-2. 把模板复制为工作区的 `migration-spec.md`，不得改写模板文件。
-3. 把已校验的模型参数写入 Contract Data 的 `model`；其他字段只用用户明确提供的值和可引用的源码证据填写，不猜 checkpoint、revision、输入模式或容差。
-4. 只要仍有必填值未确定，就保持 `NEEDS_HUMAN / SCAN`、`next_action: none`，在 `human_question` 中集中写一个需要人回答的问题，然后停止。
+Contract 首次批准前可以形成草稿。批准后的变化必须由人递增
+`contract_revision` 并追加 Human Decision；Skill 只能修改 Working State。
 
-Contract 首次批准前可以代填草稿；一旦 `contract_revision` 是已批准的正整数，后续 Contract 变化必须由人完成并写入 Human Decisions。本 Skill 只能修改 Working State。
+## 2. 校验并恢复
 
-**完成条件：** Spec 已存在；如果 Contract 尚未批准，Working State 准确停在 `NEEDS_HUMAN / SCAN`，且只有一个明确的人类问题。
+完整读取 Contract 和 Working State，依次检查：
 
-## 2. 校验并恢复当前状态
+1. Contract Data 是唯一合法 JSON，`model` 与 Skill 参数一致，
+   `contract_revision` 是正整数，且存在同 revision 的 Human Decision。
+2. 固定运行条件没有漂移：target-only、TP8、BF16、无量化、无 draft 和投机解码、
+   decode/prefill CUDA Graph 都禁用、两端启动参数一致、不显式指定 attention
+   backend。
+3. 扫描约束没有漂移：`model_paths=["target"]`、粒度为 `kernel-call`、输入模式为
+   `text-only` 和 `single-image`。
+4. 样本约束没有漂移：rank 0、每个算子最多三个 shape；保存输入和 CUDA 期望
+   输出；允许保存当前 kernel 调用直接使用的当前 rank 参数 Tensor；禁止完整
+   checkpoint、module `state_dict` 和无关参数。
+5. 比较器为 `torch.testing.assert_close`，固定 `atol=0.01`、
+   `rtol=0.02`，结构、dtype 和有限值检查不变。
+6. Contract Data 中不存在 `active_operator`、`operator_boundary` 或单数
+   `demo_input_mode`。`active_operator` 只能在扫描完成后出现在 Working State。
+7. `ACTIVE` 恰有一条 `next_action`；最近 Run、gap queue 和活动算子引用真实存在。
 
-完整读取 Contract 和 Working State，然后依次检查：
+如果 `contract_revision != observed_contract_revision`，先读最新 Human Decision，
+对齐 Working State，不能直接执行采集或重放。
 
-1. `<!-- CONTRACT-DATA: BEGIN -->` 与 `<!-- CONTRACT-DATA: END -->` 之间只有一个合法 JSON 对象。
-2. Contract Data 的 `model` 与调用参数一致，其他必填值和 `human_owner` 均已填写，Contract 中没有未决占位；`contract_revision` 是正整数；同 revision 的人工批准记录存在。
-3. Demo 固定约束没有漂移：TP 为 8、权重与计算 dtype 为 BF16、量化参数为空、`speculative_algorithm` 与 `draft_entry` 均为空、decode 和 prefill 的 CUDA Graph backend 均为 `disabled`、CUDA 与 P800 使用同一组启动参数且不显式指定 attention backend；原始算子边界为 `Step3p5MLP.forward`，只在 `self.limit is not None` 时处理，验证 rank 固定为 0；每算子最多三个 shape、最多五次修复、比较器为 `torch.testing.assert_close`，且 `atol=0.01`、`rtol=0.02`。
-4. `status / phase` 是 Contract 允许的组合；`ACTIVE` 恰有一条 `next_action`，`WAITING` 恰有一条人工动作，终止状态为 `none`。
-5. `last_run`、活动算子和阶段所引用的 Run/证据真实存在。只读取恢复所需的最近 Run，不默认加载全部历史。
+首次批准时，模板状态必须仍是 `NEEDS_HUMAN / SCAN`。校验通过后，把
+`observed_contract_revision` 设为当前 `contract_revision`，把
+`state_revision` 加一，并写入 `status: ACTIVE`、`phase: SCAN`、
+`last_completed_action: contract_approved`、
+`next_action: 运行 Spec 绑定自检`。
 
-如果 `contract_revision != observed_contract_revision`，先读最新 Human Decision 并重新对齐 Working State，不执行源码修改、CUDA 采集或 P800 重放。`BLOCKED` 或 `NEEDS_HUMAN` 只有在更高 Contract revision 明确解决原停止原因后才能恢复为 `ACTIVE`；`WAITING / HANDOFF` 在 P800 校验成功后可直接恢复，不需要修改 Contract。`PASS` 不可恢复，新目标使用新的 Spec。
+每个新 revision 使用下一个未占用的 `runs/spec-binding-NNN`，调用：
 
-首次批准有一个固定的对齐动作：当前状态必须仍是模板生成的 `NEEDS_HUMAN / SCAN`，最新 Human Decision 必须批准 revision 1，且所有 Contract 必填值已经通过上述校验。满足这些条件后，只更新 Working State：把 `observed_contract_revision` 设为当前 `contract_revision`，把 `state_revision` 加一，写为 `status: ACTIVE`、`phase: SCAN`、`last_completed_action: contract_approved`，并把唯一动作写为 `next_action: 运行 Spec 绑定自检`。同时清空旧的停止原因和人类问题，将 `resume_requires_contract_revision` 设为 `false`。若任一条件不满足，保持 `NEEDS_HUMAN / SCAN`，不得靠改 Working State 绕过批准。
+```text
+scripts/replay_compare.py \
+  --spec <migration-spec.md> \
+  --run-dir <fresh-spec-binding-run> \
+  --mode synthetic
+```
 
-Spec 绑定自检不做真实算子扫描。首次批准创建 `runs/spec-binding-001` 并写入 `last_run: runs/spec-binding-001`；后续每次 Contract revision 变化创建下一个未使用的 `runs/spec-binding-NNN`，本次 revision 4 使用 `runs/spec-binding-003`。调用 `scripts/replay_compare.py --spec <migration-spec.md> --run-dir <fresh-spec-binding-run> --mode synthetic`；这个模式使用脚本内固定且相等的 JSON 值，只验证 Contract Data 解析、摘要和 Run 写入，不代替后续 `torch.testing` 精度比较。只有退出码为 `0`、`passed: true`，且结果的三项 Spec 绑定与当前 Contract Data 全部一致时，才封存该 Run。随后把 Working State 的 `state_revision` 再加一，写入 `last_completed_action: spec_binding_smoke_passed`、`last_run: <fresh-spec-binding-run>`，并把唯一动作改为 `next_action: 完成 target-only eager 扫描并生成 Scan Run`。更新后重新读取 Spec；新会话必须先校验 `last_run` 的绑定，再执行这条扫描动作。工具未完成、结果不通过或绑定不一致时，不写成功状态，也不把它记为 Operator Gap。
-
-若 Spec 自相矛盾、证据指针失效、下一动作不唯一，更新 Working State 为 `NEEDS_HUMAN / 当前 phase`，保留证据并只问一个问题。
-
-**完成条件：** 当前状态、Contract revision 和最近证据彼此一致，并且要么得到一条可执行的 `next_action`，要么准确停止。
+只有退出码为 0、`passed: true` 且三项 Spec 绑定完全一致时，才封存绑定 Run 并进入
+扫描。首次绑定写入 `last_run: runs/spec-binding-001`、
+`last_completed_action: spec_binding_smoke_passed` 和
+`next_action: 完成 target-only eager 扫描并生成 Scan Run`。后续 revision 使用
+实际的新 Run 路径。这个动作不代表任何算子已扫描或精度已验证。
 
 ## 3. 按 phase 执行唯一动作
 
-只进入当前 `phase` 对应的分支。不要提前执行后续阶段。
-
 ### `SCAN`
 
-用源码搜索、加载后配置和调用关系分析完成扫描，不创建 `scan.py`：
+用源码搜索、加载后配置和实际启动证据完成扫描，不创建顶层扫描编排器。
 
-- 只从 `Step3p7ForConditionalGeneration.forward` 扫描 target 路径；`draft_entry: null` 且不启用投机解码，因此不进入 `Step3p5MTP.forward`。
-- 只扫描 Contract 固定的 TP8、BF16、target-only eager 分支。decode 和 prefill CUDA Graph 都禁用；CUDA Graph 管理只作为运行边界证据，不进入算子枚举。
-- 两端命令都不显式指定 attention backend；不得在 Contract 中猜 backend。扫描或实际启动后分别记录 CUDA 与 P800 的解析结果和代码落点。
-- 沿当前 checkpoint、配置和输入实际激活的分支下钻，到可单独采集、离线重放和替换的 Semantic Operator 为止。
-- 扫描可以进入 `Step3p5MLP.forward` 内部判断两侧差异，但当前 Demo 的缺口必须归到原始 `Step3p5MLP.forward`；不得新增函数或把内部表达式登记为独立算子。
-- 每个算子同时记录 CUDA 与 Kunlun 的实现证据；同名实现不自动算 `READY`，缺少专用 Kunlun Kernel 也不自动算 Operator Gap。
-- 每条记录包含 `operator_id`、`model_path`、`activation_guard`、`boundary`、`cuda_impl`、`kunlun_impl`、`replay_replace_check`、`verdict` 和源码锚点。
-- verdict 只用 `READY`、`CAPTURE_REQUIRED`、`NEEDS_HUMAN`。全部 `CAPTURE_REQUIRED` 项进入 gap queue 和唯一 Capture Session 的计划。
+#### 扫描范围
 
-把完整结果写入新的 `runs/scan-NNN/result.json`，Spec 只保留覆盖计数、gap queue 和 Run 指针。调用或边界无法可靠确定时进入 `NEEDS_HUMAN / SCAN`；固定范围内没有采集候选时进入 `BLOCKED / SCAN`。
+- 从 `Step3p7ForConditionalGeneration.forward` 出发，只进入 target 路径，不进入
+  `Step3p5MTP.forward`。
+- 分别沿 `text-only` 和固定最小 `single-image` 请求会激活的路径向下扫描。
+- 最小边界是源码中已经存在、能直接描述输入输出并可独立替换的 device-compute
+  调用。CUDA extension、Triton、SGLang JIT、第三方 kernel 和实际不兼容的
+  Torch 调用都可以进入清单。
+- 不把 view、reshape、split 等只改元数据的表达式单独列为缺口。
+- 不新增 helper、自定义算子函数、模型方法或整层 wrapper 作为扫描、捕获或重放
+  边界。
 
-**完成条件：** target 有完整覆盖结论，每条结论都有两侧证据，Scan Run 绑定当前 Contract；若存在候选，状态为 `ACTIVE / CUDA_CAPTURE` 且下一动作只有一条。
+#### 两端判断
+
+对每个 CUDA 调用沿 Kunlun 路径检查三种情况：
+
+1. 同一调用已有 Kunlun 实现；
+2. Kunlun 在更高调用点改走等价实现，因而不会进入 CUDA kernel；
+3. 固定参数下仍会进入未绑定或不可执行的调用。
+
+前两种为 `READY`。只有第三种或源码不足以证明等价时才进入 gap queue。不能因为
+缺少同名 Kunlun symbol 就直接判缺口，也不能把 “CUDA 使用 Triton” 当作入选硬
+条件。
+
+每条记录至少包含：
+
+- `operator_id`、输入模式、激活条件和从模型入口开始的 `call_chain`；
+- 现有 `kernel_call.symbol`、实现类型和现有 capture seam；
+- 输入、当前调用直接使用的参数、非 Tensor 参数和输出；
+- CUDA/Kunlun 源码或运行证据；
+- 等价路径判断、可重放/可替换判断和 verdict。
+
+verdict 只用 `READY`、`CAPTURE_REQUIRED`、`NEEDS_HUMAN`。
+
+#### 扫描后选择 Demo
+
+先完成并封存整个 Scan Run，再从它的 gap queue 比较候选。至少比较
+`topk_sigmoid`、视觉 attention 和其他真实缺口。依次优先：
+
+1. 固定输入下必达；
+2. 边界输入、输出和直接参数更少；
+3. 不依赖 TP 通信、KV cache 或大型运行时对象；
+4. 可以用 P800 Torch 或已有 xspeedgate/kunlun_ops 在 Repair Boundary 内修复。
+
+只把一个最小候选写入 Scan Run 的 `selection.active_operator` 和
+`capture_plan`，然后把同一个值写入 Working State 的 `active_operator`。Contract
+保持不变。静态缺口只能写 `STATIC_GAP_CANDIDATE`；P800 baseline 失败后才能称为
+实机缺口。
+
+完整结果写入新的 `runs/scan-NNN/result.json`。旧 Run 不可修改。
 
 ### `CUDA_CAPTURE`
 
-先确认所有 `CAPTURE_REQUIRED` 项都能在禁止保存权重和运行时对象的前提下形成可重放边界，再消耗唯一 CUDA Session。Capture plan 只作为这次动作的输入，不成为第二个状态文件。开始采集前，先把唯一 `capture_session_id`、`session_status: ACTIVE` 和 Golden Run 路径写入 Working State；恢复时只能检查并继续这个 Session，不能创建第二个。
+先检查 Scan Run 的 `capture_plan.adapter_status`。Scan Run 不可改写；如果其中是
+`NOT_IMPLEMENTED`，只有 Working State 的 `last_completed_action` 已写成
+`kernel_capture_replay_adapter_implemented`，且 `last_run` 指向一个绑定当前
+Contract 与 `active_operator`、`passed: true` 的 adapter Run，才表示后续会话可以
+继续 preflight。
 
-如果唯一 `next_action` 明确写的是 `capture_golden.py preflight`，先完整读取 [references/cuda-capture-validation.md](references/cuda-capture-validation.md) 并只执行该步骤。preflight 用真实 SGLang Hook 和小型合成 BF16 tensor 验证原始 MLP 接线、rank 0 过滤和样本格式，但不启动模型、不访问 checkpoint，也不消耗正式 Session。无论通过还是失败，都报告 preflight Run 并停止，等待人把实机证据带回确认；不要设置 `capture_session_id`，不要修改 `session_status`，也不要自行进入正式采集。
+如果 adapter 尚未实现：
 
-在 CUDA 机器上：
+1. 把实现限制在现有 `capture_golden.py`、`replay_compare.py` 和采集插件中；
+2. Hook Scan Run 指定的现有 capture seam，不新增自定义算子函数；
+3. 用测试证明只保存 Contract 允许的输入、直接参数、非 Tensor 参数和 CUDA 输出，
+   最多三个 shape，且 rank 0 以外不落盘；
+4. 用测试证明 CUDA self-replay 和 P800 compare 都直接调用活动 kernel 的现有接口；
+5. 把实现与测试证据写入新的 Run，不改写 Scan Run；随后更新 Working State 的
+   `last_completed_action`、`last_run` 和唯一 preflight 下一动作。
 
-1. 调用 `scripts/capture_golden.py`，通过 SGLang 的通用插件直接 Hook `sglang.srt.models.step3p5.Step3p5MLP.forward`；只处理 `self.limit is not None` 且 `tp_rank=0` 的实例，只按输入 `x` 的 shape 去重，最多保存前三种真实 shape 的输入 `x`、CUDA `output` 和标量 `limit`。相同 shape 出现在不同层或执行阶段时只保留第一次。
-2. 不新增模型算子函数，不保存 checkpoint 权重、`nn.Parameter`、module state、`gate_up`、`gate`、`up`、完整 batch、prompt/token、KV cache、stream/handle、随机状态或凭证。
-3. CUDA 与 P800 的正式 SGLang 启动参数保持一致：checkpoint 的 model path 与 revision、TP8、BF16、`--cuda-graph-backend-decode disabled`、`--cuda-graph-backend-prefill disabled`；不传 `--speculative-algorithm`、量化参数、MTP 或 multi-layer EAGLE 开关，也不显式传 attention 或 MoE backend。CUDA 采集只多一个插件配置环境变量，实际解析出的 backend 写入启动日志。
-4. 正式采集进程停止后，在同一次 CUDA Session 内调用 `scripts/replay_compare.py --mode prepare-model-replay`；该动作关闭样本写入，但不提前标记 `SEALED`。随后加载同一 checkpoint 的 TP8 CUDA 模型，插件从 SGLang 实际生效的 model path 与 revision 核对 checkpoint，在 rank 0 对 `capture-state.json` 中全部 Golden Samples 做 self-replay；模型内 Hook 完成比较并停止 replay 模型进程后，用 `--mode finalize-model-replay` 收口。replay 初始化与 finalize 都必须重新核对 Contract Precision Gate、完整 shape/模型路径集合，以及顶层结果与每条 shape 结果一致；finalize 在文件写入中断后允许用同一证据重复执行。不得退回为无权重函数重放。全部通过后才把 Golden Run 标为 `SEALED`，否则标为 `FAILED`。
-5. 生成下一状态 Spec 临时副本，其中只修改 Working State 为 `WAITING / HANDOFF` 及唯一人工复制动作；调用 `scripts/handoff_bundle.py` 构建并校验 bundle。成功后用同一份 Spec 字节替换工作区 Spec 并停止；构建失败时不替换当前 Spec。
+当前仓库中的 `Step3p5MLP.forward` capture/replay adapter 只属于 revision 4
+历史方案，不能消费 revision 5。缺少当前活动 kernel 的 capture/replay adapter
+时，准确报告缺口并执行对应实现 ticket；不要运行旧 MLP preflight，也不要消耗
+CUDA Session。
 
-Session 已消耗但无法形成有效 Golden 时，写入失败 Run 并进入 `BLOCKED / CUDA_CAPTURE`；不得再次访问 CUDA 采集。
+adapter 完成后，完整读取
+[references/cuda-capture-validation.md](references/cuda-capture-validation.md)，
+先执行不消耗正式 Session 的 preflight。preflight 必须验证：
 
-**完成条件：** 唯一 Session 已 `SEALED`，所有保留样本通过已加载模型内的 rank 0 self-replay，bundle 在 CUDA 端校验通过，状态原子地变为 `WAITING / HANDOFF`。
+- Scan Run 和当前 Contract 绑定；
+- Hook 的是 Scan Run 记录的现有调用；
+- rank 0 和最多三个 shape 的去重；
+- 直接参数可保存，但完整 checkpoint 和 module state 会被拒绝；
+- 相同样本可以按固定 Precision Gate self-replay。
+
+正式 CUDA Session 只采集活动算子：
+
+1. 启动固定 checkpoint 的真实 TP8/BF16/eager 模型；采集只增加插件配置，不改变
+   两端模型启动参数。
+2. 每种真实 shape 最多保存一份 rank 0 样本。样本包含活动调用的输入、直接参数、
+   必要标量和 CUDA 期望输出。
+3. 停止采集后，在同一次 CUDA Session 内用现有 kernel 接口完成全部样本
+   self-replay。全部通过才把 Golden Run 标为 `SEALED`。
+4. 构建并校验 Handoff Bundle，把 Working State 原子推进为
+   `WAITING / HANDOFF`。
+
+任何步骤失败都要保留证据。Session 已消耗但不能形成可信 Golden 时进入
+`BLOCKED / CUDA_CAPTURE`，不能重开第二次 Session。
 
 ### `HANDOFF`
 
-工具只生成和校验 bundle；人工负责跨机器复制。如果 bundle 尚未出现在 P800，报告 Spec 中的准确复制动作并停止。
+工具只生成和校验 bundle；人工负责跨机器复制。
 
-在 P800 上收到 bundle 后，先在未修改的 bundle 上调用 `scripts/handoff_bundle.py` 校验 manifest；任何文件缺失、多出、大小或 SHA-256 不符时都不得读取 Golden Tensor。校验通过后，再用 bundle 中的 `migration-spec.md + runs/` 初始化 P800 迁移工作区，记录验证 Run，并把唯一下一动作设为第一个候选的 baseline replay。
-
-**完成条件：** bundle 已在 P800 校验，Working State 为 `ACTIVE / P800_REPAIR`，`execution_site` 为 `P800`，下一动作只有 baseline replay。
+P800 收到 bundle 后，先校验 manifest。文件缺失、多出、大小或 SHA-256 不符时，
+不得读取 Golden Tensor。校验通过后进入 `ACTIVE / P800_REPAIR`，下一动作是活动
+kernel 的 baseline replay。
 
 ### `P800_REPAIR`
 
-先调用 `scripts/workspace_guard.py` 检查 Contract 固定 revisions 和干净工作区。发现无法解释的已有修改时进入 `NEEDS_HUMAN`，不得替用户清理。
+先用 `workspace_guard.py` 检查固定 revision 和干净工作区。无法解释的已有修改
+进入 `NEEDS_HUMAN`，不得替用户清理。
 
-对 gap queue 中已采集的候选逐个调用 `scripts/replay_compare.py` 做 baseline；P800 必须先加载同一 checkpoint 的 TP8 模型，并只在 rank 0 的相同 `Step3p5MLP` 实例内重放：
+baseline 直接用 Golden Sample 的输入、直接参数和非 Tensor 参数调用活动 kernel
+边界：
 
-- 全部样本通过：该候选不是真实 correctness gap，换下一个候选，不增加 `attempts_used`。
-- 任一样本执行或精度失败：记录 baseline Run，选择该算子，`attempts_used` 保持 `0`。
-- 所有候选都通过：进入 `BLOCKED / P800_REPAIR`，理由写“没有真实 gap”。
+- 全部样本通过：记录它不是实机 correctness gap，并进入 `BLOCKED`；不得伪造失败
+  或再次访问 CUDA。
+- 任一样本执行或精度失败：记录 baseline，`attempts_used` 保持 0，开始有限修复。
 
-确认真实 gap 后，每轮严格执行：
+每轮修复：
 
-1. 从同一干净基线开始，只写一条 `active_hypothesis`。
-2. 修改源码前创建本轮 Run，并把 `attempts_used` 加一；通过轮也计数。
-3. 修改只限于活动 Semantic Operator 的 Python、P800 可执行的 PyTorch 或已有 xspeedgate/kunlun_ops 能力及聚焦测试。
-4. 调用 `workspace_guard.py` 保存相对固定基线的完整 patch，再用 `replay_compare.py` 重放该算子的全部 Golden Samples。
-5. 失败时先封存 Run，再调用 `workspace_guard.py` 恢复基线；形成下一条单一假设后才能继续。
-6. 通过时用 `workspace_guard.py` 确认通过 patch 是工作区唯一修改，把 Run 写入 `passing_run`，核对全部 Demo Closure 后进入 `PASS / DONE`。
+1. 从同一基线开始，只写一个假设。
+2. 修改前创建 Run，把 `attempts_used` 加一；通过轮也计数。
+3. 修改只限活动 kernel 调用的 Python、P800 可执行 Torch、已有
+   xspeedgate/kunlun_ops 能力和聚焦测试。
+4. 保存完整 patch，重放全部 Golden Samples。
+5. 失败时封存 Run 并恢复基线；通过时确认 patch 是唯一工作区修改。
 
-可信假设需要新 C++、自定义 Kernel、底层注册、DecoderLayer/完整模型改动或放宽 Precision Gate 时，立即恢复基线并进入 `BLOCKED`。第五轮仍失败时同样 `BLOCKED`，不得开始第六轮。
+需要新增 C++/自定义 kernel/底层注册、改完整模型、放宽精度门槛，或第五轮仍失败，
+都进入 `BLOCKED`，不能扩大范围。
 
-**完成条件：** 要么一个真实 gap 的全部已采集样本通过固定门槛且 closure 证据齐全，要么以可追溯证据停在 `BLOCKED` 或 `NEEDS_HUMAN`。
+## 4. 接受工具结果
 
-## 4. 接受结果并更新 Working State
-
-四个脚本都从本 Skill 目录下解析，并至少接收：
+四个 Deterministic Tool 至少接收：
 
 ```text
 --spec <migration-spec.md> --run-dir <fresh-run-directory>
 ```
 
-调用前确认本阶段所需脚本存在。缺少脚本时报告缺失路径并停止，不把“Skill 包未完成”写成 Operator Gap 或迁移状态。不得传入覆盖 Contract 的 `--atol`、`--rtol`、`--max-shapes` 或 `--max-repair-attempts`。
+调用前确认脚本和当前活动算子的 adapter 存在。缺少能力时准确报告代码缺口，不把
+工具缺失写成 Operator Gap。不得用命令行覆盖 Contract 的容差、shape 或修复次数。
 
-工具退出码为 `0` 且产生合法 `result.json`，只说明动作已形成可信结果；`passed: false` 可以是有效的 baseline 或精度失败。非零退出不能证明 Operator Gap。
+接受结果前重新计算 Contract Data SHA-256，核对 `spec_id`、
+`contract_revision`、`contract_data_sha256`。任一不一致都不得推进状态。
 
-接受结果前，重新解析当前 Contract Data，用规范化 JSON 计算 SHA-256，并核对 `spec_id`、`contract_revision`、`contract_data_sha256` 三项。任一不一致都不得推进状态。
+## 5. 停止条件
 
-接受后先封存 Run，再更新 `last_completed_action`、`last_run`、阶段字段、`state_revision` 和下一状态。Run 封存后不可修改；`ACTIVE` 只能保留一条 `next_action`。不要创建第二个状态文件，Handoff 构建所需的下一状态 Spec 临时副本除外。
-
-**完成条件：** Working State 可以只依靠当前 Spec 与被引用的 Run 恢复；不存在未封存却被当成成功证据的 Run，也不存在两个下一动作。
-
-## 5. 继续或停止
-
-- `ACTIVE`：回到第 2 步，重新读取 Spec 后继续。
-- `WAITING`：报告 bundle、manifest 和人工复制动作，然后停止。
-- `PASS`：报告活动算子、样本数、`passing_run` 和最终 patch，然后停止。
-- `BLOCKED`：报告停止原因、边界或次数、相关 Run，然后停止。
-- `NEEDS_HUMAN`：报告证据和 Working State 中唯一的 `human_question`，然后停止。
+- `ACTIVE`：重读 Spec 后继续唯一下一动作。
+- `WAITING`：报告 bundle、manifest 和人工复制动作。
+- `PASS`：报告活动算子、样本数、passing Run 和最终 patch。
+- `BLOCKED`：报告停止原因和相关 Run。
+- `NEEDS_HUMAN`：报告唯一问题和恢复所需证据。
 
 不自动 SSH、上传、下载、登录、管理凭证、创建分支、commit 或 push。
-
-**完成条件：** 最终回复与 Spec 的实际 `status / phase` 一致，并给出恢复所需的准确路径或人工动作。

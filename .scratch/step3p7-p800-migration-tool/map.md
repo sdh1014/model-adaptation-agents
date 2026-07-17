@@ -4,7 +4,9 @@
 
 交付一份可直接指导最小 Demo 实现的中文方案设计文档：说明一个 Spec 驱动、单 Agent、少量确定性脚本组成的算子迁移工具，如何完成 Step-3.7-Flash 真实路径扫描、一次性 CUDA Golden 采集、人工跨机器交接，以及 P800 上单算子最多三种 shape 的自动修复与精度验收。
 
-最终文档保存为 `outputs/step3p7-p800-migration-tool-design.md`。本地图不实现或运行 Demo。
+最终文档保存为 `outputs/step3p7-p800-migration-tool-design.md`。设计形成后，本地图
+继续记录通过 tickets 实现最小 Demo 的范围变化；当前仍未运行正式 CUDA/P800
+Demo。
 
 ## Notes
 
@@ -16,12 +18,16 @@
 - 一个 Migration Agent 负责扫描、判断、生成修复和推进状态；确定性脚本只负责 Golden 采集、replay/compare、交接包校验和工作区保护。
 - 一个自然语言 Skill 是首次启动和恢复的唯一人类入口，不设置顶层编排 CLI；Skill 内只保留四个职责单一的确定性脚本。
 - `migration-spec.md` 的 Contract 内含专门的 JSON 结构化区块。四个脚本统一通过必选 `--spec` 只读该区块中的固定约束，不解析 Markdown 或 Working State；动作参数仍显式传入，结果绑定 `spec_id + contract_revision + Contract Data SHA-256`。
-- Demo 保留完整路径扫描，但只闭环一个真实缺口算子，最多覆盖三种实际 shape。首选不含权重的特殊 SwiGLU 语义片段。
-- CUDA 只进行一次 Capture Session，可为同一算子保存最多三个去重样本；输入和 CUDA 输出 Tensor 必须保存，内部中间 Tensor 默认不保存。
+- Demo 保留完整路径扫描，但只闭环一个真实缺口 kernel，最多覆盖三种实际 shape。
+  Contract 不预选算子；`active_operator` 在扫描完成后从 gap queue 选择。
+- CUDA 只进行一次 Capture Session，可为同一算子保存最多三个去重样本；输入和
+  CUDA 输出 Tensor 必须保存，允许当前 kernel 直接使用的参数 Tensor，但不保存
+  完整 checkpoint、module state 或无关参数。
 - 工具生成并校验 Handoff Bundle，跨机器复制由人工完成。
 - P800 自动修复上限由 Contract 固定为 `max_repair_attempts: 5`，每轮只验证一个假设；允许 Python、P800 可执行的 PyTorch 和已有 xspeedgate，实现需要新 C++/Kernel 注册时进入 BLOCKED。
 - 精度门槛位于 Contract，Agent 不得放宽。用户已在 P800 实机验证 `torch.testing` 可用，比较器直接采用 `torch.testing.assert_close`，不再设计多后端适配层。
-- 本努力对 Wayfinder 的默认“只规划”规则做一个窄覆盖：所有设计决策关闭后，允许最后一个 task 只负责合成最终方案设计文档；不允许进入工具代码实现。
+- 最初 Wayfinder 阶段只负责规划和方案文档；后续实现由明确的 implementation
+  tickets 驱动，不把 Wayfinder 调研票据当作实现授权。
 - 术语优先复用 `CONTEXT.md`；只添加驱动流程所必需的字段，不为失败原因另造错误码体系、子状态机或新领域概念。
 
 ## Decisions so far
@@ -41,14 +47,18 @@
 - [按 target-only eager 范围重新封存算子扫描](issues/18-rescan-target-only-eager-operator-gaps.md)：`runs/scan-003` 重新确认 target 路径的 13 个算子与缺口，Spec 已进入 `ACTIVE / CUDA_CAPTURE`，下一步是 revision 3 的真实 N 卡 preflight。
 - [恢复 Step3p5MLP 原始算子边界](issues/19-restore-step3p5-mlp-boundary.md)：Contract revision 4 回到原始 CUDA/Kunlun 提交，以 `Step3p5MLP.forward` 覆盖投影、特殊 SwiGLU 和下投影，不再要求 helper 重构。
 - [实现 TP8 rank 0 MLP 采集与模型内重放](issues/20-tp8-rank-local-mlp-capture-replay.md)：每种 shape 只保存 rank 0 的 `x/output`；CUDA 与 P800 都在加载同 checkpoint 的 TP8 模型实例内重放，不新增模型算子函数。
+- [以 kernel 调用为边界重扫并选择最小 Demo](issues/21-kernel-level-scan-and-demo-selection.md)：Contract revision 5 只固定 kernel-call 扫描范围、文本/单图输入和直接参数保存规则；`scan-005` 比较 Gemma RMSNorm、top-k、视觉 attention 与 Kunlun 上层 bypass，扫描完成后选择 `sgl_kernel.gemma_rmsnorm`。
+- [实现 Gemma RMSNorm kernel 采集与重放 adapter](issues/22-gemma-rmsnorm-kernel-capture-replay-adapter.md)：下一步 Hook 现有 `sglang.srt.layers.layernorm.gemma_rmsnorm`，保存 rank 0 的 `x/weight/eps/output`，最多三个 shape；旧 MLP adapter 不可消费 revision 5。
 
 ## Not yet specified
 
-- Golden Sample 的逻辑数据、比较方式和校验要求已经确定；底层序列化格式仍待实现前结合 CUDA/P800 两端能力选定。
+- `sgl_kernel.gemma_rmsnorm` 的 capture/replay adapter 与实际命令尚未实现；完成
+  Ticket 22 后才进入 CUDA preflight。
+- Golden Sample 的跨 CUDA/P800 序列化兼容性仍需实机确认。
 
 ## Out of scope
 
-- 实际编写或运行迁移工具与 Demo。
+- 在 Ticket 22 之前运行正式 CUDA Capture 或 P800 Demo。
 - 重新登录真实 CUDA/P800 环境做其他能力验证；`torch.testing` 可用性直接采用用户已完成的实机验证结论。
 - 自动 SSH、远程执行、自动上传或凭证管理。
 - 新增 C++/自定义 Kernel、底层算子注册或性能优化。

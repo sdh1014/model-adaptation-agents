@@ -13,6 +13,7 @@ from _lib.spec_contract import (
     SpecContractError,
     load_contract_data,
     load_spec_binding,
+    uses_kernel_scan_contract,
 )
 from model_adaptation_capture.contracts import (
     ACTIVATION_GUARD,
@@ -143,24 +144,10 @@ def validate_scan_candidate(
             raise ToolError(f"Scan Run source {field} does not match Contract Data")
 
     operator = find_operator(scan_result, operator_id)
-    expected_boundary = contract["operator_boundary"]
-    if operator_id != expected_boundary["id"]:
-        raise ToolError("requested operator does not match Contract Data")
     if operator.get("verdict") != "CAPTURE_REQUIRED":
         raise ToolError(f"operator {operator_id!r} is not CAPTURE_REQUIRED")
     if operator.get("model_path") != ["target"]:
         raise ToolError(f"operator {operator_id!r} must be target-only for this Demo")
-    if operator.get("activation_guard") != expected_boundary["activation_guard"]:
-        raise ToolError(f"operator {operator_id!r} activation guard has drifted")
-    if operator.get("hook_target") != MLP_HOOK_TARGET:
-        raise ToolError(f"operator {operator_id!r} hook target has drifted")
-    if (
-        operator.get("state_dependency")
-        != "same checkpoint, TP8, current-rank model weights"
-    ):
-        raise ToolError(
-            f"operator {operator_id!r} must replay with loaded checkpoint weights"
-        )
     for field in ("boundary", "cuda_impl", "kunlun_impl"):
         if not operator.get(field):
             raise ToolError(f"operator {operator_id!r} is missing {field}")
@@ -169,12 +156,64 @@ def validate_scan_candidate(
     max_shapes = contract["limits"]["max_shapes_per_operator"]
     if plan.get("max_distinct_shapes") != max_shapes:
         raise ToolError("capture plan shape limit does not match Contract Data")
-    if plan.get("tp_rank") != expected_boundary["tp_rank"]:
-        raise ToolError("capture plan TP rank does not match Contract Data")
-    if plan.get("replay_mode") != "loaded_model":
-        raise ToolError("capture plan must replay inside a loaded model")
-    if plan.get("weights_in_golden_sample") is not False:
-        raise ToolError("capture plan must keep checkpoint weights out of Golden Samples")
+    if uses_kernel_scan_contract(contract):
+        if scan_result.get("scan_scope") != contract["scan_scope"]:
+            raise ToolError("Scan Run scope does not match Contract Data")
+        selection = scan_result.get("selection")
+        if (
+            not isinstance(selection, dict)
+            or selection.get("evaluated_after_scan") is not True
+            or selection.get("active_operator") != operator_id
+        ):
+            raise ToolError(
+                "requested operator is not the post-scan active_operator"
+            )
+        sample_policy = contract["sample_policy"]
+        if plan.get("tp_rank") != sample_policy["capture_tp_rank"]:
+            raise ToolError("capture plan TP rank does not match Contract Data")
+        if plan.get("replay_mode") != "standalone-kernel-call":
+            raise ToolError("capture plan must replay the standalone kernel call")
+        policy_checks = {
+            "save_direct_parameter_tensors": (
+                sample_policy["save_direct_parameter_tensors"]
+            ),
+            "save_full_checkpoint": sample_policy["save_full_checkpoint"],
+            "save_module_state_dict": sample_policy["save_module_state_dict"],
+        }
+        for field, expected in policy_checks.items():
+            if plan.get(field) is not expected:
+                raise ToolError(
+                    f"capture plan {field} does not match Contract Data"
+                )
+        kernel_call = operator.get("kernel_call")
+        if (
+            not isinstance(kernel_call, dict)
+            or plan.get("hook_target") != kernel_call.get("capture_seam")
+        ):
+            raise ToolError("capture plan hook target has drifted")
+    else:
+        expected_boundary = contract["operator_boundary"]
+        if operator_id != expected_boundary["id"]:
+            raise ToolError("requested operator does not match Contract Data")
+        if operator.get("activation_guard") != expected_boundary["activation_guard"]:
+            raise ToolError(f"operator {operator_id!r} activation guard has drifted")
+        if operator.get("hook_target") != MLP_HOOK_TARGET:
+            raise ToolError(f"operator {operator_id!r} hook target has drifted")
+        if (
+            operator.get("state_dependency")
+            != "same checkpoint, TP8, current-rank model weights"
+        ):
+            raise ToolError(
+                f"operator {operator_id!r} must replay with loaded checkpoint weights"
+            )
+        if plan.get("tp_rank") != expected_boundary["tp_rank"]:
+            raise ToolError("capture plan TP rank does not match Contract Data")
+        if plan.get("replay_mode") != "loaded_model":
+            raise ToolError("capture plan must replay inside a loaded model")
+        if plan.get("weights_in_golden_sample") is not False:
+            raise ToolError(
+                "capture plan must keep checkpoint weights out of Golden Samples"
+            )
     return operator
 
 
@@ -196,6 +235,11 @@ def prepare_capture_config(
         operator_id,
         binding.as_result_dict(),
     )
+    if uses_kernel_scan_contract(contract):
+        raise ToolError(
+            f"capture/replay adapter is not implemented for {operator_id!r}; "
+            "do not fall back to the revision 4 Step3p5MLP adapter"
+        )
 
     actual_revision = resolve_git_revision(sglang_worktree)
     expected_revision = contract["source"]["sglang_revision"]

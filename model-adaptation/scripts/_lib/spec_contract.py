@@ -10,7 +10,7 @@ from typing import Any, Dict
 
 CONTRACT_DATA_BEGIN = "<!-- CONTRACT-DATA: BEGIN -->"
 CONTRACT_DATA_END = "<!-- CONTRACT-DATA: END -->"
-REQUIRED_PATHS = (
+COMMON_REQUIRED_PATHS = (
     "schema",
     "spec_id",
     "contract_revision",
@@ -20,14 +20,10 @@ REQUIRED_PATHS = (
     "checkpoint.id",
     "checkpoint.config_digest",
     "model_path.target_entry",
-    "operator_boundary.id",
-    "operator_boundary.activation_guard",
-    "operator_boundary.tp_rank",
     "runtime.tensor_parallel_size",
     "runtime.dtype",
     "runtime.cuda_graph_backend_decode",
     "runtime.cuda_graph_backend_prefill",
-    "demo_input_mode",
     "limits.max_shapes_per_operator",
     "limits.max_repair_attempts",
     "precision_gate.comparator",
@@ -37,6 +33,24 @@ REQUIRED_PATHS = (
     "precision_gate.require_same_dtype",
     "precision_gate.require_finite",
     "precision_gate.check_stride",
+)
+LEGACY_OPERATOR_REQUIRED_PATHS = (
+    "operator_boundary.id",
+    "operator_boundary.activation_guard",
+    "operator_boundary.tp_rank",
+    "demo_input_mode",
+)
+KERNEL_SCAN_REQUIRED_PATHS = (
+    "scan_scope.model_paths",
+    "scan_scope.granularity",
+    "scan_scope.input_modes",
+    "sample_policy.capture_tp_rank",
+    "sample_policy.save_inputs",
+    "sample_policy.save_expected_outputs",
+    "sample_policy.save_direct_parameter_tensors",
+    "sample_policy.parameter_scope",
+    "sample_policy.save_full_checkpoint",
+    "sample_policy.save_module_state_dict",
 )
 MISSING = object()
 
@@ -123,10 +137,24 @@ def is_placeholder(value: Any) -> bool:
     )
 
 
+def uses_kernel_scan_contract(contract_data: Dict[str, Any]) -> bool:
+    revision = contract_data.get("contract_revision")
+    return "scan_scope" in contract_data or (
+        isinstance(revision, int)
+        and not isinstance(revision, bool)
+        and revision >= 5
+    )
+
+
 def require_approved_contract_data(contract_data: Dict[str, Any]) -> None:
+    required_paths = COMMON_REQUIRED_PATHS + (
+        KERNEL_SCAN_REQUIRED_PATHS
+        if uses_kernel_scan_contract(contract_data)
+        else LEGACY_OPERATOR_REQUIRED_PATHS
+    )
     unresolved = [
         path
-        for path in REQUIRED_PATHS
+        for path in required_paths
         if is_placeholder(value_at_path(contract_data, path))
     ]
     if unresolved:
@@ -142,9 +170,6 @@ def require_fixed_contract_data(contract_data: Dict[str, Any]) -> None:
         "model": "Step-3.7-Flash",
         "model_path.target_entry": "Step3p7ForConditionalGeneration.forward",
         "model_path.draft_entry": None,
-        "operator_boundary.id": "Step3p5MLP.forward",
-        "operator_boundary.activation_guard": "self.limit is not None",
-        "operator_boundary.tp_rank": 0,
         "runtime.tensor_parallel_size": 8,
         "runtime.dtype": "bfloat16",
         "runtime.quantization": None,
@@ -160,6 +185,37 @@ def require_fixed_contract_data(contract_data: Dict[str, Any]) -> None:
         "precision_gate.require_finite": True,
         "precision_gate.check_stride": False,
     }
+    if uses_kernel_scan_contract(contract_data):
+        for forbidden in ("operator_boundary", "demo_input_mode", "active_operator"):
+            if forbidden in contract_data:
+                raise SpecContractError(
+                    f"Contract Data {forbidden} is forbidden in the kernel-scan "
+                    "Contract; select active_operator after Scan"
+                )
+        fixed_values.update(
+            {
+                "scan_scope.model_paths": ["target"],
+                "scan_scope.granularity": "kernel-call",
+                "scan_scope.input_modes": ["text-only", "single-image"],
+                "sample_policy.capture_tp_rank": 0,
+                "sample_policy.save_inputs": True,
+                "sample_policy.save_expected_outputs": True,
+                "sample_policy.save_direct_parameter_tensors": True,
+                "sample_policy.parameter_scope": (
+                    "selected-kernel-call-current-rank"
+                ),
+                "sample_policy.save_full_checkpoint": False,
+                "sample_policy.save_module_state_dict": False,
+            }
+        )
+    else:
+        fixed_values.update(
+            {
+                "operator_boundary.id": "Step3p5MLP.forward",
+                "operator_boundary.activation_guard": "self.limit is not None",
+                "operator_boundary.tp_rank": 0,
+            }
+        )
     for path, expected in fixed_values.items():
         actual = value_at_path(contract_data, path)
         if type(actual) is not type(expected) or actual != expected:
@@ -170,11 +226,16 @@ def require_fixed_contract_data(contract_data: Dict[str, Any]) -> None:
         "source.sglang_kunlun_revision",
         "checkpoint.id",
         "checkpoint.config_digest",
-        "demo_input_mode",
     ):
         value = value_at_path(contract_data, path)
         if not isinstance(value, str) or not value.strip():
             raise SpecContractError(f"Contract Data {path} must be a non-empty string")
+    if not uses_kernel_scan_contract(contract_data):
+        value = value_at_path(contract_data, "demo_input_mode")
+        if not isinstance(value, str) or not value.strip():
+            raise SpecContractError(
+                "Contract Data demo_input_mode must be a non-empty string"
+            )
 
     for path in ("precision_gate.atol", "precision_gate.rtol"):
         value = value_at_path(contract_data, path)

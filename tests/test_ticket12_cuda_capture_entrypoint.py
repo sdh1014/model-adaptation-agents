@@ -18,22 +18,22 @@ RUNBOOK = (
 
 
 class Ticket12CudaCaptureEntrypointTest(unittest.TestCase):
-    def test_runbook_uses_target_only_eager_launch_arguments(self) -> None:
+    def test_runbook_blocks_old_mlp_commands_until_kernel_adapter_exists(self) -> None:
         runbook = RUNBOOK.read_text(encoding="utf-8")
 
-        self.assertIn("--scan-result runs/scan-004/result.json", runbook)
-        self.assertIn("--operator-id Step3p5MLP.forward", runbook)
+        self.assertIn("revision 5", runbook)
+        self.assertIn("scan-005", runbook)
+        self.assertIn("sgl_kernel.gemma_rmsnorm", runbook)
         self.assertIn(
-            "49e384ce9d304648e9959666ecb8ce8cd98d0deb",
+            "sglang.srt.layers.layernorm.gemma_rmsnorm",
             runbook,
         )
-        self.assertIn("--cuda-graph-backend-decode disabled", runbook)
-        self.assertIn("--cuda-graph-backend-prefill disabled", runbook)
-        self.assertIn('--revision "$MODEL_REVISION"', runbook)
-        self.assertIn(
-            "5f6244077ac62e04eec3f320501ff8c2b293373a",
-            runbook,
-        )
+        self.assertIn("capture/replay adapter 尚未实现", runbook)
+        self.assertIn("不能执行 CUDA preflight", runbook)
+        self.assertIn("完整 checkpoint", runbook)
+        self.assertIn("module `state_dict`", runbook)
+        self.assertNotIn("--scan-result runs/scan-004/result.json", runbook)
+        self.assertNotIn("--operator-id Step3p5MLP.forward", runbook)
         self.assertNotIn("--speculative-algorithm EAGLE", runbook)
         self.assertNotIn("step_swiglu_with_limit", runbook)
 
