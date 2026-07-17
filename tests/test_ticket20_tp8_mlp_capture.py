@@ -11,11 +11,15 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS_ROOT = REPO_ROOT / "model-adaptation" / "scripts"
 sys.path.insert(0, str(SCRIPTS_ROOT))
 
-from model_adaptation_capture.collector import CandidateCollector
+from model_adaptation_capture.collector import CandidateCollector, CaptureError
 
 
 OPERATOR_ID = "Step3p5MLP.forward"
 MODEL_INSTANCE_PATH = "model.layers.43.share_expert"
+LOADED_CHECKPOINT = {
+    "model_path": "stepfun-ai/Step-3.7-Flash",
+    "revision": "fixture",
+}
 
 
 def write_capture_config(path: Path, run_dir: Path) -> None:
@@ -38,6 +42,12 @@ def write_capture_config(path: Path, run_dir: Path) -> None:
                 "run_dir": str(run_dir),
                 "capture_device_type": "cpu",
                 "dtype": "bfloat16",
+                "checkpoint": {
+                    "id": "stepfun-ai/Step-3.7-Flash@fixture",
+                    "model_path": "stepfun-ai/Step-3.7-Flash",
+                    "revision": "fixture",
+                    "config_digest": "config-digest",
+                },
             }
         )
         + "\n",
@@ -57,6 +67,7 @@ class Ticket20Tp8MlpCaptureTest(unittest.TestCase):
                 config_path,
                 tp_rank=1,
                 tp_size=8,
+                loaded_checkpoint=LOADED_CHECKPOINT,
             )
             ignored_x = torch.ones((1, 8), dtype=torch.bfloat16)
             non_capture_rank.record(
@@ -73,8 +84,28 @@ class Ticket20Tp8MlpCaptureTest(unittest.TestCase):
                 config_path,
                 tp_rank=0,
                 tp_size=8,
+                loaded_checkpoint=LOADED_CHECKPOINT,
             )
-            for rows in (1, 2, 4):
+            first_shape = torch.arange(
+                8,
+                dtype=torch.bfloat16,
+            ).reshape(1, 8)
+            collector.record(
+                first_shape,
+                first_shape * 2,
+                model_instance_path=MODEL_INSTANCE_PATH,
+                limit=16.0,
+                execution_phase="decode",
+            )
+            collector.record(
+                first_shape,
+                first_shape * 2,
+                model_instance_path="model.layers.44.share_expert",
+                limit=16.0,
+                execution_phase="prefill",
+            )
+
+            for rows in (2, 4):
                 x = torch.arange(
                     rows * 8,
                     dtype=torch.bfloat16,
@@ -87,14 +118,6 @@ class Ticket20Tp8MlpCaptureTest(unittest.TestCase):
                     execution_phase="decode",
                 )
 
-            duplicate = torch.zeros((2, 8), dtype=torch.bfloat16)
-            collector.record(
-                duplicate,
-                duplicate * 2,
-                model_instance_path=MODEL_INSTANCE_PATH,
-                limit=16.0,
-                execution_phase="decode",
-            )
             fourth = torch.ones((8, 8), dtype=torch.bfloat16)
             collector.record(
                 fourth,
@@ -116,6 +139,15 @@ class Ticket20Tp8MlpCaptureTest(unittest.TestCase):
             self.assertEqual(state["saved_shape_count"], 3)
             self.assertEqual(state["repeated_call_count"], 1)
             self.assertEqual(state["skipped_call_count"], 1)
+            self.assertEqual(state["status"], "ACTIVE")
+            self.assertFalse(state["capture_closed"])
+            self.assertEqual(state["loaded_checkpoint"], LOADED_CHECKPOINT)
+            self.assertTrue(
+                all("shape_id" in sample for sample in state["samples"])
+            )
+            self.assertTrue(
+                all("signature_id" not in sample for sample in state["samples"])
+            )
 
             payload = torch.load(
                 sample_paths[0],
@@ -133,6 +165,34 @@ class Ticket20Tp8MlpCaptureTest(unittest.TestCase):
             self.assertNotIn("gate_up", repr(payload).lower())
             self.assertNotIn('"gate"', repr(payload).lower())
             self.assertNotIn('"up"', repr(payload).lower())
+
+            state["capture_closed"] = True
+            (run_dir / "capture-state.json").write_text(
+                json.dumps(state) + "\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(CaptureError, "capture is closed"):
+                collector.record(
+                    torch.ones((16, 8), dtype=torch.bfloat16),
+                    torch.ones((16, 8), dtype=torch.bfloat16),
+                    model_instance_path=MODEL_INSTANCE_PATH,
+                    limit=16.0,
+                    execution_phase="decode",
+                )
+
+            with self.assertRaisesRegex(
+                CaptureError,
+                "loaded checkpoint",
+            ):
+                CandidateCollector.from_config_path(
+                    config_path,
+                    tp_rank=0,
+                    tp_size=8,
+                    loaded_checkpoint={
+                        "model_path": "stepfun-ai/Another-Model",
+                        "revision": "fixture",
+                    },
+                )
 
 
 if __name__ == "__main__":

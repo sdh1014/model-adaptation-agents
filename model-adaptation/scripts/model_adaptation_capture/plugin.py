@@ -73,12 +73,37 @@ def _get_collector() -> CandidateCollector:
         raise RuntimeError(f"{CAPTURE_CONFIG_ENV} was not set during plugin registration")
     if _collector is None:
         tp_rank, tp_size = _tp_context(_config_path)
+        config = json.loads(_config_path.read_text(encoding="utf-8"))
+        loaded_checkpoint = (
+            None
+            if "preflight_tp_context" in config
+            else _loaded_checkpoint_identity()
+        )
         _collector = CandidateCollector.from_config_path(
             _config_path,
             tp_rank=tp_rank,
             tp_size=tp_size,
+            loaded_checkpoint=loaded_checkpoint,
         )
     return _collector
+
+
+def _loaded_checkpoint_identity() -> dict[str, str]:
+    from sglang.srt.server_args import get_global_server_args
+
+    server_args = get_global_server_args()
+    model_path = getattr(server_args, "model_path", None)
+    revision = getattr(server_args, "revision", None)
+    if not isinstance(model_path, str) or not model_path:
+        raise RuntimeError("SGLang model_path is required for loaded replay")
+    if not isinstance(revision, str) or not revision:
+        raise RuntimeError(
+            "SGLang revision is required to verify the loaded checkpoint"
+        )
+    return {
+        "model_path": model_path,
+        "revision": revision,
+    }
 
 
 def _get_replay() -> LoadedModelReplay:
@@ -91,6 +116,7 @@ def _get_replay() -> LoadedModelReplay:
             _config_path,
             tp_rank=tp_rank,
             tp_size=tp_size,
+            loaded_checkpoint=_loaded_checkpoint_identity(),
         )
     return _replay
 

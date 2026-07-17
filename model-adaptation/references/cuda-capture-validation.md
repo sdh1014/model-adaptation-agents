@@ -76,8 +76,12 @@ runs/cuda-preflight-001/preflight-capture.log
 preflight 通过后仍需单独确认，才进入正式模型采集。CUDA 与 P800 的 SGLang 启动参数保持一致：
 
 ```bash
+MODEL_PATH=stepfun-ai/Step-3.7-Flash
+MODEL_REVISION=5f6244077ac62e04eec3f320501ff8c2b293373a
+
 python -m sglang.launch_server \
   --model-path "$MODEL_PATH" \
+  --revision "$MODEL_REVISION" \
   --tp-size 8 \
   --dtype bfloat16 \
   --cuda-graph-backend-decode disabled \
@@ -86,4 +90,8 @@ python -m sglang.launch_server \
 
 不要追加 `--speculative-algorithm`、量化参数、MTP 开关、`--enable-multi-layer-eagle`、`--attention-backend`、`--prefill-attention-backend`、`--decode-attention-backend` 或 MoE backend 参数。这里的 eager 表示 decode 与 prefill 都禁用 CUDA Graph，不使用仍经过 graph capture/replay 路径的 `--debug-cuda-graph`。CUDA 正式采集时只额外设置 `MODEL_ADAPTATION_CAPTURE_CONFIG` 环境变量；它不是 SGLang 启动参数。实际解析出的 attention 与 MoE backend 从启动日志记录，不回写成 Contract 参数。
 
-正式采集和两端重放必须加载 Contract 固定的同一 checkpoint 与 TP8 模型。CUDA 和 P800 都只在 rank 0 的相同 `Step3p5MLP` 实例上处理 Golden Sample；其他 rank 正常执行模型但不额外落盘或比较。模型内重放通过 `MODEL_ADAPTATION_REPLAY_CONFIG` 启用，不能退回为独立无权重函数调用。
+`MODEL_PATH` 与 `MODEL_REVISION` 必须分别等于 Contract checkpoint 的 `@` 前后两部分。正式采集和两端重放都使用这两个值与 TP8；插件会从 SGLang 实际生效的 `model_path` 和 `revision` 再核对一次，缺失或不一致时不会执行重放。
+
+正式采集结束后先停止带 `MODEL_ADAPTATION_CAPTURE_CONFIG` 的模型进程，再执行 `replay_compare.py --mode prepare-model-replay`。该动作会把 `capture-state.json` 的 `capture_closed` 写为 `true`，之后任何采集调用都会失败；它不会提前把 Golden Run 标成 `SEALED`。随后用生成的 `MODEL_ADAPTATION_REPLAY_CONFIG` 和上面的同一启动命令加载 TP8 模型，发送同一 Demo 输入触发原始 `Step3p5MLP.forward` Hook；确认 `replay-result.json` 已生成后先停止 replay 模型进程，再执行 `--mode finalize-model-replay`。初始化与 finalize 都会拒绝被改写的容差或缺失的 shape；finalize 若在状态或结果写入时中断，可用相同命令安全重试。只有全部 shape 通过时状态才变为 `SEALED`，否则变为 `FAILED`。
+
+CUDA 和 P800 都只在 rank 0 的相同 `Step3p5MLP` 实例上处理 Golden Sample；其他 rank 正常执行模型但不额外落盘或比较。不能退回为独立无权重函数调用。

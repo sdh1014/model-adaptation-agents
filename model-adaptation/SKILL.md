@@ -89,10 +89,10 @@ Spec 绑定自检不做真实算子扫描。首次批准创建 `runs/spec-bindin
 
 在 CUDA 机器上：
 
-1. 调用 `scripts/capture_golden.py`，通过 SGLang 的通用插件直接 Hook `sglang.srt.models.step3p5.Step3p5MLP.forward`；只处理 `self.limit is not None` 且 `tp_rank=0` 的实例，按调用签名去重，最多保存前三种真实 shape 的输入 `x`、CUDA `output` 和标量 `limit`。
+1. 调用 `scripts/capture_golden.py`，通过 SGLang 的通用插件直接 Hook `sglang.srt.models.step3p5.Step3p5MLP.forward`；只处理 `self.limit is not None` 且 `tp_rank=0` 的实例，只按输入 `x` 的 shape 去重，最多保存前三种真实 shape 的输入 `x`、CUDA `output` 和标量 `limit`。相同 shape 出现在不同层或执行阶段时只保留第一次。
 2. 不新增模型算子函数，不保存 checkpoint 权重、`nn.Parameter`、module state、`gate_up`、`gate`、`up`、完整 batch、prompt/token、KV cache、stream/handle、随机状态或凭证。
-3. CUDA 与 P800 的正式 SGLang 启动参数保持一致：TP8、BF16、`--cuda-graph-backend-decode disabled`、`--cuda-graph-backend-prefill disabled`；不传 `--speculative-algorithm`、量化参数、MTP 或 multi-layer EAGLE 开关，也不显式传 attention 或 MoE backend。CUDA 采集只多一个插件配置环境变量，实际解析出的 backend 写入启动日志。
-4. 在同一次 CUDA Session 内，由已经加载同一 checkpoint 的 TP8 CUDA 模型在 rank 0 对全部 Golden Samples 做 self-replay；调用 `scripts/replay_compare.py --mode prepare-model-replay` 生成配置，模型内 Hook 完成比较，再用 `--mode finalize-model-replay` 收口结果。不得退回为无权重函数重放。全部通过固定 Precision Gate 后才能把 Golden Run 标为 `SEALED`。
+3. CUDA 与 P800 的正式 SGLang 启动参数保持一致：checkpoint 的 model path 与 revision、TP8、BF16、`--cuda-graph-backend-decode disabled`、`--cuda-graph-backend-prefill disabled`；不传 `--speculative-algorithm`、量化参数、MTP 或 multi-layer EAGLE 开关，也不显式传 attention 或 MoE backend。CUDA 采集只多一个插件配置环境变量，实际解析出的 backend 写入启动日志。
+4. 正式采集进程停止后，在同一次 CUDA Session 内调用 `scripts/replay_compare.py --mode prepare-model-replay`；该动作关闭样本写入，但不提前标记 `SEALED`。随后加载同一 checkpoint 的 TP8 CUDA 模型，插件从 SGLang 实际生效的 model path 与 revision 核对 checkpoint，在 rank 0 对 `capture-state.json` 中全部 Golden Samples 做 self-replay；模型内 Hook 完成比较并停止 replay 模型进程后，用 `--mode finalize-model-replay` 收口。replay 初始化与 finalize 都必须重新核对 Contract Precision Gate、完整 shape/模型路径集合，以及顶层结果与每条 shape 结果一致；finalize 在文件写入中断后允许用同一证据重复执行。不得退回为无权重函数重放。全部通过后才把 Golden Run 标为 `SEALED`，否则标为 `FAILED`。
 5. 生成下一状态 Spec 临时副本，其中只修改 Working State 为 `WAITING / HANDOFF` 及唯一人工复制动作；调用 `scripts/handoff_bundle.py` 构建并校验 bundle。成功后用同一份 Spec 字节替换工作区 Spec 并停止；构建失败时不替换当前 Spec。
 
 Session 已消耗但无法形成有效 Golden 时，写入失败 Run 并进入 `BLOCKED / CUDA_CAPTURE`；不得再次访问 CUDA 采集。

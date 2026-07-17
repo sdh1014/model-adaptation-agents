@@ -1,6 +1,5 @@
-"""Collect at most three rank-0 samples at the original MLP boundary."""
+"""Collect at most three rank-0 shapes at the original MLP boundary."""
 
-import hashlib
 import json
 import math
 import os
@@ -18,6 +17,7 @@ from .contracts import (
     OPERATOR_ID,
     STATE_SCHEMA,
     VALIDATION_TP_RANK,
+    shape_id_for,
 )
 
 
@@ -44,17 +44,6 @@ def _atomic_write_json(path: Path, value: Dict[str, Any]) -> None:
     os.replace(temporary, path)
 
 
-def signature_id(value: Dict[str, Any]) -> str:
-    """Return the stable ID for a call signature without tensor values."""
-    encoded = json.dumps(
-        value,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
-
-
 def _dtype_name(dtype: torch.dtype) -> str:
     return str(dtype).removeprefix("torch.")
 
@@ -62,7 +51,14 @@ def _dtype_name(dtype: torch.dtype) -> str:
 class CandidateCollector:
     """Save rank 0 calls while every other TP rank remains read-only."""
 
-    def __init__(self, config: Dict[str, Any], *, tp_rank: int, tp_size: int):
+    def __init__(
+        self,
+        config: Dict[str, Any],
+        *,
+        tp_rank: int,
+        tp_size: int,
+        loaded_checkpoint: Dict[str, str] | None = None,
+    ):
         self._validate_config(config)
         if tp_size != config["tensor_parallel_size"]:
             raise CaptureError(
@@ -73,6 +69,10 @@ class CandidateCollector:
         if tp_rank < 0 or tp_rank >= tp_size:
             raise CaptureError("tp_rank is outside the configured TP group")
         self.config = config
+        self.loaded_checkpoint = self._validate_loaded_checkpoint(
+            config,
+            loaded_checkpoint,
+        )
         self.tp_rank = tp_rank
         self.tp_size = tp_size
         self.is_capture_rank = tp_rank == config["tp_rank"]
@@ -92,11 +92,13 @@ class CandidateCollector:
         *,
         tp_rank: int,
         tp_size: int,
+        loaded_checkpoint: Dict[str, str] | None = None,
     ) -> "CandidateCollector":
         return cls(
             _read_json_object(path.resolve()),
             tp_rank=tp_rank,
             tp_size=tp_size,
+            loaded_checkpoint=loaded_checkpoint,
         )
 
     @staticmethod
@@ -130,6 +132,50 @@ class CandidateCollector:
             raise CaptureError("capture config is missing spec_binding")
         if not isinstance(config.get("run_dir"), str):
             raise CaptureError("capture config is missing run_dir")
+        checkpoint = config.get("checkpoint")
+        if (
+            not isinstance(checkpoint, dict)
+            or set(checkpoint)
+            != {"id", "model_path", "revision", "config_digest"}
+            or any(
+                not isinstance(checkpoint[field], str)
+                or not checkpoint[field]
+                for field in checkpoint
+            )
+            or checkpoint["id"]
+            != f"{checkpoint['model_path']}@{checkpoint['revision']}"
+        ):
+            raise CaptureError("capture config checkpoint identity is invalid")
+
+    @staticmethod
+    def _validate_loaded_checkpoint(
+        config: Dict[str, Any],
+        loaded_checkpoint: Dict[str, str] | None,
+    ) -> Dict[str, str] | None:
+        if "preflight_tp_context" in config:
+            if loaded_checkpoint is not None:
+                raise CaptureError(
+                    "preflight capture must not claim a loaded checkpoint"
+                )
+            return None
+        if (
+            not isinstance(loaded_checkpoint, dict)
+            or set(loaded_checkpoint) != {"model_path", "revision"}
+            or any(
+                not isinstance(loaded_checkpoint[field], str)
+                or not loaded_checkpoint[field]
+                for field in loaded_checkpoint
+            )
+        ):
+            raise CaptureError(
+                "loaded checkpoint identity is required for formal capture"
+            )
+        for field in ("model_path", "revision"):
+            if loaded_checkpoint[field] != config["checkpoint"][field]:
+                raise CaptureError(
+                    f"loaded checkpoint {field} does not match capture config"
+                )
+        return loaded_checkpoint
 
     def _load_or_create_state(self) -> Dict[str, Any]:
         if self.state_path.exists():
@@ -140,6 +186,10 @@ class CandidateCollector:
                 or state.get("tp_rank") != self.config["tp_rank"]
                 or state.get("tensor_parallel_size") != self.tp_size
                 or state.get("spec_binding") != self.config["spec_binding"]
+                or state.get("checkpoint") != self.config["checkpoint"]
+                or state.get("loaded_checkpoint") != self.loaded_checkpoint
+                or state.get("status") not in {"ACTIVE", "SEALED", "FAILED"}
+                or not isinstance(state.get("capture_closed"), bool)
             ):
                 raise CaptureError("existing capture state does not match config")
             return state
@@ -149,7 +199,10 @@ class CandidateCollector:
             "operator_id": self.config["operator_id"],
             "tp_rank": self.config["tp_rank"],
             "tensor_parallel_size": self.tp_size,
-            "status": "CAPTURING",
+            "checkpoint": self.config["checkpoint"],
+            "loaded_checkpoint": self.loaded_checkpoint,
+            "status": "ACTIVE",
+            "capture_closed": False,
             "saved_shape_count": 0,
             "repeated_call_count": 0,
             "skipped_call_count": 0,
@@ -240,12 +293,19 @@ class CandidateCollector:
             limit,
             execution_phase,
         )
-        current_signature_id = signature_id(signature)
+        current_shape_id = shape_id_for(x.shape)
         if self._state is None:
             raise CaptureError("capture state was not initialized for rank 0")
         with self._lock:
+            self._state = self._load_or_create_state()
+            if (
+                self._state["status"] != "ACTIVE"
+                or self._state["capture_closed"]
+            ):
+                raise CaptureError("capture is closed and cannot accept more samples")
+
             for sample in self._state["samples"]:
-                if sample["signature_id"] == current_signature_id:
+                if sample["shape_id"] == current_shape_id:
                     sample["repeat_count"] += 1
                     self._state["repeated_call_count"] += 1
                     _atomic_write_json(self.state_path, self._state)
@@ -254,13 +314,13 @@ class CandidateCollector:
             if self._state["saved_shape_count"] >= self.config["max_shapes"]:
                 self._state["skipped_call_count"] += 1
                 for skipped in self._state["skipped_signatures"]:
-                    if skipped["signature_id"] == current_signature_id:
+                    if skipped["shape_id"] == current_shape_id:
                         skipped["call_count"] += 1
                         break
                 else:
                     self._state["skipped_signatures"].append(
                         {
-                            "signature_id": current_signature_id,
+                            "shape_id": current_shape_id,
                             "signature": signature,
                             "call_count": 1,
                         }
@@ -269,7 +329,7 @@ class CandidateCollector:
                 return
 
             self._validate_new_sample(x, limit, output)
-            sample_name = f"{current_signature_id}.pt"
+            sample_name = f"{current_shape_id}.pt"
             sample_path = self.samples_dir / sample_name
             if sample_path.exists():
                 raise CaptureError(f"sample already exists outside capture state: {sample_name}")
@@ -298,7 +358,7 @@ class CandidateCollector:
             os.replace(temporary, sample_path)
             self._state["samples"].append(
                 {
-                    "signature_id": current_signature_id,
+                    "shape_id": current_shape_id,
                     "file": str(sample_path.relative_to(self.run_dir)),
                     "signature": signature,
                     "repeat_count": 0,

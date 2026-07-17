@@ -70,6 +70,13 @@ def write_capture_config(path: Path, run_dir: Path) -> None:
                 "run_dir": str(run_dir),
                 "capture_device_type": "cpu",
                 "dtype": "bfloat16",
+                "checkpoint": {
+                    "id": "stepfun-ai/Step-3.7-Flash@fixture",
+                    "model_path": "stepfun-ai/Step-3.7-Flash",
+                    "revision": "fixture",
+                    "config_digest": "config-digest",
+                },
+                "preflight_tp_context": {"rank": 0, "size": 8},
             }
         )
         + "\n",

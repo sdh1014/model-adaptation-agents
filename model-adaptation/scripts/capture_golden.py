@@ -21,8 +21,12 @@ from model_adaptation_capture.contracts import (
     CONFIG_SCHEMA,
     MLP_HOOK_TARGET,
     MODEL_RELATIVE_PATH as MODEL_PATH_TEXT,
+    checkpoint_metadata,
 )
-from model_adaptation_capture.preflight import PreflightError, run_workers
+from model_adaptation_capture.preflight import (
+    PreflightError,
+    run_capture_preflight,
+)
 
 
 MODEL_RELATIVE_PATH = Path(MODEL_PATH_TEXT)
@@ -201,6 +205,14 @@ def prepare_capture_config(
             f"expected {expected_revision}, got {actual_revision}"
         )
 
+    try:
+        checkpoint = checkpoint_metadata(
+            contract["checkpoint"]["id"],
+            contract["checkpoint"]["config_digest"],
+        )
+    except ValueError as error:
+        raise ToolError(str(error)) from error
+
     create_run_dir(run_dir)
     config_path = run_dir / "capture-config.json"
     config = {
@@ -215,6 +227,7 @@ def prepare_capture_config(
         "serialization": CANDIDATE_SERIALIZATION,
         "capture_device_type": "cuda",
         "dtype": contract["runtime"]["dtype"],
+        "checkpoint": checkpoint,
         "precision_gate": contract["precision_gate"],
         "run_dir": str(run_dir.resolve()),
         "scan_result": {
@@ -230,7 +243,7 @@ def prepare_capture_config(
         "state_dependency": operator["state_dependency"],
         "replay": {
             "mode": "loaded_model",
-            "checkpoint_id": contract["checkpoint"]["id"],
+            "checkpoint_id": checkpoint["id"],
             "weights_in_golden_sample": False,
         },
     }
@@ -309,7 +322,7 @@ def run_preflight(
         sglang_worktree,
         preflight=True,
     )
-    passed, evidence = run_workers(
+    passed, evidence = run_capture_preflight(
         run_dir / "capture-config.json",
         sglang_worktree,
     )

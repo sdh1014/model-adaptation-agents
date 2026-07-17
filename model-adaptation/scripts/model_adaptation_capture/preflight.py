@@ -56,7 +56,7 @@ def _worker_environment(
     return environment
 
 
-def run_workers(
+def run_capture_preflight(
     config_path: Path,
     sglang_worktree: Path,
 ) -> tuple[bool, list[str]]:

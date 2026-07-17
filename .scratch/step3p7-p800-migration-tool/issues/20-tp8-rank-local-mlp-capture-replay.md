@@ -25,3 +25,9 @@ Hook `sglang.srt.models.step3p5.Step3p5MLP.forward`，只处理 `self.limit is n
 ## Comments
 
 2026-07-17 已完成本地实现与自动化测试。插件只注册 SGLang 现有的 target forward 和原始 MLP 方法 Hook；固定原始源码中不存在额外模型函数。真实 CUDA checkpoint capture 与 P800 round-trip 仍属于 Ticket 12 的实机验收，不由本票据伪装为已完成。
+
+2026-07-17 审查修复：去重键收紧为输入 `x` 的 shape；`prepare-model-replay` 会先关闭采集，成功 self-replay 后才把 Golden Run 从 `ACTIVE` 改为 `SEALED`，失败改为 `FAILED`。插件在原始 MLP 真正执行时读取 SGLang 实际 `model_path` 与 `revision`，与 Contract checkpoint 不一致时拒绝重放。
+
+2026-07-17 二次审查修复：replay 初始化与 finalize 都把容差和完整 shape/path 集合重新绑定到 Contract 与 `capture-state.json`；删 shape 或放宽容差都会失败。finalize 改为可重复执行，测试覆盖 capture-state 写失败、状态已封存但 result 写失败，以及随后使用同一证据恢复。
+
+2026-07-17 最终规格审查修复：finalize 严格校验每条 `(shape_id, model_instance_path, passed)`，并要求顶层 `passed` 与全部逐条结果一致；单条失败、模型实例路径篡改或额外字段都不能封存 Golden Run。

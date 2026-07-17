@@ -37,11 +37,17 @@ def fake_sglang_modules():
     hook_registry = types.ModuleType("sglang.srt.plugins.hook_registry")
     hook_registry.HookRegistry = FakeHookRegistry
     hook_registry.HookType = FakeHookType
+    server_args = types.ModuleType("sglang.srt.server_args")
+    server_args.get_global_server_args = lambda: types.SimpleNamespace(
+        model_path="stepfun-ai/Step-3.7-Flash",
+        revision="fixture",
+    )
     return {
         "sglang": sglang,
         "sglang.srt": srt,
         "sglang.srt.plugins": plugins,
         "sglang.srt.plugins.hook_registry": hook_registry,
+        "sglang.srt.server_args": server_args,
     }
 
 
@@ -98,6 +104,16 @@ class Ticket12SglangCapturePluginTest(unittest.TestCase):
                 "sglang.srt.models.step3p5.Step3p5MLP.forward",
             ],
         )
+
+    def test_reads_the_loaded_checkpoint_identity_from_sglang(self) -> None:
+        with patch.dict(sys.modules, fake_sglang_modules()):
+            self.assertEqual(
+                plugin._loaded_checkpoint_identity(),
+                {
+                    "model_path": "stepfun-ai/Step-3.7-Flash",
+                    "revision": "fixture",
+                },
+            )
 
 
 if __name__ == "__main__":

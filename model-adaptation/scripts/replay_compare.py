@@ -2,7 +2,9 @@
 """Replay and compare captured samples without changing Migration Spec state."""
 
 import argparse
+import hashlib
 import json
+import os
 from pathlib import Path
 import sys
 from typing import Any, Dict, Optional
@@ -10,6 +12,7 @@ from typing import Any, Dict, Optional
 from _lib.spec_contract import (
     SpecContractError,
     canonical_json_bytes,
+    load_contract_data,
     load_spec_binding,
 )
 from model_adaptation_capture.contracts import (
@@ -18,6 +21,8 @@ from model_adaptation_capture.contracts import (
     REPLAY_CONFIG_SCHEMA,
     REPLAY_RESULT_SCHEMA,
     STATE_SCHEMA,
+    checkpoint_metadata,
+    shape_id_for,
 )
 
 
@@ -50,6 +55,15 @@ def write_json(path: Path, value: Any) -> None:
         json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+
+
+def atomic_write_json(path: Path, value: Dict[str, Any]) -> None:
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    temporary.write_text(
+        json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    os.replace(temporary, path)
 
 
 def read_json_object(path: Path, label: str) -> Dict[str, Any]:
@@ -147,10 +161,14 @@ def run_validate_binding(spec_path: Path, run_dir: Path, result_path: Path) -> N
 def _load_capture_state(
     golden_run: Path,
     expected_binding: Dict[str, Any],
+    expected_checkpoint: Dict[str, str],
     tp_size: int,
     max_shapes: int,
     tp_rank: int,
-) -> Dict[str, Any]:
+    *,
+    close_active_capture: bool,
+    allow_failed: bool = False,
+) -> tuple[Dict[str, Any], bool]:
     state = read_json_object(
         golden_run / "capture-state.json",
         "Golden capture state",
@@ -161,23 +179,81 @@ def _load_capture_state(
         "operator_id": OPERATOR_ID,
         "tp_rank": tp_rank,
         "tensor_parallel_size": tp_size,
-        "status": "SEALED",
+        "checkpoint": expected_checkpoint,
+        "loaded_checkpoint": {
+            "model_path": expected_checkpoint["model_path"],
+            "revision": expected_checkpoint["revision"],
+        },
     }
     for field, expected in checks.items():
         if state.get(field) != expected:
             raise ToolError(f"Golden capture state {field} has drifted")
+    status = state.get("status")
+    if status not in {"ACTIVE", "SEALED", "FAILED"}:
+        raise ToolError("Golden capture state status has drifted")
+    if not isinstance(state.get("capture_closed"), bool):
+        raise ToolError("Golden capture state capture_closed has drifted")
+    if status == "FAILED" and not allow_failed:
+        raise ToolError("Golden capture state is FAILED")
+
     samples = state.get("samples")
     if not isinstance(samples, list) or not 1 <= len(samples) <= max_shapes:
         raise ToolError(
             f"Golden capture state must contain one to {max_shapes} shapes"
         )
+    if state.get("saved_shape_count") != len(samples):
+        raise ToolError("Golden capture saved_shape_count has drifted")
+    seen_shape_ids = set()
     for sample in samples:
+        if not isinstance(sample, dict):
+            raise ToolError("Golden capture sample entry must be one object")
+        shape_id = sample.get("shape_id")
+        signature = sample.get("signature")
+        if (
+            not isinstance(shape_id, str)
+            or not shape_id
+            or not isinstance(signature, dict)
+        ):
+            raise ToolError("Golden capture sample shape metadata is invalid")
+        if signature.get("operator_id") != OPERATOR_ID:
+            raise ToolError("Golden capture sample operator has drifted")
+        model_instance_path = signature.get("model_instance_path")
+        if not isinstance(model_instance_path, str) or not model_instance_path:
+            raise ToolError(
+                "Golden capture sample model instance path has drifted"
+            )
+        try:
+            expected_shape_id = shape_id_for(
+                signature["inputs"]["x"]["shape"]
+            )
+        except (KeyError, TypeError, ValueError) as error:
+            raise ToolError(
+                "Golden capture sample shape metadata has drifted"
+            ) from error
+        if shape_id != expected_shape_id:
+            raise ToolError("Golden capture sample shape digest has drifted")
+        if shape_id in seen_shape_ids:
+            raise ToolError("Golden capture contains a duplicate shape")
+        seen_shape_ids.add(shape_id)
+        expected_file = f"samples/{shape_id}.pt"
+        if sample.get("file") != expected_file:
+            raise ToolError("Golden Sample path does not match its shape id")
         sample_path = (golden_run / sample["file"]).resolve()
         if not sample_path.is_relative_to(golden_run.resolve()):
             raise ToolError("Golden Sample path escapes the Golden Run")
         if not sample_path.is_file():
             raise ToolError(f"Golden Sample is missing: {sample['file']}")
-    return state
+
+    seal_golden_on_success = status == "ACTIVE"
+    if status == "ACTIVE":
+        if close_active_capture and not state["capture_closed"]:
+            state["capture_closed"] = True
+            atomic_write_json(golden_run / "capture-state.json", state)
+        elif not close_active_capture and not state["capture_closed"]:
+            raise ToolError("Golden capture must be closed before replay finalization")
+    elif not state["capture_closed"]:
+        raise ToolError(f"{status} Golden capture must remain closed")
+    return state, seal_golden_on_success
 
 
 def run_prepare_model_replay(
@@ -186,16 +262,25 @@ def run_prepare_model_replay(
     golden_run: Path,
 ) -> None:
     binding = load_spec_binding(spec_path)
-    contract = read_json_object_from_contract(spec_path)
+    contract = load_contract_data(spec_path)
     tp_size = contract["runtime"]["tensor_parallel_size"]
     tp_rank = contract["operator_boundary"]["tp_rank"]
     max_shapes = contract["limits"]["max_shapes_per_operator"]
-    state = _load_capture_state(
+    try:
+        checkpoint = checkpoint_metadata(
+            contract["checkpoint"]["id"],
+            contract["checkpoint"]["config_digest"],
+        )
+    except ValueError as error:
+        raise ToolError(str(error)) from error
+    state, seal_golden_on_success = _load_capture_state(
         golden_run.resolve(),
         binding.as_result_dict(),
+        checkpoint,
         tp_size,
         max_shapes,
         tp_rank,
+        close_active_capture=True,
     )
     shape_groups = []
     for sample in state["samples"]:
@@ -209,7 +294,7 @@ def run_prepare_model_replay(
             raise ToolError("Golden capture signature is missing model instance path")
         shape_groups.append(
             {
-                "shape_id": sample["signature_id"],
+                "shape_id": sample["shape_id"],
                 "model_instance_path": model_instance_path,
             }
         )
@@ -222,8 +307,9 @@ def run_prepare_model_replay(
         "activation_guard": contract["operator_boundary"]["activation_guard"],
         "tensor_parallel_size": tp_size,
         "tp_rank": tp_rank,
-        "checkpoint_id": contract["checkpoint"]["id"],
+        "checkpoint": checkpoint,
         "weights_source": "loaded_checkpoint",
+        "seal_golden_on_success": seal_golden_on_success,
         "golden_run": str(golden_run.resolve()),
         "run_dir": str(run_dir.resolve()),
         "shape_groups": shape_groups,
@@ -242,41 +328,96 @@ def run_prepare_model_replay(
             "tensor_parallel_size": tp_size,
             "tp_rank": tp_rank,
             "shape_count": len(shape_groups),
+            "capture_closed": True,
+            "seal_golden_on_success": seal_golden_on_success,
             "launch_environment": {
                 REPLAY_CONFIG_ENV: str(config_path.resolve()),
             },
             "summary": (
-                "Launch the same checkpoint and TP8 model on P800; the plugin "
-                "will replay rank 0 x inside the matching Step3p5MLP."
+                "Launch the Contract checkpoint and TP8 model; the plugin "
+                "will verify the loaded model identity before replaying rank 0 "
+                "x inside the matching Step3p5MLP."
             ),
         },
     )
 
 
-def read_json_object_from_contract(spec_path: Path) -> Dict[str, Any]:
-    from _lib.spec_contract import load_contract_data
-
-    return load_contract_data(spec_path)
-
-
 def run_finalize_model_replay(spec_path: Path, run_dir: Path) -> None:
-    if (run_dir / "result.json").exists():
-        raise ToolError("model replay result already exists")
     binding = load_spec_binding(spec_path)
+    contract = load_contract_data(spec_path)
+    try:
+        checkpoint = checkpoint_metadata(
+            contract["checkpoint"]["id"],
+            contract["checkpoint"]["config_digest"],
+        )
+    except ValueError as error:
+        raise ToolError(str(error)) from error
     config = read_json_object(run_dir / "replay-config.json", "replay config")
     if config.get("schema") != REPLAY_CONFIG_SCHEMA:
         raise ToolError("replay config schema has drifted")
     if config.get("spec_binding") != binding.as_result_dict():
         raise ToolError("replay config spec binding has drifted")
+    if config.get("checkpoint") != checkpoint:
+        raise ToolError("replay config checkpoint has drifted")
+    if config.get("weights_source") != "loaded_checkpoint":
+        raise ToolError("replay config weights source has drifted")
+    if config.get("precision_gate") != contract["precision_gate"]:
+        raise ToolError("replay config precision gate has drifted")
+    seal_golden_on_success = config.get("seal_golden_on_success")
+    if not isinstance(seal_golden_on_success, bool):
+        raise ToolError("replay config Golden seal policy has drifted")
     tp_size = config.get("tensor_parallel_size")
     if tp_size != 8:
         raise ToolError("model replay finalization requires TP8")
     tp_rank = config.get("tp_rank")
     if tp_rank != 0:
         raise ToolError("model replay finalization requires tp_rank 0")
-    expected_shapes = {
-        item["shape_id"] for item in config.get("shape_groups", [])
-    }
+    shape_groups = config.get("shape_groups")
+    if not isinstance(shape_groups, list) or not shape_groups:
+        raise ToolError("replay config shape groups are invalid")
+    configured_groups = []
+    for item in shape_groups:
+        if (
+            not isinstance(item, dict)
+            or set(item) != {"shape_id", "model_instance_path"}
+            or not isinstance(item["shape_id"], str)
+            or not item["shape_id"]
+            or not isinstance(item["model_instance_path"], str)
+            or not item["model_instance_path"]
+        ):
+            raise ToolError("replay config shape groups are invalid")
+        configured_groups.append(
+            (item["shape_id"], item["model_instance_path"])
+        )
+    if len(set(configured_groups)) != len(configured_groups):
+        raise ToolError("replay config shape groups contain duplicate or invalid ids")
+    expected_shapes = {shape_id for shape_id, _ in configured_groups}
+
+    golden_run_value = config.get("golden_run")
+    if not isinstance(golden_run_value, str) or not golden_run_value:
+        raise ToolError("replay config Golden Run has drifted")
+    golden_run = Path(golden_run_value).resolve()
+    capture_state, state_requires_seal = _load_capture_state(
+        golden_run,
+        binding.as_result_dict(),
+        checkpoint,
+        tp_size,
+        contract["limits"]["max_shapes_per_operator"],
+        tp_rank,
+        close_active_capture=False,
+        allow_failed=True,
+    )
+    state_groups = [
+        (
+            sample["shape_id"],
+            sample["signature"]["model_instance_path"],
+        )
+        for sample in capture_state["samples"]
+    ]
+    if configured_groups != state_groups:
+        raise ToolError(
+            "replay config shape groups do not match Golden capture state"
+        )
 
     replay_result = read_json_object(
         run_dir / "replay-result.json",
@@ -288,6 +429,11 @@ def run_finalize_model_replay(spec_path: Path, run_dir: Path) -> None:
         "operator_id": OPERATOR_ID,
         "tp_rank": tp_rank,
         "tensor_parallel_size": tp_size,
+        "checkpoint": checkpoint,
+        "loaded_checkpoint": {
+            "model_path": checkpoint["model_path"],
+            "revision": checkpoint["revision"],
+        },
     }
     for field, expected in checks.items():
         if replay_result.get(field) != expected:
@@ -295,28 +441,88 @@ def run_finalize_model_replay(spec_path: Path, run_dir: Path) -> None:
     checked_shapes = replay_result.get("checked_shapes")
     if not isinstance(checked_shapes, list):
         raise ToolError("model replay checked_shapes is invalid")
-    if {item.get("shape_id") for item in checked_shapes} != expected_shapes:
-        raise ToolError("model replay did not check every shape")
+    checked_groups = []
+    per_shape_passed = []
+    for item in checked_shapes:
+        if (
+            not isinstance(item, dict)
+            or set(item)
+            != {"shape_id", "model_instance_path", "passed"}
+            or not isinstance(item["shape_id"], str)
+            or not item["shape_id"]
+            or not isinstance(item["model_instance_path"], str)
+            or not item["model_instance_path"]
+            or not isinstance(item["passed"], bool)
+        ):
+            raise ToolError("model replay checked_shapes entry is invalid")
+        checked_groups.append(
+            (item["shape_id"], item["model_instance_path"])
+        )
+        per_shape_passed.append(item["passed"])
+    if (
+        set(checked_groups) != set(configured_groups)
+        or len(checked_groups) != len(configured_groups)
+    ):
+        raise ToolError("model replay checked shape groups have drifted")
 
-    passed = replay_result.get("passed") is True
-    write_json(
-        run_dir / "result.json",
-        {
-            "tool": "replay_compare.py",
-            "action": "finalize-model-replay",
-            "spec_binding": binding.as_result_dict(),
-            "operator_id": OPERATOR_ID,
+    passed = replay_result.get("passed")
+    if not isinstance(passed, bool) or passed != all(per_shape_passed):
+        raise ToolError("model replay per-shape pass results are inconsistent")
+    result = {
+        "tool": "replay_compare.py",
+        "action": "finalize-model-replay",
+        "spec_binding": binding.as_result_dict(),
+        "operator_id": OPERATOR_ID,
+        "passed": passed,
+        "checked_shape_count": len(expected_shapes),
+        "tp_rank": tp_rank,
+        "checkpoint": checkpoint,
+        "loaded_checkpoint": replay_result["loaded_checkpoint"],
+        "replay_result_file": "replay-result.json",
+        "summary": (
+            "Every rank-0 MLP shape passed inside the loaded TP8 model."
+            if passed
+            else "At least one rank-0 MLP shape failed inside the loaded TP8 model."
+        ),
+    }
+    result_path = run_dir / "result.json"
+    if result_path.exists():
+        existing_result = read_json_object(result_path, "model replay result")
+        if existing_result != result:
+            raise ToolError("existing model replay result has drifted")
+
+    if seal_golden_on_success:
+        target_status = "SEALED" if passed else "FAILED"
+        self_replay = {
             "passed": passed,
             "checked_shape_count": len(expected_shapes),
-            "tp_rank": tp_rank,
-            "replay_result_file": "replay-result.json",
-            "summary": (
-                "Every rank-0 MLP shape passed inside the loaded TP8 model."
-                if passed
-                else "At least one rank-0 MLP shape failed inside the loaded TP8 model."
-            ),
-        },
-    )
+            "checkpoint_id": checkpoint["id"],
+            "loaded_checkpoint": replay_result["loaded_checkpoint"],
+            "replay_result_sha256": hashlib.sha256(
+                canonical_json_bytes(replay_result)
+            ).hexdigest(),
+        }
+        if capture_state["status"] == "ACTIVE":
+            if not state_requires_seal:
+                raise ToolError("ACTIVE Golden capture state cannot be sealed")
+            capture_state["status"] = target_status
+            capture_state["self_replay"] = self_replay
+            atomic_write_json(
+                golden_run / "capture-state.json",
+                capture_state,
+            )
+        elif (
+            capture_state["status"] != target_status
+            or capture_state.get("self_replay") != self_replay
+        ):
+            raise ToolError(
+                "Golden capture terminal self-replay evidence has drifted"
+            )
+    elif capture_state["status"] != "SEALED" or state_requires_seal:
+        raise ToolError("P800 replay requires an already SEALED Golden Run")
+
+    if not result_path.exists():
+        atomic_write_json(result_path, result)
 
 
 def parse_args() -> argparse.Namespace:

@@ -406,28 +406,19 @@ runs/scan-001/
 
 | 类别 | 最少内容 |
 |---|---|
-| 身份 | `operator_id`、target、执行阶段 |
-| 源码 | qualified symbol/调用点、相对路径、行号、commit |
-| 输入结构 | args/kwargs 顺序，list/tuple/dict/标量/`None` 的嵌套形状 |
-| 输入 Tensor | 数值及稳定叶子路径、shape、dtype、layout、stride、contiguous |
-| 非 Tensor 参数 | 参与语义且可稳定表示的实际值 |
-| 输出 | 容器结构、CUDA Tensor 数值、叶子路径、shape、dtype |
-| 运行上下文 | forward mode、eager/CUDA Graph 设置、关键版本 |
-| 去重 | 规范签名及计数 |
+| 绑定 | `spec_binding`、`operator_id=Step3p5MLP.forward` |
+| 模型位置 | `model_instance_path`、`tp_rank=0`、`tensor_parallel_size=8`、执行阶段 |
+| 输入 | CPU BF16 `x` 数值，以及 shape、dtype、layout、stride |
+| 非 Tensor 参数 | 标量 `limit` |
+| 输出 | CPU BF16 CUDA Golden `output` |
+| 去重 | `capture-state.json` 中输入 `x` 的 shape ID 及计数 |
+| 外部证据 | checkpoint、源码 revision、Hook 目标和启动参数保存在 Run 配置与日志，不重复写入每份样本 |
 
 如果正确行为依赖共享存储、原地修改、随机状态或无法稳定表示的运行时对象，该候选不满足当前数据契约，不能为了采它临时扩大 dump 范围。
 
 ### 10.3 去重规则
 
-对以下规范 JSON 计算 SHA-256：
-
-- `operator_id`；
-- target 与执行阶段；
-- 输入容器结构；
-- 按稳定叶子路径排序的输入 shape、dtype、layout、stride；
-- 规范化的非 Tensor 参数。
-
-签名不包含 Tensor 数值和输出。同一算子在唯一 Session 中：已出现签名只增加重复计数；前三个新签名保存 Tensor；第四个及以后只记签名和未保留计数。若只观察到一个或两个真实形态，就只验收这些样本，不能用随机 shape 补满三个。
+本 Demo 只对输入 `x` 的 shape 计算稳定 SHA-256。shape 相同就算同一种，即使它再次出现在另一个模型层、prefill 或 decode；首次出现的记录保留模型层路径、执行阶段、dtype、layout、stride 和 `limit` 作为重放定位与校验元数据。前三种新 shape 保存 Tensor，第四种及以后只记未保留计数。若只观察到一种或两种真实 shape，就只验收这些样本，不能用随机 shape 补满三种。
 
 ### 10.4 Golden Run 与模型内 self-replay
 
@@ -437,15 +428,15 @@ runs/golden-001/
 ├── capture.log
 ├── capture-state.json
 ├── samples/
-│   ├── <signature-id-1>.pt
-│   ├── <signature-id-2>.pt
-│   └── <signature-id-3>.pt
+│   ├── <shape-id-1>.pt
+│   ├── <shape-id-2>.pt
+│   └── <shape-id-3>.pt
 └── self-replay/
     ├── result.json
     └── replay.log
 ```
 
-每份样本只包含 rank 0 的 `x`、CUDA `output`、`limit`、模型层路径和布局元数据。权重不进入样本，由同一 checkpoint 在当前 rank 加载。Capture 结束后，必须在仍可使用 CUDA 的同一次 Session 内，让已加载同一 checkpoint 的 TP8 模型在相同 `Step3p5MLP` 实例上重放 `x`。所有保留样本通过 Contract Precision Gate 后，Golden Run 才能标记为 `SEALED`。不能把 MLP 退化成无权重函数调用。
+每份样本只包含 rank 0 的 `x`、CUDA `output`、`limit`、模型层路径和布局元数据。权重不进入样本，由同一 checkpoint 在当前 rank 加载。Capture 结束后，先停止采集进程；`prepare-model-replay` 原子地关闭样本写入，但保持 Session 为 `ACTIVE`。随后在仍可使用 CUDA 的同一次 Session 内加载同一 checkpoint 的 TP8 模型，在相同 `Step3p5MLP` 实例上重放 `x`。插件必须把 SGLang 实际生效的 model path 与 revision 和 Contract checkpoint 核对；缺失或不一致直接停止。`replay-result.json` 生成后先停止 replay 模型进程，再执行 finalize；初始化和 finalize 都重新核对 Contract Precision Gate，并要求配置中的 shape/模型路径与 `capture-state.json` 完全相同。每条结果必须严格对应一个配置项，且顶层 `passed` 必须等于所有逐条结果的合取。finalize 先写入可校验的 self-replay 证据，再发布最终结果；任一步中断后都可用同一证据重试。所有保留样本通过后，Golden Run 才能标记为 `SEALED`，失败则标记为 `FAILED`。不能把 MLP 退化成无权重函数调用。
 
 当前源码在 active CUDA Graph capture 时会跳过 Tensor dump，因此 Contract 明确把 decode 与 prefill CUDA Graph 都设为 `disabled`，并选择允许安全落盘的函数边界。不能在 active graph capture 中强行复制 Tensor。
 

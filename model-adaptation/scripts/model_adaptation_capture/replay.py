@@ -1,6 +1,5 @@
 """Replay rank-0 Golden Samples inside an already loaded TP8 model."""
 
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -10,10 +9,13 @@ import torch
 
 from .contracts import (
     CANDIDATE_SAMPLE_SCHEMA,
+    FIXED_PRECISION_GATE,
     OPERATOR_ID,
     REPLAY_CONFIG_SCHEMA,
     REPLAY_RESULT_SCHEMA,
+    STATE_SCHEMA,
     VALIDATION_TP_RANK,
+    shape_id_for,
 )
 
 
@@ -41,20 +43,49 @@ def _atomic_write_json(path: Path, value: Dict[str, Any]) -> None:
     os.replace(temporary, path)
 
 
-def _signature_id(value: Dict[str, Any]) -> str:
-    encoded = json.dumps(
-        value,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
+def _shape_groups_from_state(state: Dict[str, Any]) -> list[tuple[str, str]]:
+    samples = state.get("samples")
+    if not isinstance(samples, list) or not 1 <= len(samples) <= 3:
+        raise ModelReplayError(
+            "Golden capture state requires one to three shapes"
+        )
+    groups = []
+    for sample in samples:
+        if not isinstance(sample, dict):
+            raise ModelReplayError("Golden capture sample entry is invalid")
+        signature = sample.get("signature")
+        shape_id = sample.get("shape_id")
+        model_instance_path = (
+            signature.get("model_instance_path")
+            if isinstance(signature, dict)
+            else None
+        )
+        if (
+            not isinstance(shape_id, str)
+            or not shape_id
+            or not isinstance(model_instance_path, str)
+            or not model_instance_path
+        ):
+            raise ModelReplayError(
+                "Golden capture sample shape groups are invalid"
+            )
+        groups.append((shape_id, model_instance_path))
+    if len(set(groups)) != len(groups):
+        raise ModelReplayError("Golden capture shape groups contain duplicates")
+    return groups
 
 
 class LoadedModelReplay:
-    """Compare Golden records using the loaded rank-0 MLP weights."""
+    """Compare Golden Samples using the loaded rank-0 MLP weights."""
 
-    def __init__(self, config: Dict[str, Any], *, tp_rank: int, tp_size: int):
+    def __init__(
+        self,
+        config: Dict[str, Any],
+        *,
+        tp_rank: int,
+        tp_size: int,
+        loaded_checkpoint: Dict[str, str],
+    ):
         if config.get("schema") != REPLAY_CONFIG_SCHEMA:
             raise ModelReplayError("loaded-model replay config schema has drifted")
         if config.get("operator_id") != OPERATOR_ID:
@@ -71,15 +102,100 @@ class LoadedModelReplay:
             raise ModelReplayError("tp_rank is outside the TP group")
         if not isinstance(config.get("spec_binding"), dict):
             raise ModelReplayError("loaded-model replay is missing spec_binding")
+        if config.get("weights_source") != "loaded_checkpoint":
+            raise ModelReplayError(
+                "loaded-model replay must use the loaded checkpoint weights"
+            )
+        checkpoint = config.get("checkpoint")
+        if (
+            not isinstance(checkpoint, dict)
+            or set(checkpoint)
+            != {"id", "model_path", "revision", "config_digest"}
+        ):
+            raise ModelReplayError(
+                "loaded-model replay checkpoint identity is invalid"
+            )
+        if (
+            not isinstance(loaded_checkpoint, dict)
+            or set(loaded_checkpoint) != {"model_path", "revision"}
+            or any(
+                not isinstance(loaded_checkpoint[field], str)
+                or not loaded_checkpoint[field]
+                for field in loaded_checkpoint
+            )
+        ):
+            raise ModelReplayError("loaded checkpoint identity is unavailable")
+        for field in ("model_path", "revision"):
+            if loaded_checkpoint[field] != checkpoint.get(field):
+                raise ModelReplayError(
+                    f"loaded checkpoint {field} does not match Contract Data"
+                )
+        if config.get("precision_gate") != FIXED_PRECISION_GATE:
+            raise ModelReplayError(
+                "loaded-model replay precision gate has drifted"
+            )
         shape_groups = config.get("shape_groups")
         if not isinstance(shape_groups, list) or not 1 <= len(shape_groups) <= 3:
             raise ModelReplayError("loaded-model replay requires one to three shapes")
+        for group in shape_groups:
+            if (
+                not isinstance(group, dict)
+                or set(group) != {"shape_id", "model_instance_path"}
+                or not isinstance(group["shape_id"], str)
+                or not group["shape_id"]
+                or not isinstance(group["model_instance_path"], str)
+                or not group["model_instance_path"]
+            ):
+                raise ModelReplayError(
+                    "loaded-model replay shape group is invalid"
+                )
+        configured_groups = [
+            (group["shape_id"], group["model_instance_path"])
+            for group in shape_groups
+        ]
+        if len(set(configured_groups)) != len(configured_groups):
+            raise ModelReplayError(
+                "loaded-model replay shape groups contain duplicates"
+            )
+
+        golden_run_value = config.get("golden_run")
+        if not isinstance(golden_run_value, str) or not golden_run_value:
+            raise ModelReplayError("loaded-model replay is missing Golden Run")
+        golden_run = Path(golden_run_value).resolve()
+        state = _read_json_object(
+            golden_run / "capture-state.json",
+            "Golden capture state",
+        )
+        state_checks = {
+            "schema": STATE_SCHEMA,
+            "spec_binding": config["spec_binding"],
+            "operator_id": config["operator_id"],
+            "tp_rank": config["tp_rank"],
+            "tensor_parallel_size": tp_size,
+            "checkpoint": checkpoint,
+            "loaded_checkpoint": loaded_checkpoint,
+            "capture_closed": True,
+        }
+        for field, expected in state_checks.items():
+            if state.get(field) != expected:
+                raise ModelReplayError(
+                    f"Golden capture state {field} has drifted"
+                )
+        if state.get("status") not in {"ACTIVE", "SEALED"}:
+            raise ModelReplayError(
+                "Golden capture state is not replayable"
+            )
+        if configured_groups != _shape_groups_from_state(state):
+            raise ModelReplayError(
+                "loaded-model replay shape groups do not match Golden capture"
+            )
 
         self.config = config
+        self.loaded_checkpoint = loaded_checkpoint
         self.tp_rank = tp_rank
         self.tp_size = tp_size
         self.run_dir = Path(config["run_dir"]).resolve()
-        self.golden_run = Path(config["golden_run"]).resolve()
+        self.golden_run = golden_run
         self.result_path = self.run_dir / "replay-result.json"
         self._processed_paths: set[str] = set()
         self._result = {
@@ -88,6 +204,8 @@ class LoadedModelReplay:
             "operator_id": config["operator_id"],
             "tp_rank": tp_rank,
             "tensor_parallel_size": tp_size,
+            "checkpoint": checkpoint,
+            "loaded_checkpoint": loaded_checkpoint,
             "passed": True,
             "checked_shapes": [],
             "errors": [],
@@ -100,11 +218,13 @@ class LoadedModelReplay:
         *,
         tp_rank: int,
         tp_size: int,
+        loaded_checkpoint: Dict[str, str],
     ) -> "LoadedModelReplay":
         return cls(
             _read_json_object(path.resolve(), "loaded-model replay config"),
             tp_rank=tp_rank,
             tp_size=tp_size,
+            loaded_checkpoint=loaded_checkpoint,
         )
 
     def _load_payload(
@@ -156,8 +276,16 @@ class LoadedModelReplay:
                 raise ModelReplayError(
                     f"rank-0 Golden Sample {field} does not match replay config"
                 )
-        if _signature_id(payload["signature"]) != shape_id:
-            raise ModelReplayError("rank-0 Golden Sample signature digest has drifted")
+        try:
+            actual_shape_id = shape_id_for(
+                payload["signature"]["inputs"]["x"]["shape"]
+            )
+        except (KeyError, TypeError, ValueError) as error:
+            raise ModelReplayError(
+                "rank-0 Golden Sample shape metadata has drifted"
+            ) from error
+        if actual_shape_id != shape_id:
+            raise ModelReplayError("rank-0 Golden Sample shape digest has drifted")
         if set(payload["inputs"]) != {"x"} or set(payload["outputs"]) != {"output"}:
             raise ModelReplayError("rank-0 Golden Sample must contain x and output")
         if set(payload["parameters"]) != {"limit"}:

@@ -14,6 +14,12 @@ sys.path.insert(0, str(SCRIPTS_ROOT))
 from model_adaptation_capture.collector import CandidateCollector, CaptureError
 
 
+LOADED_CHECKPOINT = {
+    "model_path": "stepfun-ai/Step-3.7-Flash",
+    "revision": "fixture",
+}
+
+
 def write_capture_config(path: Path, run_dir: Path) -> None:
     path.write_text(
         json.dumps(
@@ -34,6 +40,12 @@ def write_capture_config(path: Path, run_dir: Path) -> None:
                 "run_dir": str(run_dir),
                 "capture_device_type": "cpu",
                 "dtype": "bfloat16",
+                "checkpoint": {
+                    "id": "stepfun-ai/Step-3.7-Flash@fixture",
+                    "model_path": "stepfun-ai/Step-3.7-Flash",
+                    "revision": "fixture",
+                    "config_digest": "config-digest",
+                },
             }
         )
         + "\n",
@@ -52,6 +64,7 @@ class Ticket12CaptureCandidateTest(unittest.TestCase):
                 config_path,
                 tp_rank=0,
                 tp_size=8,
+                loaded_checkpoint=LOADED_CHECKPOINT,
             )
 
             parameter = torch.nn.Parameter(

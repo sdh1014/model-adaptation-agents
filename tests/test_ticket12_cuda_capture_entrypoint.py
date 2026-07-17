@@ -29,6 +29,11 @@ class Ticket12CudaCaptureEntrypointTest(unittest.TestCase):
         )
         self.assertIn("--cuda-graph-backend-decode disabled", runbook)
         self.assertIn("--cuda-graph-backend-prefill disabled", runbook)
+        self.assertIn('--revision "$MODEL_REVISION"', runbook)
+        self.assertIn(
+            "5f6244077ac62e04eec3f320501ff8c2b293373a",
+            runbook,
+        )
         self.assertNotIn("--speculative-algorithm EAGLE", runbook)
         self.assertNotIn("step_swiglu_with_limit", runbook)
 
