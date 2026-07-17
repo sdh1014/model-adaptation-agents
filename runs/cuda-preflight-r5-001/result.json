@@ -1,0 +1,27 @@
+{
+  "action": "preflight",
+  "capture_status": "PREFLIGHT_PASSED",
+  "consumes_capture_session": false,
+  "evidence": [
+    "capture-config.json",
+    "preflight-capture.log",
+    "capture-state.json",
+    "preflight-capture-summary.json",
+    "preflight-rank-filter-config.json",
+    "preflight-rank-filter.log",
+    "preflight-rank-filter-summary.json",
+    "preflight-replay-config.json",
+    "preflight-replay.log",
+    "worker-result.json"
+  ],
+  "operator_id": "sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul",
+  "passed": true,
+  "serialization": "kernel-call-torch-save/v1",
+  "spec_binding": {
+    "contract_data_sha256": "f683ea62427279da3c899a3ef0afcfa1d16298b7424154664c7e3fac9b13d938",
+    "contract_revision": 5,
+    "spec_id": "step3p7-flash-p800-demo"
+  },
+  "summary": "The installed SGLang hook captured rank-0 Kernel Call records and a new process self-replayed them through the existing CUDA call; the real checkpoint capture remains a later step.",
+  "tool": "capture_golden.py"
+}
