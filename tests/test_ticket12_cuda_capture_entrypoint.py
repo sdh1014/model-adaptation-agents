@@ -22,10 +22,11 @@ class Ticket12CudaCaptureEntrypointTest(unittest.TestCase):
         runbook = RUNBOOK.read_text(encoding="utf-8")
 
         self.assertIn("revision 5", runbook)
-        self.assertIn("scan-005", runbook)
-        self.assertIn("sgl_kernel.gemma_rmsnorm", runbook)
+        self.assertIn("scan-006", runbook)
+        self.assertIn("_swiglu_silu_clamp_mul", runbook)
         self.assertIn(
-            "sglang.srt.layers.layernorm.gemma_rmsnorm",
+            "sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe."
+            "_swiglu_silu_clamp_mul",
             runbook,
         )
         self.assertIn("capture/replay adapter 尚未实现", runbook)

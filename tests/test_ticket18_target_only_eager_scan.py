@@ -122,12 +122,12 @@ class Ticket18TargetOnlyEagerScanTest(unittest.TestCase):
 
     def test_spec_advances_from_historical_scan_to_revision_5_kernel_adapter(self):
         spec = (ROOT / "migration-spec.md").read_text(encoding="utf-8")
-        self.assertIn("- `scan_run`: `runs/scan-005`", spec)
-        self.assertIn("- `last_run`: `runs/scan-005`", spec)
+        self.assertIn("- `scan_run`: `runs/scan-006`", spec)
+        self.assertIn("- `last_run`: `runs/scan-006`", spec)
         self.assertIn("- `draft_coverage`: `NOT_APPLICABLE`", spec)
         self.assertIn("- `phase`: `CUDA_CAPTURE`", spec)
         self.assertIn(
-            "`next_action`: `实现 Ticket 22 的 sgl_kernel.gemma_rmsnorm "
+            "`next_action`: `实现 Ticket 23 的 _swiglu_silu_clamp_mul "
             "capture/replay adapter；本地测试通过前不得运行 CUDA preflight`",
             spec,
         )

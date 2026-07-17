@@ -185,6 +185,26 @@ def validate_scan_candidate(
                 raise ToolError(
                     f"capture plan {field} does not match Contract Data"
                 )
+        boundary = operator["boundary"]
+        saved_boundary_fields = {
+            "saved_inputs": ("inputs", "inputs"),
+            "saved_parameters": ("parameters", "direct call parameters"),
+            "saved_non_tensor_args": ("non_tensor_args", "non-Tensor arguments"),
+            "saved_outputs": ("outputs", "outputs"),
+        }
+        for plan_field, (boundary_field, label) in saved_boundary_fields.items():
+            expected_names = boundary.get(boundary_field)
+            if not isinstance(expected_names, list) or not all(
+                isinstance(name, str) and name for name in expected_names
+            ):
+                raise ToolError(
+                    f"operator boundary {boundary_field} must be a list of names"
+                )
+            if plan.get(plan_field) != expected_names:
+                raise ToolError(
+                    f"capture plan {plan_field.replace('_', ' ')} do not match "
+                    f"the {label}"
+                )
         kernel_call = operator.get("kernel_call")
         if (
             not isinstance(kernel_call, dict)

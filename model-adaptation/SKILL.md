@@ -103,8 +103,8 @@ scripts/replay_compare.py \
 - 从 `Step3p7ForConditionalGeneration.forward` 出发，只进入 target 路径，不进入
   `Step3p5MTP.forward`。
 - 分别沿 `text-only` 和固定最小 `single-image` 请求会激活的路径向下扫描。
-- 最小边界是源码中已经存在、能直接描述输入输出并可独立替换的 device-compute
-  调用。CUDA extension、Triton、SGLang JIT、第三方 kernel 和实际不兼容的
+- 最小边界是源码中已经存在、能直接描述输入输出并可独立替换的 Kernel Call。
+  CUDA extension、Triton、SGLang JIT、第三方 kernel 和实际不兼容的
   Torch 调用都可以进入清单。
 - 不把 view、reshape、split 等只改元数据的表达式单独列为缺口。
 - 不新增 helper、自定义算子函数、模型方法或整层 wrapper 作为扫描、捕获或重放
@@ -163,7 +163,9 @@ Contract 与 `active_operator`、`passed: true` 的 adapter Run，才表示后�
 2. Hook Scan Run 指定的现有 capture seam，不新增自定义算子函数；
 3. 用测试证明只保存 Contract 允许的输入、直接参数、非 Tensor 参数和 CUDA 输出，
    最多三个 shape，且 rank 0 以外不落盘；
-4. 用测试证明 CUDA self-replay 和 P800 compare 都直接调用活动 kernel 的现有接口；
+4. 用测试证明 CUDA self-replay 调 Scan Run 记录的 CUDA capture seam，P800
+   compare 调 Scan Run 记录的对应 Kunlun seam；两端都只使用已有调用，不新增模型
+   helper 或自定义算子；
 5. 把实现与测试证据写入新的 Run，不改写 Scan Run；随后更新 Working State 的
    `last_completed_action`、`last_run` 和唯一 preflight 下一动作。
 

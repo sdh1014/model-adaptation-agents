@@ -176,14 +176,18 @@ class Ticket11ScanArtifactTest(unittest.TestCase):
         mlp_scan = json.loads(
             (ROOT / "runs" / "scan-004" / "result.json").read_text()
         )
-        current_scan = json.loads(
+        initial_kernel_scan = json.loads(
             (ROOT / "runs" / "scan-005" / "result.json").read_text()
         )
-        self.assertIn("- `scan_run`: `runs/scan-005`", spec)
+        current_scan = json.loads(
+            (ROOT / "runs" / "scan-006" / "result.json").read_text()
+        )
+        self.assertIn("- `scan_run`: `runs/scan-006`", spec)
         self.assertEqual(self.result["supersedes"], "runs/scan-001")
         self.assertEqual(target_only_scan["supersedes"], "runs/scan-002")
         self.assertEqual(mlp_scan["supersedes"], "runs/scan-003")
-        self.assertEqual(current_scan["supersedes"], "runs/scan-004")
+        self.assertEqual(initial_kernel_scan["supersedes"], "runs/scan-004")
+        self.assertEqual(current_scan["supersedes"], "runs/scan-005")
 
     def test_eagle_defaults_cover_all_three_draft_weight_layers(self):
         eagle = self.result["eagle_draft_resolution"]

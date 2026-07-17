@@ -138,12 +138,7 @@ def is_placeholder(value: Any) -> bool:
 
 
 def uses_kernel_scan_contract(contract_data: Dict[str, Any]) -> bool:
-    revision = contract_data.get("contract_revision")
-    return "scan_scope" in contract_data or (
-        isinstance(revision, int)
-        and not isinstance(revision, bool)
-        and revision >= 5
-    )
+    return "scan_scope" in contract_data or "sample_policy" in contract_data
 
 
 def require_approved_contract_data(contract_data: Dict[str, Any]) -> None:

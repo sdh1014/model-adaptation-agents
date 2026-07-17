@@ -1,7 +1,7 @@
 # 实现 Gemma RMSNorm kernel 采集与重放 adapter
 
 Type: task
-Status: ready-for-agent
+Status: wontfix
 Blocked by: 21
 
 ## What to build
@@ -38,3 +38,6 @@ Blocked by: 21
 `scan-005` 选择这个调用，是因为 Step-3.7 文本 q/k norm 固定可达、只有一个输出、
 没有 TP 通信，只需一个直接 1-D 参数，并且 Kunlun 已有普通 RMSNorm 能力可供后续
 修复复用。
+
+2026-07-17：`scan-006` 补回更小的已有 `_swiglu_silu_clamp_mul` 缺口并改选它。
+本票据不再执行；SwiGLU adapter 由 Ticket 23 继续。

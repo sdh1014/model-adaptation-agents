@@ -10,7 +10,7 @@ Blocked by: none
 `active_operator`，只固定 Step-3.7 target-only eager 的扫描范围、文本与单图输入、
 TP8/BF16 运行条件、最多三个 shape、精度门槛和 Golden Sample 参数保存规则。
 
-新建不可变 `runs/scan-005`，以现有 kernel/device-compute 调用为最小边界，沿两种
+新建不可变 `runs/scan-005`，以现有 Kernel Call 为最小边界，沿两种
 输入的真实调用链比较 CUDA 已有实现与 Kunlun 等价路径。Triton 只是 CUDA 实现类型
 之一，不能作为入选硬条件。首轮扫描完成后，比较 `topk_sigmoid`、视觉 attention、
 Gemma RMSNorm 和其他真实缺口，再从 gap queue 中选择最小 Demo，写入 Working
@@ -48,3 +48,8 @@ State 的 `active_operator`。
 `scan-005` 已封存；扫描比较四个静态缺口候选，并选择
 `sgl_kernel.gemma_rmsnorm`。当前 Working State 的唯一下一动作是 Ticket 22，
 旧 MLP adapter 明确不可消费 revision 5。
+
+2026-07-17 复核补充：保留 `scan-005` 不变。源码复核发现其视觉调用链有误，并
+漏掉已有 `_swiglu_silu_clamp_mul` 与 Kunlun 普通 SwiGLU 间的 clamp 语义缺口，
+因此新增 `scan-006` 纠正清单和选择。Gemma Ticket 22 标记为 `wontfix`，当前下一
+步改为 Ticket 23。

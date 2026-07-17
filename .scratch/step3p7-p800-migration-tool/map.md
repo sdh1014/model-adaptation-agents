@@ -47,18 +47,19 @@ Demo。
 - [按 target-only eager 范围重新封存算子扫描](issues/18-rescan-target-only-eager-operator-gaps.md)：`runs/scan-003` 重新确认 target 路径的 13 个算子与缺口，Spec 已进入 `ACTIVE / CUDA_CAPTURE`，下一步是 revision 3 的真实 N 卡 preflight。
 - [恢复 Step3p5MLP 原始算子边界](issues/19-restore-step3p5-mlp-boundary.md)：Contract revision 4 回到原始 CUDA/Kunlun 提交，以 `Step3p5MLP.forward` 覆盖投影、特殊 SwiGLU 和下投影，不再要求 helper 重构。
 - [实现 TP8 rank 0 MLP 采集与模型内重放](issues/20-tp8-rank-local-mlp-capture-replay.md)：每种 shape 只保存 rank 0 的 `x/output`；CUDA 与 P800 都在加载同 checkpoint 的 TP8 模型实例内重放，不新增模型算子函数。
-- [以 kernel 调用为边界重扫并选择最小 Demo](issues/21-kernel-level-scan-and-demo-selection.md)：Contract revision 5 只固定 kernel-call 扫描范围、文本/单图输入和直接参数保存规则；`scan-005` 比较 Gemma RMSNorm、top-k、视觉 attention 与 Kunlun 上层 bypass，扫描完成后选择 `sgl_kernel.gemma_rmsnorm`。
-- [实现 Gemma RMSNorm kernel 采集与重放 adapter](issues/22-gemma-rmsnorm-kernel-capture-replay-adapter.md)：下一步 Hook 现有 `sglang.srt.layers.layernorm.gemma_rmsnorm`，保存 rank 0 的 `x/weight/eps/output`，最多三个 shape；旧 MLP adapter 不可消费 revision 5。
+- [以 kernel 调用为边界重扫并选择最小 Demo](issues/21-kernel-level-scan-and-demo-selection.md)：Contract revision 5 只固定 kernel-call 扫描范围、文本/单图输入和直接参数保存规则；`scan-005` 保留初次结果，`scan-006` 纠正视觉链并补回 clamp SwiGLU 后选择已有 `_swiglu_silu_clamp_mul`。
+- [Gemma RMSNorm kernel adapter（已取消）](issues/22-gemma-rmsnorm-kernel-capture-replay-adapter.md)：保留原票据历史；`scan-006` 改选更小缺口后标记为 `wontfix`。
+- [实现 SwiGLU clamp Kernel Call 采集与重放 adapter](issues/23-swiglu-clamp-kernel-capture-replay-adapter.md)：下一步 Hook 现有 `_swiglu_silu_clamp_mul`，保存 rank 0 的 `x/limit/output`，最多三个 shape 且不保存权重；旧 MLP adapter 不可消费 revision 5。
 
 ## Not yet specified
 
-- `sgl_kernel.gemma_rmsnorm` 的 capture/replay adapter 与实际命令尚未实现；完成
-  Ticket 22 后才进入 CUDA preflight。
+- `_swiglu_silu_clamp_mul` 的 capture/replay adapter 与实际命令尚未实现；完成
+  Ticket 23 后才进入 CUDA preflight。
 - Golden Sample 的跨 CUDA/P800 序列化兼容性仍需实机确认。
 
 ## Out of scope
 
-- 在 Ticket 22 之前运行正式 CUDA Capture 或 P800 Demo。
+- 在 Ticket 23 之前运行正式 CUDA Capture 或 P800 Demo。
 - 重新登录真实 CUDA/P800 环境做其他能力验证；`torch.testing` 可用性直接采用用户已完成的实机验证结论。
 - 自动 SSH、远程执行、自动上传或凭证管理。
 - 新增 C++/自定义 Kernel、底层算子注册或性能优化。

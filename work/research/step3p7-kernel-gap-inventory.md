@@ -2,22 +2,22 @@
 
 ## revision 5 更新
 
-`runs/scan-005` 已把本调研的 Triton 口径扩展为完整 kernel-call 口径：
+`runs/scan-006` 已把本调研的 Triton 口径扩展为完整 kernel-call 口径：
 
 - Triton 不再是候选硬条件；CUDA extension、SGLang JIT、第三方 kernel 和真实不
   兼容的 Torch 调用都进入扫描范围。
 - Contract 不预选算子，只固定 target-only、文本/单图输入和样本参数规则。
 - Golden Sample 可以保存当前 kernel 调用直接使用的参数 Tensor，但不能保存完整
   checkpoint、module `state_dict` 或无关参数。
-- 首轮比较 `sgl_kernel.gemma_rmsnorm`、
+- 首轮比较已有 `_swiglu_silu_clamp_mul`、`sgl_kernel.gemma_rmsnorm`、
   `sgl_kernel.gemma_fused_add_rmsnorm`、`sgl_kernel.topk_sigmoid` 和视觉
-  `prefill_attention._fwd_kernel` 后，选择 `sgl_kernel.gemma_rmsnorm` 作为最小
+  `prefill_attention._fwd_kernel` 后，选择 `_swiglu_silu_clamp_mul` 作为最小
   Demo。
 
-选择 Gemma RMSNorm 的原因是：它在文本 q/k norm 路径固定可达，只需要
-`x + weight + eps -> output`，没有 TP 通信，而且 Kunlun 已有普通 RMSNorm 可供
-修复复用。`topk_sigmoid` 保留为后续缺口；视觉 attention 因输入与 metadata 更大
-而延后。
+这个调用是 SGLang 已有的 `@torch.compile` 函数，在文本 MoE 第 43、44 层固定
+接收 limit=7。它只需要 `x + limit -> output`，不保存权重，也没有边界内 TP
+通信；固定 Kunlun MoE 路径调用普通 `kunlun_ops.swiglu`，没有读取 limit。
+Gemma RMSNorm、`topk_sigmoid` 和视觉 attention 保留为后续缺口。
 
 下面保留最初以 Triton 为切入口的详细源码审计。它用于解释 top-k、视觉 attention、
 SWA 和上层 Kunlun bypass，不再代表当前 Demo 选择。
@@ -44,9 +44,9 @@ SWA 和上层 Kunlun bypass，不再代表当前 Demo 选择。
 - Kunlun 对 FusedMoE 和文本 attention 都是在更高层改走自己的实现。因此上游 Triton 符号没有一一注册替换，不等于“Kunlun 缺少这个算子”。
 - 如果 Demo 必须同时保持纯文本输入，并要求 CUDA 本次运行直接启动显式 Triton kernel，严格候选数仍是 0。
 
-因此，这一阶段曾建议先验证 `topk_sigmoid`；revision 5 的完整 kernel 缺口比较已
-由 `scan-005` 取代该建议，并选择更小的 `sgl_kernel.gemma_rmsnorm`。视觉
-`prefill_attention._fwd_kernel` 与 top-k 都继续保留在 gap queue。
+因此，这一阶段曾建议先验证 `topk_sigmoid`；revision 5 的完整 Kernel Call 比较已
+由 `scan-006` 取代该建议，并选择更小的 `_swiglu_silu_clamp_mul`。Gemma
+RMSNorm、视觉 `prefill_attention._fwd_kernel` 与 top-k 都继续保留在缺口队列。
 
 ## 扫描边界
 
@@ -168,6 +168,51 @@ target-only、无投机解码 Contract 不进入这条分支，所以它不阻�
 - 窗口值在 Python 链路丢失：`NOT_OBSERVED`。
 - P800 长上下文精度：`RUNTIME_CONFIRMATION_REQUIRED`。
 - 最小确认样例：至少一条长度大于 512 的文本请求，同时比较 SWA 层与 full-attention 层输出；短于等于 512 的输入无法证明窗口裁剪正确。
+
+## revision 5 首选：已有 `_swiglu_silu_clamp_mul`
+
+这不是重新抽取的 helper，而是固定 CUDA revision 中已经存在的
+`@torch.compile` 调用：
+
+```python
+@torch.compile
+def _swiglu_silu_clamp_mul(x, gemm1_limit):
+    gate, up = x.chunk(2, dim=-1)
+    gate = F.silu(gate)
+    gate = gate.clamp(max=gemm1_limit)
+    up = up.clamp(min=-gemm1_limit, max=gemm1_limit)
+    return gate * up
+```
+
+Step-3.7 在 routed MoE 第 43、44 层把 `gemm1_clamp_limit=7` 传入 FusedMoE；
+CUDA legacy Triton runner 继续把该值传到上面的调用：
+
+- 模型配置传递：
+  `/tmp/sglang-step3p7-cuda-original/python/sglang/srt/models/step3p5.py:118-158`；
+- runner 传递：
+  `/tmp/sglang-step3p7-cuda-original/python/sglang/srt/layers/moe/moe_runner/triton.py:132-166`；
+- 函数定义和实际调用：
+  `/tmp/sglang-step3p7-cuda-original/python/sglang/srt/layers/moe/moe_runner/triton_utils/fused_moe.py:326-333,551-571`；
+- checkpoint 中第 43、44 层的 routed limit：
+  `runs/scan-004/checkpoint-config-summary.json:34-47`。
+
+固定 Kunlun revision 在 `UnquantizedFusedMoEMethod.apply` 上层替换整段 MoE，
+但激活处只执行 `kunlun_ops.swiglu(x=y, y=out1)`，没有读取
+`gemm1_clamp_limit`：
+`sglang-kunlun/sglang_kunlun/hooks/layers/quantization/unquant.py:100-125`。
+
+因此可比较的现有调用边界是：
+
+```text
+CUDA: _swiglu_silu_clamp_mul(x, gemm1_limit) -> output
+P800 baseline: 当前 kunlun_ops.swiglu 路径使用同一 x -> actual
+```
+
+Golden Sample 只保存 `x`、标量 `gemm1_limit` 和 CUDA output，不需要 expert
+权重、checkpoint 或 module state。它比 Gemma RMSNorm 少一个直接参数 Tensor，
+比 top-k 少一个输出及排序语义，也比视觉 attention 少 q/k/v metadata，因此成为
+revision 5 的最小 Demo。这个结论仍是静态源码结论，必须由 CUDA 真实样本和 P800
+baseline 验证。
 
 ## 原始条件首选：MoE `topk_sigmoid`
 
@@ -420,8 +465,8 @@ Step-3.7 文本路径使用 `Step3p5Attention -> RadixAttention`，视觉路径�
 
 1. SWA 不作为当前缺口候选：只确认 target-only 普通 prefill/decode
    的静态接线，下一步补长上下文 P800 精度证据；不要外推到投机 SWA。
-2. 最初按 Triton 切入口推荐 `topk_sigmoid`；当前 `scan-005` 已在更完整的
-   kernel-call 范围内选择 `sgl_kernel.gemma_rmsnorm`。
+2. 最初按 Triton 切入口推荐 `topk_sigmoid`；当前 `scan-006` 已在更完整的
+   Kernel Call 范围内选择已有 `_swiglu_silu_clamp_mul`。
 3. `topk_sigmoid` 后续样本允许保存直接参数 `correction_bias`，但不保存完整
    checkpoint 或其他 MoE 权重。CUDA actual 使用 `sgl_kernel.topk_sigmoid`，MUSA
    Triton kernel 只是仓库中的同语义参考。

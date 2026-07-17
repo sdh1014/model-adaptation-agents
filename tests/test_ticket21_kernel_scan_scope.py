@@ -14,13 +14,23 @@ SKILL = ROOT / "model-adaptation" / "SKILL.md"
 SPEC_TEMPLATE = (
     ROOT / "model-adaptation" / "references" / "migration-spec-template.md"
 )
-SCAN_005 = ROOT / "runs" / "scan-005" / "result.json"
+SCAN_006 = ROOT / "runs" / "scan-006" / "result.json"
 SPEC_BINDING_004 = ROOT / "runs" / "spec-binding-004" / "result.json"
 REPLAY_COMPARE = ROOT / "model-adaptation" / "scripts" / "replay_compare.py"
 CAPTURE_GOLDEN = ROOT / "model-adaptation" / "scripts" / "capture_golden.py"
+SWIGLU_CLAMP = (
+    "sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe."
+    "_swiglu_silu_clamp_mul"
+)
 CONTRACT_BEGIN = "<!-- CONTRACT-DATA: BEGIN -->"
 CONTRACT_END = "<!-- CONTRACT-DATA: END -->"
 HISTORICAL_SHA256 = {
+    "runs/scan-005/result.json": (
+        "3d9fc10e3c1382a13b09f7902e7c27819b22eef4148d77f5e2fce9d1c995852c"
+    ),
+    "runs/scan-005/scan.log": (
+        "f7b9c872144415eac0aa96e1a3bbd1ea165a8579506be16496d9af3e3b861b39"
+    ),
     "runs/scan-004/result.json": (
         "6b0d7531937a06a116a323d3211a9a3cfb29b7233f2f067e421ca3cd22cb01c5"
     ),
@@ -78,7 +88,7 @@ class Ticket21KernelScanScopeTest(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.spec_text = SPEC.read_text(encoding="utf-8")
         cls.contract = contract_from_text(cls.spec_text)
-        cls.scan = json.loads(SCAN_005.read_text(encoding="utf-8"))
+        cls.scan = json.loads(SCAN_006.read_text(encoding="utf-8"))
 
     def test_revision_5_contract_fixes_scope_without_preselecting_operator(self) -> None:
         self.assertEqual(self.contract["contract_revision"], 5)
@@ -147,7 +157,25 @@ class Ticket21KernelScanScopeTest(unittest.TestCase):
                     self.assertEqual(rejected.returncode, 2)
                     self.assertIn(forbidden_field, rejected.stderr)
 
-    def test_scan_005_is_kernel_level_and_bound_to_revision_5(self) -> None:
+    def test_contract_shape_does_not_depend_on_revision_number(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            legacy = json.loads(json.dumps(self.contract))
+            legacy["contract_revision"] = 5
+            legacy.pop("scan_scope")
+            legacy.pop("sample_policy")
+            legacy["operator_boundary"] = {
+                "id": "Step3p5MLP.forward",
+                "activation_guard": "self.limit is not None",
+                "tp_rank": 0,
+            }
+            legacy["demo_input_mode"] = "text-only"
+            legacy_spec = workspace / "legacy-revision-5.md"
+            write_contract(legacy_spec, legacy)
+            completed = run_synthetic(legacy_spec, workspace / "legacy-run")
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def test_scan_006_is_kernel_level_and_bound_to_revision_5(self) -> None:
         expected_digest = hashlib.sha256(
             json.dumps(
                 self.contract,
@@ -164,7 +192,14 @@ class Ticket21KernelScanScopeTest(unittest.TestCase):
         binding_result = json.loads(SPEC_BINDING_004.read_text(encoding="utf-8"))
         self.assertEqual(binding_result["spec_binding"], self.scan["spec_binding"])
         self.assertTrue(binding_result["passed"])
-        self.assertEqual(self.scan["supersedes"], "runs/scan-004")
+        self.assertEqual(self.scan["supersedes"], "runs/scan-005")
+        self.assertIn(
+            {
+                "path": "runs/scan-005/result.json",
+                "sha256": HISTORICAL_SHA256["runs/scan-005/result.json"],
+            },
+            self.scan["historical_inputs"],
+        )
         self.assertTrue(self.scan["scan_complete"])
         self.assertEqual(self.scan["scan_scope"], self.contract["scan_scope"])
         for operator in self.scan["operators"]:
@@ -185,6 +220,7 @@ class Ticket21KernelScanScopeTest(unittest.TestCase):
     def test_candidate_comparison_covers_requested_and_bypassed_calls(self) -> None:
         operators = {item["operator_id"]: item for item in self.scan["operators"]}
         self.assertIn("sgl_kernel.topk_sigmoid", operators)
+        self.assertIn(SWIGLU_CLAMP, operators)
         self.assertIn(
             "sglang.srt.layers.attention.triton_ops.prefill_attention._fwd_kernel",
             operators,
@@ -207,6 +243,42 @@ class Ticket21KernelScanScopeTest(unittest.TestCase):
             ]["verdict"],
             "READY",
         )
+        fused_moe = operators[
+            "sglang.srt.layers.moe.moe_runner.triton_utils."
+            "fused_moe_triton_kernels.fused_moe_kernel"
+        ]
+        self.assertEqual(
+            fused_moe["boundary"]["outputs"],
+            ["mutated_C_output_buffer"],
+        )
+        self.assertTrue(
+            {
+                "A",
+                "C_output_buffer",
+                "topk_weights",
+                "topk_ids",
+                "sorted_token_ids",
+                "expert_ids",
+                "num_tokens_post_padded",
+            }.issubset(fused_moe["boundary"]["inputs"])
+        )
+        self.assertTrue(
+            {
+                "B_expert_weight",
+                "bias",
+                "B_scale",
+                "B_zp",
+            }.issubset(fused_moe["boundary"]["parameters"])
+        )
+        self.assertTrue(
+            {
+                "mul_routed_weight",
+                "top_k",
+                "config",
+                "compute_type",
+                "filter_expert",
+            }.issubset(fused_moe["boundary"]["non_tensor_args"])
+        )
         self.assertEqual(
             operators[
                 "sglang.srt.layers.attention.triton_ops.extend_attention._fwd_kernel"
@@ -214,9 +286,35 @@ class Ticket21KernelScanScopeTest(unittest.TestCase):
             "READY",
         )
 
+    def test_single_image_inventory_uses_the_real_step3p7_vision_path(self) -> None:
+        operators = {item["operator_id"]: item for item in self.scan["operators"]}
+        self.assertNotIn("sgl_kernel.rmsnorm", operators)
+        vision = operators[
+            "sglang.srt.layers.attention.triton_ops.prefill_attention._fwd_kernel"
+        ]
+        self.assertNotIn("Step3VisionEncoder.forward", vision["call_chain"])
+        self.assertIn(
+            "Step3p7ForConditionalGeneration.get_image_feature",
+            vision["call_chain"],
+        )
+        self.assertIn("PerceptionEncoder.forward", vision["call_chain"])
+        self.assertIn(
+            "PerceptionEncoderVisionBlock.forward",
+            vision["call_chain"],
+        )
+
     def test_inventory_counts_and_gap_queue_match_operator_verdicts(self) -> None:
         operators = self.scan["operators"]
         counts = self.scan["operator_counts"]
+        self.assertEqual(
+            counts,
+            {
+                "ready": 6,
+                "capture_required": 5,
+                "needs_human": 0,
+                "total": 11,
+            },
+        )
         self.assertEqual(counts["total"], len(operators))
         self.assertEqual(
             counts["ready"],
@@ -245,10 +343,11 @@ class Ticket21KernelScanScopeTest(unittest.TestCase):
         active_operator = selection["active_operator"]
         gap_ids = {item["operator_id"] for item in self.scan["gap_queue"]}
         compared_ids = {item["operator_id"] for item in selection["candidates"]}
-        self.assertEqual(active_operator, "sgl_kernel.gemma_rmsnorm")
+        self.assertEqual(active_operator, SWIGLU_CLAMP)
         self.assertIn(active_operator, gap_ids)
         self.assertTrue(
             {
+                SWIGLU_CLAMP,
                 "sgl_kernel.gemma_rmsnorm",
                 "sgl_kernel.topk_sigmoid",
                 "sglang.srt.layers.attention.triton_ops.prefill_attention._fwd_kernel",
@@ -259,20 +358,77 @@ class Ticket21KernelScanScopeTest(unittest.TestCase):
             [active_operator],
         )
         self.assertIn(
-            "- `active_operator`: `sgl_kernel.gemma_rmsnorm`",
+            f"- `active_operator`: `{SWIGLU_CLAMP}`",
             self.spec_text,
         )
-        self.assertIn("- `scan_run`: `runs/scan-005`", self.spec_text)
+        self.assertIn("- `scan_run`: `runs/scan-006`", self.spec_text)
 
     def test_selected_capture_plan_obeys_parameter_policy(self) -> None:
         plan = self.scan["capture_plan"][0]
+        operator = next(
+            item
+            for item in self.scan["operators"]
+            if item["operator_id"] == SWIGLU_CLAMP
+        )
+        self.assertEqual(operator["kernel_call"]["kind"], "torch-compile")
+        self.assertEqual(
+            operator["boundary"],
+            {
+                "inputs": ["x"],
+                "parameters": [],
+                "non_tensor_args": ["gemm1_limit"],
+                "outputs": ["output"],
+            },
+        )
         self.assertEqual(plan["max_distinct_shapes"], 3)
         self.assertEqual(plan["tp_rank"], 0)
-        self.assertEqual(plan["saved_parameters"], ["weight"])
+        self.assertEqual(plan["saved_parameters"], [])
         self.assertTrue(plan["save_direct_parameter_tensors"])
         self.assertFalse(plan["save_full_checkpoint"])
         self.assertFalse(plan["save_module_state_dict"])
         self.assertEqual(plan["replay_mode"], "standalone-kernel-call")
+
+    def test_capture_validation_rejects_parameters_outside_the_call_boundary(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            malicious_scan = json.loads(json.dumps(self.scan))
+            malicious_scan["capture_plan"][0]["saved_parameters"] = [
+                "entire_checkpoint_tensor"
+            ]
+            scan_path = workspace / "scan.json"
+            scan_path.write_text(
+                json.dumps(malicious_scan, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    str(CAPTURE_GOLDEN),
+                    "--spec",
+                    str(SPEC),
+                    "--run-dir",
+                    str(workspace / "capture"),
+                    "--mode",
+                    "prepare",
+                    "--scan-result",
+                    str(scan_path),
+                    "--operator-id",
+                    SWIGLU_CLAMP,
+                    "--sglang-worktree",
+                    str(ROOT),
+                ],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(completed.returncode, 2)
+            self.assertIn(
+                "saved parameters do not match the direct call parameters",
+                completed.stderr,
+            )
 
     def test_skill_describes_scan_then_select_and_defers_missing_adapter(self) -> None:
         skill = SKILL.read_text(encoding="utf-8")
@@ -298,9 +454,9 @@ class Ticket21KernelScanScopeTest(unittest.TestCase):
                     "--mode",
                     "prepare",
                     "--scan-result",
-                    str(SCAN_005),
+                    str(SCAN_006),
                     "--operator-id",
-                    "sgl_kernel.gemma_rmsnorm",
+                    SWIGLU_CLAMP,
                     "--sglang-worktree",
                     str(ROOT),
                 ],
@@ -311,7 +467,7 @@ class Ticket21KernelScanScopeTest(unittest.TestCase):
             )
             self.assertEqual(completed.returncode, 2)
             self.assertIn("capture/replay adapter is not implemented", completed.stderr)
-            self.assertIn("sgl_kernel.gemma_rmsnorm", completed.stderr)
+            self.assertIn(SWIGLU_CLAMP, completed.stderr)
             self.assertFalse(run_dir.exists())
 
     def test_revision_5_model_replay_reports_the_missing_kernel_adapter(self) -> None:

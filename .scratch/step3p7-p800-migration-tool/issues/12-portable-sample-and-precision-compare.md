@@ -58,3 +58,7 @@ Ticket 20 已完成并解除阻塞。revision 4 在 TP8 模型中只采集和重
 `sgl_kernel.gemma_rmsnorm`，本票据现在由 Ticket 22 的 kernel adapter 阻塞。旧
 `scan-004` MLP preflight 不再是当前人工动作。跨端格式验证要覆盖直接参数
 `weight`，同时证明完整 checkpoint 和 module state 会被拒绝。
+
+2026-07-17 复核更新：`scan-005` 保留为历史，当前 `scan-006` 改选
+`_swiglu_silu_clamp_mul`，本票据改由 Ticket 23 阻塞。首选样本不保存权重；格式
+验证仍要拒绝任何超出当前调用边界的参数、完整 checkpoint 和 module state。

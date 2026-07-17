@@ -88,14 +88,19 @@ json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False).enco
 
 ### Goal
 
-在 target-only eager 模式下，以现有 kernel/device-compute 调用为边界扫描固定版本模型的文本与单图实际路径，记录 CUDA 与 Kunlun 的 Operator Gap。扫描完成后从 gap queue 选择最小 Demo；在一次 CUDA Capture Session 中采集最多三种真实 shape，由人工把 Handoff Bundle 复制到 P800；随后在最多五轮修复内关闭一个 P800 baseline 真实失败的 kernel 调用。
+在 target-only eager 模式下扫描固定版本模型的文本与单图实际路径。扫描边界使用
+源码中已有的 Kernel Call。每项都要比较 CUDA 与 Kunlun 的实现差异。
+
+扫描完成后，从缺口队列选择最小 Demo。在 CUDA 机器上只采集一次，最多保存三种
+真实 shape；交接包由人工复制到 P800。P800 baseline 必须先证明所选调用真实失败，
+随后最多进行五轮修复。
 
 ### Fixed inputs
 
 - 模型名由 Skill 调用参数写入 Contract Data；本 Demo 的值必须是 `Step-3.7-Flash`。
 - SGLang 与 SGLang-Kunlun revision、checkpoint、配置摘要、target 入口、TP8、BF16、target-only eager 和扫描输入模式全部由 Contract Data 固定。CUDA 与 P800 使用同一组启动参数；不传量化或投机解码参数，不额外传 MTP 开关，也不显式传 attention backend。运行后解析出的两端实际 backend 必须分别进入 Scan/Capture 证据。
 - eager 固定为 decode 与 prefill 的 CUDA Graph backend 都是 `disabled`。`draft_entry: null` 与 `speculative_algorithm: null` 表示不加载 draft 路径，不得把 eager 解释为 EAGLE。
-- 扫描边界是源码中已经存在、可直接调用和替换的 kernel/device-compute 调用；不得为打桩新增 helper、自定义算子函数或整层 wrapper。
+- 扫描边界是源码中已经存在、可直接调用和替换的 Kernel Call；不得为打桩新增 helper、自定义算子函数或整层 wrapper。
 - Contract 不保存或预选 `active_operator`。只有完整 Scan Run 形成后，Working State 才能从 gap queue 写入一个活动 kernel 调用。
 - CUDA 只允许一个 Capture Session；TP8 中只保存 rank 0，每个算子最多保存三个去重后的真实 shape。可以保存当前 kernel 调用直接使用的当前 rank 参数 Tensor，但不得保存完整 checkpoint、module `state_dict` 或无关参数。
 - `max_repair_attempts` 固定为五；baseline 不计数，通过轮计数。

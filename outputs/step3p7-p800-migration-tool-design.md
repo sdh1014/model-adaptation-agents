@@ -2,9 +2,9 @@
 
 > 当前版本：Contract revision 5
 >
-> 当前扫描：`runs/scan-005`
+> 当前扫描：`runs/scan-006`
 >
-> 当前选择：`sgl_kernel.gemma_rmsnorm`
+> 当前选择：`sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul`
 >
 > 证据边界：当前只是静态源码缺口，尚未完成 CUDA Golden Capture 或 P800 baseline
 
@@ -13,7 +13,7 @@
 做一个由 Spec 驱动的最小工具：
 
 1. 沿 Step-3.7-Flash 的实际输入路径扫描 CUDA/Kunlun 实现差异；
-2. 把缺口定位到源码中已经存在的 kernel/device-compute 调用；
+2. 把缺口定位到源码中已经存在的 Kernel Call；
 3. 扫描完成后，从真实缺口队列选择最小 Demo；
 4. 在 CUDA 机器一次采集最多三个真实 shape；
 5. 人工把交接包复制到 P800；
@@ -36,7 +36,7 @@ revision 5 改成：
 - Triton 只是实现类型之一，CUDA extension、SGLang JIT、第三方 kernel 和真实
   不兼容的 Torch 调用同样在范围内；
 - 扫描完成后比较 `topk_sigmoid`、视觉 attention 与其他真实缺口；
-- `active_operator` 从 `scan-005` 的 gap queue 选择，再写入 Working State；
+- `active_operator` 从当前 Scan Run 的 gap queue 选择，再写入 Working State；
 - Golden Sample 可以保存当前调用直接使用的参数 Tensor，但不能保存完整
   checkpoint、module `state_dict` 或无关参数。
 
@@ -107,7 +107,12 @@ Step3p7ForConditionalGeneration.forward
 ```text
 Step3p7ForConditionalGeneration.forward
   -> general_mm_embed_routine(single-image)
-  -> Step3VisionEncoder.forward
+  -> Step3p7ForConditionalGeneration.get_image_feature
+  -> Step3p7ForConditionalGeneration._get_vision_model_output
+  -> PerceptionEncoder.forward
+  -> PerceptionEncoder.forward_features
+  -> PerceptionEncoderVisionTransformer.forward
+  -> PerceptionEncoderVisionBlock.forward
   -> VisionAttention.forward
 ```
 
@@ -116,7 +121,7 @@ Step3p7ForConditionalGeneration.forward
 
 ### 5.2 kernel 边界
 
-一个扫描项必须是源码中已经存在的 device-compute 调用，并能写清：
+一个扫描项必须是源码中已经存在的 Kernel Call，并能写清：
 
 - 实际 symbol 和调用链；
 - 输入、直接参数、非 Tensor 参数和输出；
@@ -145,20 +150,24 @@ Step3p7ForConditionalGeneration.forward
 - Kunlun 上层替换：
   `sglang_kunlun/hooks/layers/quantization/unquant.py:32-155`。
 
-## 6. scan-005 结果
+## 6. scan-006 结果
 
-`scan-005` 记录 11 个当前输入路径上的 CUDA 专用 kernel/JIT 调用：
+`scan-005` 已封存并保持字节不变。复核发现它漏掉了 clamp SwiGLU，并把视觉路径
+识别错了；因此按 Run 不可变规则新建 `scan-006`，没有原地改写旧证据。
 
-- `READY=7`
-- `CAPTURE_REQUIRED=4`
+`scan-006` 记录 11 个当前输入路径上的 CUDA 专用 Kernel Call：
+
+- `READY=6`
+- `CAPTURE_REQUIRED=5`
 - `NEEDS_HUMAN=0`
 
-四个静态缺口候选是：
+五个静态缺口候选是：
 
-1. `sgl_kernel.gemma_rmsnorm`
-2. `sgl_kernel.gemma_fused_add_rmsnorm`
-3. `sgl_kernel.topk_sigmoid`
-4. `sglang.srt.layers.attention.triton_ops.prefill_attention._fwd_kernel`
+1. `sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul`
+2. `sgl_kernel.gemma_rmsnorm`
+3. `sgl_kernel.gemma_fused_add_rmsnorm`
+4. `sgl_kernel.topk_sigmoid`
+5. `sglang.srt.layers.attention.triton_ops.prefill_attention._fwd_kernel`
 
 这里的 `CAPTURE_REQUIRED` 只表示固定源码下缺少 Kunlun 等价调用，需要 CUDA Golden
 和 P800 baseline。它不表示已经在 P800 实机失败。
@@ -167,7 +176,8 @@ Step3p7ForConditionalGeneration.forward
 
 | 候选 | 固定输入可达性 | 需要保存的直接参数 | 输出与状态 | 修复面 | 结论 |
 |---|---|---|---|---|---|
-| `gemma_rmsnorm` | 文本路径每层 q/k norm 必达 | 一个 1-D `weight` | 单 Tensor、无 TP 通信 | 可复用已有 Kunlun RMSNorm | 首选 |
+| `_swiglu_silu_clamp_mul` | 文本 MoE 第 43、44 层可达 | 无 | 单 Tensor、无 TP 通信 | 让 Kunlun SwiGLU 保留已有 limit 语义 | 首选 |
+| `gemma_rmsnorm` | 文本路径每层 q/k norm 必达 | 一个 1-D `weight` | 单 Tensor、无 TP 通信 | 可复用已有 Kunlun RMSNorm | 延后 |
 | `gemma_fused_add_rmsnorm` | 文本路径必达 | 一个 1-D `weight` | 两个 in-place Tensor | 可复用 fused RMSNorm，但验证更复杂 | 延后 |
 | `topk_sigmoid` | MoE 文本路径必达 | `correction_bias[288]` | FP32 weights + INT32 ids | 需要保证 biased top-k、归一化和 id 顺序 | 延后 |
 | 视觉 `_fwd_kernel` | 需要单图且 CUDA mm backend 为 Triton | 无 | q/k/v、序列 metadata、布局较多 | 需要映射到 Kunlun attention | 延后 |
@@ -188,7 +198,7 @@ Step-3.7 的 MoE 确实固定使用 sigmoid、correction bias、top-k 8 和 reno
   `sglang_kunlun/bootstrap/sgl_kernel_stub.py:158-172`。
 
 它是很好的后续缺口，但首个 Demo 还要比较浮点权重与精确 expert ids，排序一致性比
-单输出 RMSNorm 更复杂。
+单输出 SwiGLU 更复杂。
 
 ### 7.2 为什么不是视觉 attention
 
@@ -202,7 +212,47 @@ Step-3.7 的 MoE 确实固定使用 sigmoid、correction bias、top-k 8 和 reno
 固定 Kunlun plugin 没有视觉 `context_attention_fwd` 替换。但这个候选依赖单图
 请求和 CUDA 设备能力，重放还需要 q/k/v 与序列 metadata，因此不是最小首选。
 
-### 7.3 为什么选择 gemma_rmsnorm
+### 7.3 为什么选择 `_swiglu_silu_clamp_mul`
+
+Step-3.7 把 MoE 第 43、44 层的 `gemm1_clamp_limit` 固定为 7。CUDA 的未量化
+Triton runner 把该值传入源码中已有的 `@torch.compile` 函数：
+
+```python
+@torch.compile
+def _swiglu_silu_clamp_mul(x, gemm1_limit):
+    gate, up = x.chunk(2, dim=-1)
+    gate = F.silu(gate)
+    gate = gate.clamp(max=gemm1_limit)
+    up = up.clamp(min=-gemm1_limit, max=gemm1_limit)
+    return gate * up
+```
+
+源码位置：
+
+- limit 从模型进入 FusedMoE：
+  `python/sglang/srt/models/step3p5.py:118-158`；
+- CUDA runner 继续传递 limit：
+  `python/sglang/srt/layers/moe/moe_runner/triton.py:132-166`；
+- 已有调用的定义和使用：
+  `python/sglang/srt/layers/moe/moe_runner/triton_utils/fused_moe.py:326-333,551-571`。
+
+Kunlun 在更高层替换 MoE，但只调用普通 `kunlun_ops.swiglu`，没有读取
+`gemm1_clamp_limit`：
+`sglang_kunlun/hooks/layers/quantization/unquant.py:122-125`。
+
+因此最小捕获边界是现有调用，不需要新增 helper：
+
+```text
+hook: sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul
+input: x
+non-tensor argument: gemm1_limit
+output: output
+```
+
+它不保存 expert 权重或 checkpoint。CUDA self-replay 调原有函数；P800 baseline
+用同一份 `x` 检查当前 Kunlun SwiGLU 路径是否遗漏 limit。
+
+### 7.4 为什么暂不选择 `gemma_rmsnorm`
 
 Step-3.7 attention 为 q/k 创建 `GemmaRMSNorm`，并在每层调用：
 
@@ -219,7 +269,7 @@ Kunlun platform 明确把 `MultiPlatformOp` 分派到 `forward_cuda`：
 `sglang_kunlun/platform/device.py:8-17`，所以这里不能假定会自动走
 `forward_native`。
 
-最小捕获边界因此是现有调用：
+它的捕获边界同样清楚：
 
 ```text
 hook: sglang.srt.layers.layernorm.gemma_rmsnorm
@@ -229,7 +279,8 @@ non-tensor argument: eps
 output: output
 ```
 
-它不需要加载模型做离线重放，不需要 TP 通信，也不需要保存其他层权重。
+但它需要额外保存当前 rank 的 1-D `weight`。相比之下，已存在的 clamp SwiGLU
+调用没有参数 Tensor，输入输出也都是单 Tensor，因此更小。
 
 ## 8. 参数保存规则
 
@@ -249,7 +300,8 @@ Golden Sample 不可以保存：
 - 完整 batch、prompt/token、KV cache；
 - stream、handle、随机状态或凭证。
 
-“不保存完整权重”不等于禁止一切参数。`gemma_rmsnorm` 的 `weight` 和
+“不保存完整权重”不等于禁止一切参数。当前首选不需要保存参数 Tensor；
+`gemma_rmsnorm` 的 `weight` 和
 `topk_sigmoid` 的 `correction_bias` 都是当前 kernel 的直接参数，可以保存；整层
 MLP 或全部 expert 权重不适合作为最小 Demo。
 
@@ -260,15 +312,13 @@ MLP 或全部 expert 权重不适合作为最小 Demo。
 ```text
 samples/<shape-id>.pt
   schema
-  operator_id = sgl_kernel.gemma_rmsnorm
+  operator_id = sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul
   tp_rank = 0
   signature
     x: shape, dtype, stride
-    weight: shape, dtype, stride
-    eps
+    gemm1_limit
   payload
     x
-    weight
     expected_output
 ```
 
@@ -286,11 +336,11 @@ P800 actual output 只在内存中参与比较，不落盘。
 | `workspace_guard.py` | 固定基线、保存 patch、检查唯一修改 | 自动 commit/push |
 
 当前代码中的 MLP adapter 是 revision 4 历史实现。revision 5 的
-`gemma_rmsnorm` capture/replay adapter 尚未实现；在它完成并通过本地测试之前，
+`_swiglu_silu_clamp_mul` capture/replay adapter 尚未实现；在它完成并通过本地测试之前，
 不能运行旧 MLP preflight，也不能消耗唯一 CUDA Session。
 
-`scan-005` 是不可变证据，所以其中的 `adapter_status=NOT_IMPLEMENTED` 不会被原地
-更新。Ticket 22 完成后要生成新的 adapter Run，并让 Working State 的
+`scan-006` 是不可变证据，所以其中的 `adapter_status=NOT_IMPLEMENTED` 不会被原地
+更新。Ticket 23 完成后要生成新的 adapter Run，并让 Working State 的
 `last_completed_action`、`last_run` 和 `next_action` 指向该证据；恢复会话通过这
 三个已有字段判断是否可以进入 preflight。
 
@@ -299,8 +349,9 @@ P800 actual output 只在内存中参与比较，不落盘。
 ```text
 Contract revision 5
   -> spec-binding-004
-  -> scan-005
-  -> 扫描后选择 gemma_rmsnorm
+  -> scan-005（历史初稿）
+  -> scan-006（纠正后当前证据）
+  -> 扫描后选择 _swiglu_silu_clamp_mul
   -> 实现并测试该 kernel 的 adapter
   -> CUDA preflight（不消耗正式 Session）
   -> 一次 CUDA Golden Capture，最多三个 shape
@@ -330,13 +381,13 @@ Contract revision 5
 
 ## 13. 当前下一步
 
-实现 Ticket 22：
+实现 Ticket 23：
 
-1. 在现有 SGLang call-site Hook `sglang.srt.layers.layernorm.gemma_rmsnorm`；
-2. rank 0 保存 `x`、直接参数 `weight`、`eps` 和 CUDA output；
+1. Hook 现有 SGLang 调用 `_swiglu_silu_clamp_mul`；
+2. rank 0 保存 `x`、`gemm1_limit` 和 CUDA output，不保存权重；
 3. 最多三个 shape；
-4. 直接调用同一 kernel 接口做 CUDA self-replay 和 P800 compare；
+4. CUDA self-replay 调原有函数，P800 baseline 调当前 Kunlun SwiGLU 路径；
 5. 使用固定 `torch.testing.assert_close`；
 6. 完成本地测试后，才更新 CUDA runbook 并进入实机 preflight。
 
-完整机器可读扫描证据见 `runs/scan-005/result.json`。
+完整机器可读扫描证据见 `runs/scan-006/result.json`；原始 `scan-005` 保留为历史。

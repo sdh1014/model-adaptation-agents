@@ -7,7 +7,7 @@ Blocked by: 14, 15
 ## What to build
 
 人工把交接包复制到 P800 后，先验证 manifest，再用
-`sgl_kernel.gemma_rmsnorm` 的一至三个 Golden Samples 验证：
+`_swiglu_silu_clamp_mul` 的一至三个 Golden Samples 验证：
 
 ```text
 恢复 Spec -> baseline replay -> 精度比较 -> 最多五轮修复 -> 最终结论
@@ -19,8 +19,8 @@ Gap。源码缺少绑定或预期性能较慢都不能代替 baseline。
 ## Acceptance criteria
 
 - P800 开始执行前，bundle、manifest、Spec 绑定和固定源码 revision 全部通过。
-- baseline 直接使用样本中的 `x`、直接参数 `weight` 和 `eps` 调用现有 kernel
-  边界，不加载 MLP 或新增 helper。
+- baseline 使用样本中的 `x` 和 `gemm1_limit` 调用当前 Kunlun MoE 的
+  `kunlun_ops.swiglu` 路径，不加载完整 MoE 或新增 helper。
 - baseline 对全部样本执行，不计 repair attempt。
 - baseline FAIL 后最多五轮修复；每轮一个假设，失败恢复基线，通过 patch 保持为
   唯一工作区修改。

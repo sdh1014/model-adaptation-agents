@@ -88,15 +88,20 @@ json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False).enco
 
 ### Goal
 
-在 target-only eager 模式下，以现有 kernel/device-compute 调用为边界扫描固定版本 Step-3.7-Flash 的文本与单图实际路径，记录 CUDA 与 Kunlun 的 Operator Gap。扫描完成后从 gap queue 选择最小 Demo；在一次 CUDA Capture Session 中采集最多三种真实 shape，由人工把 Handoff Bundle 复制到 P800；随后在最多五轮修复内关闭一个 P800 baseline 真实失败的 kernel 调用。
+在 target-only eager 模式下扫描固定版本 Step-3.7-Flash 的文本与单图实际路径。
+扫描边界使用源码中已有的 Kernel Call。每项都要比较 CUDA 与 Kunlun 的实现差异。
+
+扫描完成后，从缺口队列选择最小 Demo。在 CUDA 机器上只采集一次，最多保存三种
+真实 shape；交接包由人工复制到 P800。P800 baseline 必须先证明所选调用真实失败，
+随后最多进行五轮修复。
 
 ### Fixed inputs
 
 - 模型名由 Skill 调用参数写入 Contract Data；本 Demo 的值必须是 `Step-3.7-Flash`。
 - SGLang 与 SGLang-Kunlun revision、checkpoint、配置摘要、target 入口、TP8、BF16、target-only eager 和扫描输入模式全部由 Contract Data 固定。CUDA 与 P800 使用同一组启动参数；不传量化或投机解码参数，不额外传 MTP 开关，也不显式传 attention backend。运行后解析出的两端实际 backend 必须分别进入 Scan/Capture 证据。
 - eager 固定为 decode 与 prefill 的 CUDA Graph backend 都是 `disabled`。`draft_entry: null` 与 `speculative_algorithm: null` 表示不加载 draft 路径，不得把 eager 解释为 EAGLE。
-- 扫描边界是源码中已经存在、可直接调用和替换的 kernel/device-compute 调用。CUDA extension、Triton、SGLang JIT、第三方 kernel 和真实不兼容的 Torch 调用都在范围内；不得为打桩新增 helper、自定义算子函数或整层 wrapper。
-- Contract 不保存或预选 `active_operator`。只有 `scan-005` 完成 CUDA/Kunlun 证据与候选比较后，Working State 才能从 gap queue 写入一个活动 kernel 调用。
+- 扫描边界是源码中已经存在、可直接调用和替换的 Kernel Call。CUDA extension、Triton、SGLang JIT、第三方 kernel 和真实不兼容的 Torch 调用都在范围内；不得为打桩新增 helper、自定义算子函数或整层 wrapper。
+- Contract 不保存或预选 `active_operator`。只有当前 Scan Run 完成 CUDA/Kunlun 证据与候选比较后，Working State 才能从 gap queue 写入一个活动 kernel 调用。
 - 扫描同时覆盖 `text-only` 和固定最小 `single-image` 请求。输入模式是扫描范围，不表示唯一 CUDA Session 要采集所有候选；最小 Demo 只采集选中的活动算子。
 - CUDA 只允许一个 Capture Session；TP8 中只保存 rank 0，每个算子最多保存三个去重后的真实 shape。Golden Sample 保存重放所需的输入、CUDA 期望输出和必要非 Tensor 参数；可以保存当前 kernel 调用直接使用的当前 rank 参数 Tensor，但不得保存完整 checkpoint、module `state_dict` 或无关参数。
 - `max_repair_attempts` 固定为五；baseline 不计数，通过轮计数。
@@ -206,34 +211,41 @@ Agent 每次动作前完整读取 Contract 与本区；每次动作结束后立�
 ### Current
 
 - `observed_contract_revision`: `5`
-- `state_revision`: `14`
+- `state_revision`: `15`
 - `status`: `ACTIVE`
 - `phase`: `CUDA_CAPTURE`
 - `execution_site`: `SOURCE`
-- `active_operator`: `sgl_kernel.gemma_rmsnorm`
-- `last_completed_action`: `kernel_level_scan_and_demo_selection_completed`
-- `last_run`: `runs/scan-005`
-- `next_action`: `实现 Ticket 22 的 sgl_kernel.gemma_rmsnorm capture/replay adapter；本地测试通过前不得运行 CUDA preflight`
+- `active_operator`: `sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul`
+- `last_completed_action`: `kernel_level_scan_review_completed`
+- `last_run`: `runs/scan-006`
+- `next_action`: `实现 Ticket 23 的 _swiglu_silu_clamp_mul capture/replay adapter；本地测试通过前不得运行 CUDA preflight`
 
 规则：`ACTIVE` 时 `next_action` 必须恰好一条；`WAITING` 时必须是一条人工动作；`PASS`、`BLOCKED`、`NEEDS_HUMAN` 时必须为 `none`。
 
 ### Scan
 
-- `scan_run`: `runs/scan-005`
+- `scan_run`: `runs/scan-006`
 - `target_coverage`: `COMPLETE`
 - `draft_coverage`: `NOT_APPLICABLE`
-- `operator_counts`: `{ready: 7, capture_required: 4, needs_human: 0}`
+- `operator_counts`: `{ready: 6, capture_required: 5, needs_human: 0}`
 
 #### Gap queue
 
 | operator_id | scan_verdict | golden | demo_role | repair | evidence |
 |---|---|---|---|---|---|
-| `sgl_kernel.gemma_rmsnorm` | `CAPTURE_REQUIRED` | `PLANNED` | 首选最小 Demo | 缺少 Gemma symbol；待 P800 baseline 证明真实失败 | `runs/scan-005/result.json` |
-| `sgl_kernel.gemma_fused_add_rmsnorm` | `CAPTURE_REQUIRED` | `NOT_PLANNED` | 后续缺口 | 双 in-place 输出比首选边界复杂 | `runs/scan-005/result.json` |
-| `sgl_kernel.topk_sigmoid` | `CAPTURE_REQUIRED` | `NOT_PLANNED` | 对比候选 | 权重与 ids 双输出、排序语义比首选复杂 | `runs/scan-005/result.json` |
-| `sglang.srt.layers.attention.triton_ops.prefill_attention._fwd_kernel` | `CAPTURE_REQUIRED` | `NOT_PLANNED` | 图像对比候选 | 只在单图视觉路径激活，metadata 和布局更多 | `runs/scan-005/result.json` |
+| `sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul` | `CAPTURE_REQUIRED` | `PLANNED` | 首选最小 Demo | Kunlun MoE 的普通 SwiGLU 没有接收 clamp limit；待 P800 baseline 证明真实失败 | `runs/scan-006/result.json` |
+| `sgl_kernel.gemma_rmsnorm` | `CAPTURE_REQUIRED` | `NOT_PLANNED` | 对比候选 | 缺少 Gemma symbol，且样本需要保存一个直接参数 `weight` | `runs/scan-006/result.json` |
+| `sgl_kernel.gemma_fused_add_rmsnorm` | `CAPTURE_REQUIRED` | `NOT_PLANNED` | 后续缺口 | 双 in-place 输出比首选边界复杂 | `runs/scan-006/result.json` |
+| `sgl_kernel.topk_sigmoid` | `CAPTURE_REQUIRED` | `NOT_PLANNED` | 对比候选 | 权重与 ids 双输出、排序语义比首选复杂 | `runs/scan-006/result.json` |
+| `sglang.srt.layers.attention.triton_ops.prefill_attention._fwd_kernel` | `CAPTURE_REQUIRED` | `NOT_PLANNED` | 图像对比候选 | 只在单图视觉路径激活，metadata 和布局更多 | `runs/scan-006/result.json` |
 
-完整 kernel 调用清单、两端证据和候选排序保存在 `scan-005`。首选 `sgl_kernel.gemma_rmsnorm` 是因为它在固定文本路径必达，只需 `x`、直接参数 `weight`、标量 `eps` 和单个输出，无 TP 通信，并可复用 Kunlun 已有普通 RMSNorm 能力。这个选择仍是静态缺口候选，必须由 P800 baseline 证明实际失败。`scan-004` 及更早 Run 只作历史证据，不再作为当前 preflight 输入。
+完整 Kernel Call 清单、两端证据和候选排序保存在 `scan-006`。首选
+`_swiglu_silu_clamp_mul` 是因为它是 SGLang 源码中已有的 `torch.compile` 调用，
+在固定文本路径的 MoE 第 43、44 层可达，只需 `x`、标量 `gemm1_limit` 和单个输出，
+不需要保存权重，也没有边界内 TP 通信。固定 Kunlun 路径调用普通
+`kunlun_ops.swiglu`，但没有读取 clamp limit。这个选择仍是静态缺口候选，必须由
+P800 baseline 证明实际失败。`scan-004` 及更早 Run 只作历史证据，不再作为当前
+preflight 输入。
 
 ### CUDA Capture
 
@@ -267,8 +279,8 @@ baseline replay 不算修复尝试。每轮修改源码前递增 `attempts_used`
 | item | status | evidence |
 |---|---|---|
 | Contract approved and tool bindings match | `PASS` | `runs/spec-binding-004/result.json` |
-| target-only eager kernel scan complete | `PASS` | `runs/scan-005/result.json` |
-| gap queue and Demo selection complete | `PASS` | `runs/scan-005/result.json` |
+| target-only eager kernel scan complete | `PASS` | `runs/scan-006/result.json` |
+| gap queue and Demo selection complete | `PASS` | `runs/scan-006/result.json` |
 | one CUDA Session and at most three samples per operator | `PENDING` | `null` |
 | CUDA self-replay passed | `PENDING` | `null` |
 | bundle verified on CUDA and P800 | `PENDING` | `null` |
@@ -303,6 +315,7 @@ baseline replay 不算修复尝试。每轮修改源码前递增 `attempts_used`
 | `11` | `scan-004` 以原始 MLP 边界替代 helper，保留完整 target-only eager 算子清单；进入 rank 0 CUDA preflight | `runs/scan-004/result.json` |
 | `12` | 对齐 Contract revision 5，取消预选 MLP，回到 kernel-call 扫描范围 | `migration-spec.md#human-decisions`、`.scratch/step3p7-p800-migration-tool/issues/21-kernel-level-scan-and-demo-selection.md` |
 | `13` | revision 5 Spec 绑定自检通过 | `runs/spec-binding-004/result.json` |
-| `14` | `scan-005` 比较文本与单图实际 kernel 缺口，选择 `sgl_kernel.gemma_rmsnorm` 作为最小 Demo；旧 MLP adapter 不可消费 revision 5 | `runs/scan-005/result.json` |
+| `14` | `scan-005` 初稿比较文本与单图 Kernel Call，暂选 `sgl_kernel.gemma_rmsnorm` | `runs/scan-005/result.json` |
+| `15` | 保留 `scan-005`，以 `scan-006` 纠正视觉调用链并补回已有 `_swiglu_silu_clamp_mul` 与 Kunlun 普通 SwiGLU 间的 clamp 语义缺口；因其无需权重且只有一个输出，改为最小 Demo | `runs/scan-006/result.json` |
 
 <!-- AGENT-WRITABLE WORKING STATE: END -->
