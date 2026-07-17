@@ -243,21 +243,38 @@ baseline 直接用 Golden Sample 的输入、直接参数和非 Tensor 参数调
   或再次访问 CUDA。
 - 任一样本执行或精度失败：记录 baseline，`attempts_used` 保持 0，开始有限修复。
 
+baseline 前先调用 `workspace_guard.py --mode check-baseline`；replay 完成后调用
+`--mode assess-baseline --replay-result <baseline-replay/result.json>`。两次都要
+显式给出本轮 Repair Boundary 允许修改的文件，工具从 Contract 读取固定 Kunlun
+revision 和五轮上限，不允许命令行覆盖。正式 Spec 只接受
+`replay_compare.py --mode kernel-replay --execution-site p800` 的结果；测试用
+synthetic 结果不能推进正式流程。
+
 每轮修复：
 
-1. 从同一基线开始，只写一个假设。
-2. 修改前创建 Run，把 `attempts_used` 加一；通过轮也计数。
+1. 从同一基线开始，只写一个假设；调用
+   `workspace_guard.py --mode start-attempt --attempt N --hypothesis <一句话>
+   --previous-result <上一结果>` 创建 Run 后，Agent 才能修改源码。attempt 1 的
+   上一结果是失败的 baseline assessment；后续轮必须指向紧邻的上一轮失败结果。
+   每个编号只能使用一次，不能重新从 attempt 1 开始绕过五轮上限。
+2. 修改前把 Working State 的 `attempts_used` 加一；通过轮也计数。
 3. 修改只限活动 kernel 调用的 Python、P800 可执行 Torch、已有
    xspeedgate/kunlun_ops 能力和聚焦测试。
-4. 保存完整 patch，重放全部 Golden Samples。
-5. 失败时封存 Run 并恢复基线；通过时确认 patch 是唯一工作区修改。
+4. 修改完成后，先调用 `workspace_guard.py --mode record-candidate` 保存相对固定
+   基线的完整 patch；然后才把 `replay_compare.py` 的 Run 放在
+   `<attempt-run>/replay`，重放全部 Golden Samples。
+5. 调用 `workspace_guard.py --mode finish-attempt
+   --replay-result <attempt-run>/replay/result.json`。
+   `finish-attempt` 要求工作区仍与已记录 patch 完全一致，并先把 patch 摘要和 replay
+   结果摘要共同写入 `outcome.json`。失败时才恢复已声明的候选文件；通过时保留
+   patch，并确认它是唯一工作区修改。未知或 staged 修改一律停止且不清理。
 
 需要新增 C++/自定义 kernel/底层注册、改完整模型、放宽精度门槛，或第五轮仍失败，
 都进入 `BLOCKED`，不能扩大范围。
 
 ## 4. 接受工具结果
 
-四个 Deterministic Tool 至少接收：
+这些确定性脚本至少接收：
 
 ```text
 --spec <migration-spec.md> --run-dir <fresh-run-directory>

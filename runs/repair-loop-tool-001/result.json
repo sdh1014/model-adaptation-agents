@@ -1,0 +1,89 @@
+{
+  "action": "implement_repair_loop_tool",
+  "active_operator": "sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul",
+  "actual_tensors_saved": false,
+  "consumes_capture_session": false,
+  "evidence": [
+    "repair-loop.log"
+  ],
+  "passed": true,
+  "run_id": "repair-loop-tool-001",
+  "runtime_validation": {
+    "formal_cuda_capture": "NOT_STARTED",
+    "p800_runtime": "NOT_RUN",
+    "synthetic_replay_scope": "TEST_SPEC_ONLY",
+    "test_repository_only": true,
+    "torch_available": false
+  },
+  "source_files": [
+    {
+      "path": "model-adaptation/scripts/workspace_guard.py",
+      "sha256": "0b57c40f9b5a873422832a52862e1cb768e14fdd1dcaeddf10c8c24ebf61837f"
+    },
+    {
+      "path": "model-adaptation/scripts/replay_compare.py",
+      "sha256": "9995c34b43b4786f872debfb3bc00362c00a22112dd5f34201d21eb7579b6ca4"
+    },
+    {
+      "path": "model-adaptation/scripts/_lib/kernel_evidence.py",
+      "sha256": "99598f350472c7479097c9de977e4a47e73fb451769375c5029cb10ec46e36ab"
+    },
+    {
+      "path": "model-adaptation/scripts/model_adaptation_capture/contracts.py",
+      "sha256": "36764a2413a441484fa32a35acc4fedbb2d28ee0b082e6badeb4b699b408687e"
+    },
+    {
+      "path": "model-adaptation/SKILL.md",
+      "sha256": "c95c85f8c40c820a0ecf4baec412512800502e1483c9c5ee3ae042f17f30be28"
+    },
+    {
+      "path": "tests/test_ticket14_repair_loop.py",
+      "sha256": "2085e211e6e6eb370238b78c8143f00c23087eb3be6f9cbfbc630426c043a376"
+    }
+  ],
+  "spec_binding": {
+    "contract_data_sha256": "f683ea62427279da3c899a3ef0afcfa1d16298b7424154664c7e3fac9b13d938",
+    "contract_revision": 5,
+    "spec_id": "step3p7-flash-p800-demo"
+  },
+  "tests": {
+    "focused": {
+      "command": "PYTHONPYCACHEPREFIX=/tmp/model-adaptation-pycache python3 -m unittest tests.test_ticket14_repair_loop",
+      "passed": 11
+    },
+    "full_discovery": {
+      "attempted": 98,
+      "errors": 6,
+      "failures": 1,
+      "passed": false,
+      "reason": "Local Python has no torch; six modules cannot import it and one existing runbook test cascades through a torch-importing module."
+    },
+    "local_environment": {
+      "known_no_torch_cascade_tests_excluded": 1,
+      "python": "3.9.6",
+      "torch_available": false,
+      "torch_import_test_modules_not_run": 6
+    },
+    "torch_free_regression": {
+      "passed": 90
+    }
+  },
+  "tool": "migration-agent",
+  "validation": {
+    "attempt_history_bound_to_spec_baseline_and_worktree": true,
+    "candidate_recorded_before_replay": true,
+    "failed_candidate_restored_after_outcome_sealed": true,
+    "fifth_attempt_fail_and_pass_paths_checked": true,
+    "formal_replay_requires_p800_kernel_evidence": true,
+    "no_branch_commit_or_push": true,
+    "passing_patch_retained_uncommitted": true,
+    "patch_and_replay_evidence_bound_in_outcome": true,
+    "review": {
+      "spec": "PASS",
+      "standards": "PASS"
+    },
+    "synthetic_replay_rejected_for_production_spec": true,
+    "unknown_workspace_changes_preserved": true,
+    "working_state_parsed_by_tool": false
+  }
+}

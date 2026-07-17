@@ -349,9 +349,9 @@ P800 actual output 只在内存中参与比较，不落盘。
 
 `scan-006` 是不可变证据，所以其中的 `adapter_status=NOT_IMPLEMENTED` 不会被原地
 更新。初始实现证据保存在 `runs/adapter-001`；交接包 code review 后的当前源码
-摘要与样本/replay 绑定证据保存在 `runs/adapter-002`。后者只做本机源码与元数据
-校验，没有重跑 CUDA/P800；必须在 Ticket 15 的唯一正式 Session 前完成新的
-不消耗 Session 的 CUDA preflight。
+摘要与样本/replay 绑定证据保存在 `runs/adapter-002`。该 Run 本身只做本机源码
+与元数据校验；后续独立的 `runs/cuda-preflight-r5-002` 已补做当前源码的 CUDA
+preflight，且没有消耗正式 Session。
 
 ## 11. 运行流程
 
@@ -401,10 +401,15 @@ worker result、Golden state 和 wrapper result 还必须绑定同一 sidecar SH
 把 record result/sidecar 摘要和完整允许文件集合写入 manifest，以检测缺失、额外
 或篡改。
 
-下一步实现 Ticket 14 的可恢复五轮修复闭环。真实 Golden、CUDA 端 bundle 和
-`WAITING / HANDOFF` 状态仍由 Ticket 15 在唯一正式 CUDA Session 中产生；当前
-源码工作区不得把测试夹具当成正式 Golden。进入 Ticket 15 前还必须用
-`adapter-002` 当前源码重跑 CUDA preflight；旧 `cuda-preflight-r5-001` 只作为
-adapter-001 的历史实机证据。
+`runs/cuda-preflight-r5-002` 已验证 adapter-002 当前源码的三个 rank-0 shape、
+样本摘要绑定和 CUDA 新进程 self-replay，且未消耗正式 Session。Ticket 14 也已实现
+`workspace_guard.py` 的基线检查、baseline 零计数判定、连续且不可复用的 attempt
+编号、replay 前完整 patch 固化、patch/replay 联合摘要、失败恢复、通过保留和五轮
+上限；证据为
+`runs/repair-loop-tool-001`，只来自临时 Git 仓库和 synthetic replay。
+
+下一步执行 Ticket 15。真实 Golden、CUDA 端 bundle 和 `WAITING / HANDOFF` 状态
+必须由唯一正式 CUDA Session 产生；当前源码工作区不得把 preflight 或 Ticket 14
+测试夹具当成正式 Golden。
 
 完整机器可读扫描证据见 `runs/scan-006/result.json`；原始 `scan-005` 保留为历史。

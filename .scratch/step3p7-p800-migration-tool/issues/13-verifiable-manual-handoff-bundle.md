@@ -55,3 +55,7 @@ manifest 必须列出允许出现的完整文件集合，并为每个文件记�
 
 交接包工具已经完成。它只生成和校验本地目录，不包含 SSH、上传、登录或自动复制；
 真实 Golden 仍要等 Ticket 15 在 CUDA 机器上的唯一正式 Session 产生。
+
+2026-07-17 后续证据更新：当前 `adapter-002` 源码对应的
+`runs/cuda-preflight-r5-002` 已回传并通过。Ticket 13 的历史实现证据保持不变，
+Ticket 15 不再被 current-source preflight 阻塞。

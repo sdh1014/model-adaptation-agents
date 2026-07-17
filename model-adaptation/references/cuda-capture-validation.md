@@ -12,9 +12,10 @@ Ticket 23 已实现对应 adapter。preflight 只验证现有 SGLang Hook、rank
 格式和新进程 CUDA self-replay；不加载 checkpoint，不启动正式模型，也不消耗唯一
 CUDA Capture Session。
 
-`runs/cuda-preflight-r5-001` 已验证 adapter-001，但随后 `adapter-002` 增加了样本
-摘要与 replay 证据绑定。当前必须生成新的 `cuda-preflight-r5-002`；旧 Run 保留为
-历史，不能解锁正式 Session。
+`runs/cuda-preflight-r5-001` 已验证 adapter-001。随后 `adapter-002` 增加样本摘要
+与 replay 证据绑定，新的 `runs/cuda-preflight-r5-002` 也已回传并通过。旧 Run
+只作历史；当前源码由 r5-002 解锁 Ticket 15。以下步骤保留为这份证据的复现记录，
+不得覆盖已经封存的 Run。
 
 不要使用 revision 4 的 `Step3p5MLP.forward` 命令，不要在本地 Mac 运行本步骤。
 
@@ -203,8 +204,8 @@ result。preflight 样本很小，不需要把 checkpoint 提交到 GitHub。
 
 ## preflight 通过后的正式 Session 边界
 
-只有 `cuda-preflight-r5-002` 回传并通过当前源码校验后，正式 Session 才能继续。
-届时使用固定 checkpoint、TP8、BF16 和 eager，
+`cuda-preflight-r5-002` 已回传并通过当前源码校验，因此这个前置条件已经满足。
+正式 Session 仍须使用固定 checkpoint、TP8、BF16 和 eager，
 不传量化、投机解码、MTP、attention backend 或 MoE backend 参数。采集插件只增加
 环境变量，不改变两端模型启动参数。真实文本请求触发第 43、44 层后，保存最多三个
 rank 0 shape，并通过 `replay_compare.py --mode kernel-replay

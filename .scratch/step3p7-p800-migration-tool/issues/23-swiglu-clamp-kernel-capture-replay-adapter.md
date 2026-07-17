@@ -61,3 +61,7 @@ Ticket 13 code review 后，replay config、worker result、Golden state 和 wra
 result 增加同一 `sample-files.json` SHA-256 绑定。当前源码摘要和本机元数据测试
 封存在 `runs/adapter-002`；该 Run 没有重跑 CUDA/P800。必须先为当前源码重新执行
 不消耗正式 Session 的 preflight，才能开始 Ticket 15 的唯一 CUDA Session。
+
+2026-07-17 后续证据更新：`runs/cuda-preflight-r5-002` 已由 CUDA 机器回传并通过
+当前源码校验。它验证三个 rank-0 shape、样本摘要绑定和新进程 CUDA self-replay，
+没有消耗正式 Session；因此 Ticket 15 的这项前置条件已经满足。
