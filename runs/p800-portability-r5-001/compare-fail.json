@@ -1,0 +1,15 @@
+{
+  "error": "Tensor-likes are not close!\n\nMismatched elements: 8 / 8 (100.0%)\nGreatest absolute difference: 1024.0 at index (0, 0) (up to 0.01 allowed)\nGreatest relative difference: 566231040.0 at index (0, 0) (up to 0.02 allowed)",
+  "error_type": "AssertionError",
+  "intentional": true,
+  "passed": false,
+  "precision_gate": {
+    "atol": 0.01,
+    "check_stride": false,
+    "comparator": "torch.testing.assert_close",
+    "require_exact_structure": true,
+    "require_finite": true,
+    "require_same_dtype": true,
+    "rtol": 0.02
+  }
+}

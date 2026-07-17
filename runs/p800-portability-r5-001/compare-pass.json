@@ -1,0 +1,54 @@
+{
+  "checked_sample_count": 3,
+  "checked_samples": [
+    {
+      "dtype": "torch.bfloat16",
+      "file": "samples/a6373c992b411bb6ad5a5472c7f15b8c3c443c2f68cb8c40c0aab8bb3c70c9b7.pt",
+      "input_shape": [
+        1,
+        16
+      ],
+      "output_shape": [
+        1,
+        8
+      ],
+      "passed": true
+    },
+    {
+      "dtype": "torch.bfloat16",
+      "file": "samples/0e4b2019979d881300ae0cfe47f845c08f1641b9d84f36f6befa963dd5459d7b.pt",
+      "input_shape": [
+        2,
+        16
+      ],
+      "output_shape": [
+        2,
+        8
+      ],
+      "passed": true
+    },
+    {
+      "dtype": "torch.bfloat16",
+      "file": "samples/5f0aa83cf1e39715be3fb1e566b7ffaca31b949aeaea0633c16e5ff82c72872d.pt",
+      "input_shape": [
+        4,
+        16
+      ],
+      "output_shape": [
+        4,
+        8
+      ],
+      "passed": true
+    }
+  ],
+  "passed": true,
+  "precision_gate": {
+    "atol": 0.01,
+    "check_stride": false,
+    "comparator": "torch.testing.assert_close",
+    "require_exact_structure": true,
+    "require_finite": true,
+    "require_same_dtype": true,
+    "rtol": 0.02
+  }
+}

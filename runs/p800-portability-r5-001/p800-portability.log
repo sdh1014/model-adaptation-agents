@@ -1,0 +1,7 @@
+p800_torch_version=2.5.1+cu118
+p800_torch_path=/root/miniconda/envs/python310_torch25_cuda/lib/python3.10/site-packages/torch/__init__.py
+loaded=samples/a6373c992b411bb6ad5a5472c7f15b8c3c443c2f68cb8c40c0aab8bb3c70c9b7.pt passed=true
+loaded=samples/0e4b2019979d881300ae0cfe47f845c08f1641b9d84f36f6befa963dd5459d7b.pt passed=true
+loaded=samples/5f0aa83cf1e39715be3fb1e566b7ffaca31b949aeaea0633c16e5ff82c72872d.pt passed=true
+intentional_fail_observed=true
+result=PASS
