@@ -18,7 +18,7 @@ RUNBOOK = (
 
 
 class Ticket12CudaCaptureEntrypointTest(unittest.TestCase):
-    def test_runbook_blocks_old_mlp_commands_until_kernel_adapter_exists(self) -> None:
+    def test_runbook_runs_only_revision_five_kernel_preflight(self) -> None:
         runbook = RUNBOOK.read_text(encoding="utf-8")
 
         self.assertIn("revision 5", runbook)
@@ -29,10 +29,11 @@ class Ticket12CudaCaptureEntrypointTest(unittest.TestCase):
             "_swiglu_silu_clamp_mul",
             runbook,
         )
-        self.assertIn("capture/replay adapter 尚未实现", runbook)
-        self.assertIn("不能执行 CUDA preflight", runbook)
-        self.assertIn("完整 checkpoint", runbook)
-        self.assertIn("module `state_dict`", runbook)
+        self.assertIn("Ticket 23 已实现对应 adapter", runbook)
+        self.assertIn("--mode preflight", runbook)
+        self.assertIn("不加载 checkpoint", runbook)
+        self.assertIn("不消耗唯一", runbook)
+        self.assertIn("不要继续正式模型 Capture", runbook)
         self.assertNotIn("--scan-result runs/scan-004/result.json", runbook)
         self.assertNotIn("--operator-id Step3p5MLP.forward", runbook)
         self.assertNotIn("--speculative-algorithm EAGLE", runbook)

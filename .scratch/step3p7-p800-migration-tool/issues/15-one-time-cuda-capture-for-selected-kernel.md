@@ -2,7 +2,7 @@
 
 Type: task
 Status: ready-for-agent
-Blocked by: 13, 22
+Blocked by: 13
 
 ## What to build
 

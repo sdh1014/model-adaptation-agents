@@ -6,9 +6,11 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
 from typing import Any, Dict, Optional
 
+from capture_golden import resolve_git_revision, validate_scan_candidate
 from _lib.spec_contract import (
     SpecContractError,
     canonical_json_bytes,
@@ -17,11 +19,16 @@ from _lib.spec_contract import (
     uses_kernel_scan_contract,
 )
 from model_adaptation_capture.contracts import (
+    KERNEL_CALL_STATE_SCHEMA,
+    KERNEL_REPLAY_CONFIG_SCHEMA,
+    KERNEL_REPLAY_RESULT_SCHEMA,
+    KUNLUN_SWIGLU_TARGET,
     OPERATOR_ID,
     REPLAY_CONFIG_ENV,
     REPLAY_CONFIG_SCHEMA,
     REPLAY_RESULT_SCHEMA,
     STATE_SCHEMA,
+    SWIGLU_CLAMP_OPERATOR_ID,
     checkpoint_metadata,
     shape_id_for,
 )
@@ -40,8 +47,8 @@ DEFAULT_SYNTHETIC_CASE = {
 def require_loaded_model_mlp_adapter(contract: Dict[str, Any]) -> None:
     if uses_kernel_scan_contract(contract):
         raise ToolError(
-            "kernel capture/replay adapter is not implemented for revision 5; "
-            "do not fall back to the revision 4 loaded-model MLP replay"
+            "loaded-model MLP replay is not valid for revision 5; use "
+            "--mode kernel-replay for the selected Kernel Call"
         )
 
 
@@ -536,6 +543,293 @@ def run_finalize_model_replay(spec_path: Path, run_dir: Path) -> None:
         atomic_write_json(result_path, result)
 
 
+def _load_kernel_capture_state(
+    golden_run: Path,
+    binding: Dict[str, Any],
+    checkpoint: Dict[str, str],
+    *,
+    execution_site: str,
+) -> Dict[str, Any]:
+    state = read_json_object(
+        golden_run / "capture-state.json",
+        "Kernel Call capture state",
+    )
+    checks = {
+        "schema": KERNEL_CALL_STATE_SCHEMA,
+        "spec_binding": binding,
+        "operator_id": SWIGLU_CLAMP_OPERATOR_ID,
+        "tp_rank": 0,
+        "tensor_parallel_size": 8,
+        "checkpoint": checkpoint,
+        "loaded_checkpoint": {
+            "model_path": checkpoint["model_path"],
+            "revision": checkpoint["revision"],
+        },
+    }
+    for field, expected in checks.items():
+        if state.get(field) != expected:
+            raise ToolError(f"Kernel Call capture state {field} has drifted")
+    samples = state.get("samples")
+    if not isinstance(samples, list) or not 1 <= len(samples) <= 3:
+        raise ToolError("Kernel Call capture state requires one to three shapes")
+    if state.get("saved_shape_count") != len(samples):
+        raise ToolError("Kernel Call saved_shape_count has drifted")
+    seen_shape_ids = set()
+    for sample in samples:
+        if not isinstance(sample, dict):
+            raise ToolError("Kernel Call sample entry must be one object")
+        shape_id = sample.get("shape_id")
+        signature = sample.get("signature")
+        if (
+            not isinstance(shape_id, str)
+            or not shape_id
+            or not isinstance(signature, dict)
+        ):
+            raise ToolError("Kernel Call sample shape metadata is invalid")
+        try:
+            expected_shape_id = shape_id_for(signature["inputs"]["x"]["shape"])
+        except (KeyError, TypeError, ValueError) as error:
+            raise ToolError("Kernel Call sample shape metadata has drifted") from error
+        if shape_id != expected_shape_id or shape_id in seen_shape_ids:
+            raise ToolError("Kernel Call sample shape digest has drifted")
+        seen_shape_ids.add(shape_id)
+        if sample.get("file") != f"samples/{shape_id}.pt":
+            raise ToolError("Kernel Call sample path has drifted")
+        sample_path = (golden_run / sample["file"]).resolve()
+        if (
+            not sample_path.is_relative_to(golden_run)
+            or not sample_path.is_file()
+        ):
+            raise ToolError("Kernel Call sample file is missing or escapes its Run")
+
+    if execution_site == "cuda":
+        if state.get("status") != "ACTIVE":
+            raise ToolError("CUDA self-replay requires an ACTIVE capture")
+        if not isinstance(state.get("capture_closed"), bool):
+            raise ToolError("Kernel Call capture_closed has drifted")
+    elif (
+        state.get("status") != "SEALED"
+        or state.get("capture_closed") is not True
+        or state.get("self_replay", {}).get("passed") is not True
+    ):
+        raise ToolError("P800 baseline requires a self-replay-verified Golden Run")
+    return state
+
+
+def _kernel_worker_environment(
+    sglang_worktree: Optional[Path],
+) -> Dict[str, str]:
+    environment = os.environ.copy()
+    python_paths = [str(Path(__file__).resolve().parent)]
+    if sglang_worktree is not None:
+        python_paths.append(str((sglang_worktree / "python").resolve()))
+    if environment.get("PYTHONPATH"):
+        python_paths.append(environment["PYTHONPATH"])
+    environment["PYTHONPATH"] = os.pathsep.join(python_paths)
+    return environment
+
+
+def _validate_kernel_worker_result(
+    result: Dict[str, Any],
+    config: Dict[str, Any],
+) -> None:
+    checks = {
+        "schema": KERNEL_REPLAY_RESULT_SCHEMA,
+        "spec_binding": config["spec_binding"],
+        "operator_id": config["operator_id"],
+        "execution_site": config["execution_site"],
+        "invocation_target": config["invocation_target"],
+        "tp_rank": config["tp_rank"],
+        "tensor_parallel_size": config["tensor_parallel_size"],
+        "precision_gate": config["precision_gate"],
+        "actual_tensors_saved": False,
+    }
+    for field, expected in checks.items():
+        if result.get(field) != expected:
+            raise ToolError(f"kernel replay result {field} has drifted")
+    checked_shapes = result.get("checked_shapes")
+    if not isinstance(checked_shapes, list) or not checked_shapes:
+        raise ToolError("kernel replay checked_shapes is invalid")
+    if result.get("checked_shape_count") != len(checked_shapes):
+        raise ToolError("kernel replay checked shape count has drifted")
+    failed = 0
+    seen = set()
+    for item in checked_shapes:
+        if (
+            not isinstance(item, dict)
+            or set(item) != {"shape_id", "passed"}
+            or not isinstance(item["shape_id"], str)
+            or not item["shape_id"]
+            or not isinstance(item["passed"], bool)
+            or item["shape_id"] in seen
+        ):
+            raise ToolError("kernel replay checked shape entry is invalid")
+        seen.add(item["shape_id"])
+        failed += not item["passed"]
+    if result.get("failed_shape_count") != failed:
+        raise ToolError("kernel replay failed shape count has drifted")
+    passed = result.get("passed")
+    if not isinstance(passed, bool) or passed != (failed == 0):
+        raise ToolError("kernel replay pass result is inconsistent")
+    errors = result.get("errors")
+    if not isinstance(errors, list) or len(errors) != failed:
+        raise ToolError("kernel replay error evidence is inconsistent")
+
+
+def run_kernel_replay(
+    spec_path: Path,
+    run_dir: Path,
+    scan_result_path: Path,
+    operator_id: str,
+    golden_run: Path,
+    *,
+    execution_site: str,
+    sglang_worktree: Optional[Path] = None,
+) -> None:
+    binding = load_spec_binding(spec_path)
+    contract = load_contract_data(spec_path)
+    if not uses_kernel_scan_contract(contract):
+        raise ToolError("standalone Kernel Call replay requires revision 5 Contract")
+    if operator_id != SWIGLU_CLAMP_OPERATOR_ID:
+        raise ToolError(f"kernel replay adapter is not implemented for {operator_id!r}")
+    scan_result = read_json_object(scan_result_path, "Scan Run result")
+    validate_scan_candidate(
+        contract,
+        scan_result,
+        operator_id,
+        binding.as_result_dict(),
+    )
+    if execution_site not in {"cuda", "p800"}:
+        raise ToolError("execution_site must be cuda or p800")
+    if execution_site == "cuda":
+        if sglang_worktree is None:
+            raise ToolError("--sglang-worktree is required for CUDA self-replay")
+        actual_revision = resolve_git_revision(sglang_worktree)
+        expected_revision = contract["source"]["sglang_revision"]
+        if actual_revision != expected_revision:
+            raise ToolError(
+                "SGLang worktree revision does not match Contract Data: "
+                f"expected {expected_revision}, got {actual_revision}"
+            )
+    elif sglang_worktree is not None:
+        raise ToolError("--sglang-worktree is not valid for P800 baseline")
+
+    try:
+        checkpoint = checkpoint_metadata(
+            contract["checkpoint"]["id"],
+            contract["checkpoint"]["config_digest"],
+        )
+    except ValueError as error:
+        raise ToolError(str(error)) from error
+    golden_run = golden_run.resolve()
+    state = _load_kernel_capture_state(
+        golden_run,
+        binding.as_result_dict(),
+        checkpoint,
+        execution_site=execution_site,
+    )
+    create_run_dir(run_dir)
+    invocation_target = (
+        SWIGLU_CLAMP_OPERATOR_ID
+        if execution_site == "cuda"
+        else KUNLUN_SWIGLU_TARGET
+    )
+    config = {
+        "schema": KERNEL_REPLAY_CONFIG_SCHEMA,
+        "spec_binding": binding.as_result_dict(),
+        "operator_id": operator_id,
+        "execution_site": execution_site,
+        "invocation_target": invocation_target,
+        "golden_run": str(golden_run),
+        "run_dir": str(run_dir.resolve()),
+        "tensor_parallel_size": contract["runtime"]["tensor_parallel_size"],
+        "tp_rank": contract["sample_policy"]["capture_tp_rank"],
+        "precision_gate": contract["precision_gate"],
+        "allow_active_capture": execution_site == "cuda",
+    }
+    config_path = run_dir / "replay-config.json"
+    write_json(config_path, config)
+    if execution_site == "cuda" and state["capture_closed"] is not True:
+        state["capture_closed"] = True
+        atomic_write_json(golden_run / "capture-state.json", state)
+
+    command = [
+        sys.executable,
+        "-m",
+        "model_adaptation_capture.kernel_replay",
+        "--config",
+        str(config_path.resolve()),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=sglang_worktree if sglang_worktree is not None else Path.cwd(),
+        env=_kernel_worker_environment(sglang_worktree),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    (run_dir / "replay.log").write_text(
+        "\n".join(
+            [
+                f"execution_site={execution_site}",
+                f"invocation_target={invocation_target}",
+                f"returncode={completed.returncode}",
+                "--- stdout ---",
+                completed.stdout,
+                "--- stderr ---",
+                completed.stderr,
+            ]
+        ),
+        encoding="utf-8",
+    )
+    worker_result_path = run_dir / "worker-result.json"
+    if completed.returncode not in {0, 1} or not worker_result_path.is_file():
+        if execution_site == "cuda":
+            state["status"] = "FAILED"
+            state["self_replay"] = {
+                "passed": False,
+                "error": "kernel replay worker did not produce trustworthy evidence",
+            }
+            atomic_write_json(golden_run / "capture-state.json", state)
+        raise ToolError("kernel replay worker did not produce trustworthy evidence")
+    worker_result = read_json_object(worker_result_path, "kernel replay result")
+    _validate_kernel_worker_result(worker_result, config)
+    if (completed.returncode == 0) != worker_result["passed"]:
+        raise ToolError("kernel replay worker exit code contradicts its result")
+
+    if execution_site == "cuda":
+        state["status"] = "SEALED" if worker_result["passed"] else "FAILED"
+        state["self_replay"] = {
+            "passed": worker_result["passed"],
+            "checked_shape_count": worker_result["checked_shape_count"],
+            "worker_result_sha256": hashlib.sha256(
+                canonical_json_bytes(worker_result)
+            ).hexdigest(),
+        }
+        atomic_write_json(golden_run / "capture-state.json", state)
+
+    result = {
+        "tool": "replay_compare.py",
+        "action": "kernel-replay",
+        "spec_binding": binding.as_result_dict(),
+        "operator_id": operator_id,
+        "execution_site": execution_site,
+        "invocation_target": invocation_target,
+        "passed": worker_result["passed"],
+        "checked_shape_count": worker_result["checked_shape_count"],
+        "failed_shape_count": worker_result["failed_shape_count"],
+        "precision_gate": contract["precision_gate"],
+        "actual_tensors_saved": False,
+        "evidence": ["replay-config.json", "worker-result.json", "replay.log"],
+        "summary": (
+            f"All Kernel Call samples passed through {invocation_target}."
+            if worker_result["passed"]
+            else f"At least one Kernel Call sample failed through {invocation_target}."
+        ),
+    }
+    atomic_write_json(run_dir / "result.json", result)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--spec", required=True, type=Path)
@@ -548,11 +842,16 @@ def parse_args() -> argparse.Namespace:
             "validate-binding",
             "prepare-model-replay",
             "finalize-model-replay",
+            "kernel-replay",
         ),
     )
     parser.add_argument("--case", type=Path)
     parser.add_argument("--result", type=Path)
     parser.add_argument("--golden-run", type=Path)
+    parser.add_argument("--scan-result", type=Path)
+    parser.add_argument("--operator-id")
+    parser.add_argument("--execution-site", choices=("cuda", "p800"))
+    parser.add_argument("--sglang-worktree", type=Path)
     return parser.parse_args()
 
 
@@ -560,17 +859,37 @@ def main() -> int:
     args = parse_args()
     try:
         if args.mode == "synthetic":
-            if args.result is not None:
-                raise ToolError("--result is not valid for synthetic mode")
-            if args.golden_run is not None:
-                raise ToolError("--golden-run is not valid for synthetic mode")
+            if any(
+                value is not None
+                for value in (
+                    args.result,
+                    args.golden_run,
+                    args.scan_result,
+                    args.operator_id,
+                    args.execution_site,
+                    args.sglang_worktree,
+                )
+            ):
+                raise ToolError(
+                    "replay arguments are not valid for synthetic mode"
+                )
             run_synthetic(args.spec, args.run_dir, args.case)
         elif args.mode == "validate-binding":
             if args.result is None:
                 raise ToolError("--result is required for validate-binding mode")
-            if args.case is not None or args.golden_run is not None:
+            if any(
+                value is not None
+                for value in (
+                    args.case,
+                    args.golden_run,
+                    args.scan_result,
+                    args.operator_id,
+                    args.execution_site,
+                    args.sglang_worktree,
+                )
+            ):
                 raise ToolError(
-                    "--case and --golden-run are not valid for validate-binding mode"
+                    "replay arguments are not valid for validate-binding mode"
                 )
             run_validate_binding(args.spec, args.run_dir, args.result)
         elif args.mode == "prepare-model-replay":
@@ -578,21 +897,64 @@ def main() -> int:
                 raise ToolError(
                     "--golden-run is required for prepare-model-replay mode"
                 )
-            if args.case is not None or args.result is not None:
-                raise ToolError(
-                    "--case and --result are not valid for prepare-model-replay mode"
-                )
-            run_prepare_model_replay(args.spec, args.run_dir, args.golden_run)
-        else:
             if any(
                 value is not None
-                for value in (args.case, args.result, args.golden_run)
+                for value in (
+                    args.case,
+                    args.result,
+                    args.scan_result,
+                    args.operator_id,
+                    args.execution_site,
+                    args.sglang_worktree,
+                )
             ):
                 raise ToolError(
-                    "--case, --result, and --golden-run are not valid for "
-                    "finalize-model-replay mode"
+                    "kernel replay arguments are not valid for "
+                    "prepare-model-replay mode"
+                )
+            run_prepare_model_replay(args.spec, args.run_dir, args.golden_run)
+        elif args.mode == "finalize-model-replay":
+            if any(
+                value is not None
+                for value in (
+                    args.case,
+                    args.result,
+                    args.golden_run,
+                    args.scan_result,
+                    args.operator_id,
+                    args.execution_site,
+                    args.sglang_worktree,
+                )
+            ):
+                raise ToolError(
+                    "replay arguments are not valid for finalize-model-replay mode"
                 )
             run_finalize_model_replay(args.spec, args.run_dir)
+        else:
+            required = {
+                "--golden-run": args.golden_run,
+                "--scan-result": args.scan_result,
+                "--operator-id": args.operator_id,
+                "--execution-site": args.execution_site,
+            }
+            missing = [name for name, value in required.items() if value is None]
+            if missing:
+                raise ToolError(
+                    ", ".join(missing) + " required for kernel-replay mode"
+                )
+            if args.case is not None or args.result is not None:
+                raise ToolError(
+                    "--case and --result are not valid for kernel-replay mode"
+                )
+            run_kernel_replay(
+                args.spec,
+                args.run_dir,
+                args.scan_result,
+                args.operator_id,
+                args.golden_run,
+                execution_site=args.execution_site,
+                sglang_worktree=args.sglang_worktree,
+            )
     except (SpecContractError, ToolError, OSError) as error:
         print(f"replay_compare.py: {error}", file=sys.stderr)
         return 2

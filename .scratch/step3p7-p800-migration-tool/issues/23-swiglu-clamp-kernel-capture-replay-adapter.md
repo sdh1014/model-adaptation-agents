@@ -1,7 +1,7 @@
 # 实现 SwiGLU clamp Kernel Call 采集与重放 adapter
 
 Type: task
-Status: ready-for-agent
+Status: resolved
 Blocked by: 21
 
 ## What to build
@@ -41,3 +41,18 @@ CUDA self-replay 调原函数；P800 baseline 用相同 `x` 调当前 Kunlun MoE
 `scan-006` 选择这个调用，是因为它在 Step-3.7 文本 MoE 第 43、44 层可达，只有
 一个输入 Tensor 和一个输出 Tensor，没有边界内 TP 通信，也不需要保存权重。固定
 Kunlun MoE 路径已有普通 SwiGLU，但没有读取 clamp limit。
+
+2026-07-17 已完成本地 adapter 实现：
+
+- `capture_golden.py` 消费 `scan-006` 的活动 Kernel Call 和 capture plan；
+- SGLang 插件只 Hook 已有 `_swiglu_silu_clamp_mul`；
+- rank 0 collector 保存 `x / gemm1_limit / output`，参数字典为空，最多三个 shape；
+- `replay_compare.py --mode kernel-replay` 在 CUDA 调原函数，在 P800 调
+  `kunlun_ops.swiglu`，actual Tensor 不落盘；
+- preflight 会在 rank 0 采集后启动 rank 1 过滤 probe，再启动独立 CUDA
+  self-replay worker；
+- 本机只完成 CPU 测试，没有运行 CUDA/P800，也没有消耗正式 Capture Session。
+
+实现证据封存在 `runs/adapter-001`。当前人工动作是按
+`model-adaptation/references/cuda-capture-validation.md` 在 CUDA 机器执行
+`runs/cuda-preflight-r5-001`，并通过 GitHub evidence 分支回传整个 Run。

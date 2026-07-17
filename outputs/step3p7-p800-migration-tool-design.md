@@ -317,9 +317,13 @@ samples/<shape-id>.pt
   signature
     x: shape, dtype, stride
     gemm1_limit
-  payload
+  inputs
     x
-    expected_output
+  parameters = {}
+  non_tensor_args
+    gemm1_limit
+  outputs
+    output
 ```
 
 同一 shape 只保存第一次真实调用，最多三种。输入和参数保留原 dtype 后复制到 CPU。
@@ -336,13 +340,14 @@ P800 actual output 只在内存中参与比较，不落盘。
 | `workspace_guard.py` | 固定基线、保存 patch、检查唯一修改 | 自动 commit/push |
 
 当前代码中的 MLP adapter 是 revision 4 历史实现。revision 5 的
-`_swiglu_silu_clamp_mul` capture/replay adapter 尚未实现；在它完成并通过本地测试之前，
-不能运行旧 MLP preflight，也不能消耗唯一 CUDA Session。
+`_swiglu_silu_clamp_mul` adapter 已实现：采集插件 Hook 原调用，rank 0 collector
+保存最多三个 shape，CUDA self-replay 调 SGLang 原函数，P800 baseline 调
+`kunlun_ops.swiglu`。本机只完成 CPU 测试，没有运行 CUDA/P800。
 
 `scan-006` 是不可变证据，所以其中的 `adapter_status=NOT_IMPLEMENTED` 不会被原地
-更新。Ticket 23 完成后要生成新的 adapter Run，并让 Working State 的
-`last_completed_action`、`last_run` 和 `next_action` 指向该证据；恢复会话通过这
-三个已有字段判断是否可以进入 preflight。
+更新。实现证据保存在新的 `runs/adapter-001`；Working State 通过
+`last_completed_action`、`last_run` 和 `next_action` 判断现在可以进入 CUDA
+preflight。
 
 ## 11. 运行流程
 
@@ -381,13 +386,11 @@ Contract revision 5
 
 ## 13. 当前下一步
 
-实现 Ticket 23：
-
-1. Hook 现有 SGLang 调用 `_swiglu_silu_clamp_mul`；
-2. rank 0 保存 `x`、`gemm1_limit` 和 CUDA output，不保存权重；
-3. 最多三个 shape；
-4. CUDA self-replay 调原有函数，P800 baseline 调当前 Kunlun SwiGLU 路径；
-5. 使用固定 `torch.testing.assert_close`；
-6. 完成本地测试后，才更新 CUDA runbook 并进入实机 preflight。
+在 CUDA 机器按
+`model-adaptation/references/cuda-capture-validation.md` 执行
+`runs/cuda-preflight-r5-001`。preflight 必须同时证明现有函数 Hook、rank 0
+三 shape 格式、rank 1 不落盘和新进程 CUDA self-replay，并明确
+`consumes_capture_session=false`。完成后把整个 Run 提交到独立 GitHub evidence
+分支，先回传审查，不直接开始正式 CUDA Capture。
 
 完整机器可读扫描证据见 `runs/scan-006/result.json`；原始 `scan-005` 保留为历史。

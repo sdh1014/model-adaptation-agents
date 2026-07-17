@@ -49,17 +49,17 @@ Demo。
 - [实现 TP8 rank 0 MLP 采集与模型内重放](issues/20-tp8-rank-local-mlp-capture-replay.md)：每种 shape 只保存 rank 0 的 `x/output`；CUDA 与 P800 都在加载同 checkpoint 的 TP8 模型实例内重放，不新增模型算子函数。
 - [以 kernel 调用为边界重扫并选择最小 Demo](issues/21-kernel-level-scan-and-demo-selection.md)：Contract revision 5 只固定 kernel-call 扫描范围、文本/单图输入和直接参数保存规则；`scan-005` 保留初次结果，`scan-006` 纠正视觉链并补回 clamp SwiGLU 后选择已有 `_swiglu_silu_clamp_mul`。
 - [Gemma RMSNorm kernel adapter（已取消）](issues/22-gemma-rmsnorm-kernel-capture-replay-adapter.md)：保留原票据历史；`scan-006` 改选更小缺口后标记为 `wontfix`。
-- [实现 SwiGLU clamp Kernel Call 采集与重放 adapter](issues/23-swiglu-clamp-kernel-capture-replay-adapter.md)：下一步 Hook 现有 `_swiglu_silu_clamp_mul`，保存 rank 0 的 `x/limit/output`，最多三个 shape 且不保存权重；旧 MLP adapter 不可消费 revision 5。
+- [实现 SwiGLU clamp Kernel Call 采集与重放 adapter](issues/23-swiglu-clamp-kernel-capture-replay-adapter.md)：已完成现有 `_swiglu_silu_clamp_mul` Hook、rank 0 三 shape 样本、CUDA 原函数 self-replay 与 P800 `kunlun_ops.swiglu` baseline 入口；本机未运行实机 preflight。
 
 ## Not yet specified
 
-- `_swiglu_silu_clamp_mul` 的 capture/replay adapter 与实际命令尚未实现；完成
-  Ticket 23 后才进入 CUDA preflight。
+- revision 5 CUDA preflight 尚未执行；按当前 runbook 在 CUDA 机器生成
+  `runs/cuda-preflight-r5-001` 并通过 GitHub evidence 分支回传。
 - Golden Sample 的跨 CUDA/P800 序列化兼容性仍需实机确认。
 
 ## Out of scope
 
-- 在 Ticket 23 之前运行正式 CUDA Capture 或 P800 Demo。
+- 在 revision 5 CUDA preflight 通过前运行正式 CUDA Capture 或 P800 Demo。
 - 重新登录真实 CUDA/P800 环境做其他能力验证；`torch.testing` 可用性直接采用用户已完成的实机验证结论。
 - 自动 SSH、远程执行、自动上传或凭证管理。
 - 新增 C++/自定义 Kernel、底层算子注册或性能优化。

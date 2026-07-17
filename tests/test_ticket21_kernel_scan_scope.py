@@ -440,7 +440,7 @@ class Ticket21KernelScanScopeTest(unittest.TestCase):
         self.assertIn("当前 kernel 调用直接使用", skill)
         self.assertIn("capture/replay adapter", skill)
 
-    def test_revision_5_cannot_fall_back_to_the_historical_mlp_adapter(self) -> None:
+    def test_revision_5_cannot_fall_back_to_the_historical_mlp_operator(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             run_dir = Path(temp_dir) / "capture"
             completed = subprocess.run(
@@ -456,7 +456,7 @@ class Ticket21KernelScanScopeTest(unittest.TestCase):
                     "--scan-result",
                     str(SCAN_006),
                     "--operator-id",
-                    SWIGLU_CLAMP,
+                    "Step3p5MLP.forward",
                     "--sglang-worktree",
                     str(ROOT),
                 ],
@@ -466,11 +466,11 @@ class Ticket21KernelScanScopeTest(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(completed.returncode, 2)
-            self.assertIn("capture/replay adapter is not implemented", completed.stderr)
-            self.assertIn(SWIGLU_CLAMP, completed.stderr)
+            self.assertIn("Step3p5MLP.forward", completed.stderr)
+            self.assertIn("exactly one operator", completed.stderr)
             self.assertFalse(run_dir.exists())
 
-    def test_revision_5_model_replay_reports_the_missing_kernel_adapter(self) -> None:
+    def test_revision_5_cannot_use_the_historical_loaded_model_replay(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = Path(temp_dir)
             completed = subprocess.run(
@@ -492,7 +492,11 @@ class Ticket21KernelScanScopeTest(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(completed.returncode, 2)
-            self.assertIn("kernel capture/replay adapter is not implemented", completed.stderr)
+            self.assertIn(
+                "loaded-model MLP replay is not valid for revision 5",
+                completed.stderr,
+            )
+            self.assertIn("--mode kernel-replay", completed.stderr)
             self.assertFalse((workspace / "replay").exists())
 
     def test_historical_revision_4_runs_are_unchanged(self) -> None:

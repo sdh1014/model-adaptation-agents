@@ -2,7 +2,7 @@
 
 Type: task
 Status: ready-for-human
-Blocked by: 22
+Blocked by: none
 
 ## What to build
 
@@ -62,3 +62,7 @@ Ticket 20 已完成并解除阻塞。revision 4 在 TP8 模型中只采集和重
 2026-07-17 复核更新：`scan-005` 保留为历史，当前 `scan-006` 改选
 `_swiglu_silu_clamp_mul`，本票据改由 Ticket 23 阻塞。首选样本不保存权重；格式
 验证仍要拒绝任何超出当前调用边界的参数、完整 checkpoint 和 module state。
+
+2026-07-17 Ticket 23 完成：revision 5 adapter 已实现并通过本地测试，当前不再受
+代码实现阻塞。下一人工动作是在 CUDA 机器执行 revision 5 preflight 并通过 GitHub
+回传 Run；只有该证据通过后，才继续正式 CUDA Capture 和后续 P800 round-trip。

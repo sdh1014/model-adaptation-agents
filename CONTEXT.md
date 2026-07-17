@@ -50,7 +50,7 @@ The one-time collection of replayable operator inputs and expected outputs from 
 _Avoid_: Repeated cross-device comparison
 
 **Capture Session**:
-The single CUDA-side execution that gathers all required Golden Samples, retaining one sample for each distinct execution phase, shape, dtype, layout, and non-tensor argument signature.
+The single CUDA-side execution that gathers all required Golden Samples using the human-approved deduplication rule. For the revision 5 Demo, the selected Kernel Call retains the first rank-0 sample for each distinct input shape, up to three shapes; dtype, layout, and non-Tensor arguments remain recorded in the signature and are validated during replay.
 _Avoid_: One sample total, repeated CUDA visits
 
 **Golden Sample**:
@@ -62,7 +62,7 @@ The human-approved validation rule in the Contract that requires matching output
 _Avoid_: Agent-adjusted tolerance, diagnostic metric
 
 **Run**:
-An immutable record of one CUDA capture or P800 repair attempt, containing its inputs, commands, logs, results, and candidate patch when applicable.
+An immutable record of one bounded migration action, such as Spec binding, Scan, adapter validation, CUDA capture, or P800 repair. It contains the action's inputs, commands, logs, results, and candidate patch when applicable.
 _Avoid_: Output, current state
 
 **Golden Run**:

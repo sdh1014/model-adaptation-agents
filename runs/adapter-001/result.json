@@ -1,0 +1,75 @@
+{
+  "action": "implement_kernel_capture_replay_adapter",
+  "active_operator": "sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul",
+  "adapter_status": "IMPLEMENTED",
+  "capture_boundary": {
+    "inputs": [
+      "x"
+    ],
+    "non_tensor_args": [
+      "gemm1_limit"
+    ],
+    "outputs": [
+      "output"
+    ],
+    "parameters": []
+  },
+  "evidence": [
+    "adapter.log"
+  ],
+  "passed": true,
+  "replay_targets": {
+    "cuda": "sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul",
+    "p800": "kunlun_ops.swiglu"
+  },
+  "run_id": "adapter-001",
+  "runtime_validation": {
+    "consumes_capture_session": false,
+    "cuda_available": false,
+    "cuda_preflight": "NOT_RUN",
+    "local_test_device": "cpu",
+    "p800_baseline": "NOT_RUN"
+  },
+  "source_files": [
+    {
+      "path": "model-adaptation/scripts/capture_golden.py",
+      "sha256": "c4a7e76e9289ba883914a16e5f7e742c7bb20185575943871fad1b0e9a10170a"
+    },
+    {
+      "path": "model-adaptation/scripts/replay_compare.py",
+      "sha256": "4cf1467e2caca32daea4cbdf08a17332beb66a3e78a930da55d29bd0d4a9776e"
+    },
+    {
+      "path": "model-adaptation/scripts/model_adaptation_capture/contracts.py",
+      "sha256": "36764a2413a441484fa32a35acc4fedbb2d28ee0b082e6badeb4b699b408687e"
+    },
+    {
+      "path": "model-adaptation/scripts/model_adaptation_capture/plugin.py",
+      "sha256": "23b4692dd4b23b35be097545a67efbd252bba97124ec1903d2bd0a4dc268abab"
+    },
+    {
+      "path": "model-adaptation/scripts/model_adaptation_capture/preflight.py",
+      "sha256": "f3a73b8b7a5daa611dcacade097dbac7cfde8b151682ee973b569111b83b11ad"
+    },
+    {
+      "path": "model-adaptation/scripts/model_adaptation_capture/kernel_call.py",
+      "sha256": "d9d2de68fc319de8a05c4911c389154ce905b9d6ad4260994476ceb376846c70"
+    },
+    {
+      "path": "model-adaptation/scripts/model_adaptation_capture/kernel_replay.py",
+      "sha256": "a7ccec2508cf47fd1c801e139a134ee31cf35457b324c19acdb114eac40eb1cf"
+    }
+  ],
+  "spec_binding": {
+    "contract_data_sha256": "f683ea62427279da3c899a3ef0afcfa1d16298b7424154664c7e3fac9b13d938",
+    "contract_revision": 5,
+    "spec_id": "step3p7-flash-p800-demo"
+  },
+  "tests": {
+    "command": "PYTHONPATH=/tmp/model-adaptation-torch312 PYTHONPYCACHEPREFIX=/tmp/model-adaptation-agents-pyc /Users/songdehao/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3 -m unittest discover -s tests",
+    "passed": 73,
+    "python": "3.12.13",
+    "torch": "2.6.0"
+  },
+  "tool": "migration-agent"
+}

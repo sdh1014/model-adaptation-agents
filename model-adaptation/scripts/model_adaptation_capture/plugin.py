@@ -1,4 +1,4 @@
-"""SGLang plugin entry point for rank-0 Step3p5MLP capture and replay."""
+"""SGLang plugin entry point for bounded MLP and Kernel Call capture."""
 
 import contextvars
 import json
@@ -6,22 +6,22 @@ import os
 from pathlib import Path
 from typing import Any, Optional
 
-from .collector import CandidateCollector
 from .contracts import (
     CAPTURE_CONFIG_ENV,
     FORWARD_HOOK_TARGET,
     MLP_HOOK_TARGET,
     REPLAY_CONFIG_ENV,
+    SWIGLU_CLAMP_HOOK_TARGET,
+    SWIGLU_CLAMP_OPERATOR_ID,
 )
-from .replay import LoadedModelReplay
 
 
 _execution_phase: contextvars.ContextVar[str] = contextvars.ContextVar(
     "model_adaptation_execution_phase",
     default="unknown",
 )
-_collector: Optional[CandidateCollector] = None
-_replay: Optional[LoadedModelReplay] = None
+_collector: Optional[Any] = None
+_replay: Optional[Any] = None
 _config_path: Optional[Path] = None
 _mode: Optional[str] = None
 
@@ -67,19 +67,27 @@ def _tp_context(config_path: Path) -> tuple[int, int]:
         )
 
 
-def _get_collector() -> CandidateCollector:
+def _get_collector() -> Any:
     global _collector
     if _config_path is None:
         raise RuntimeError(f"{CAPTURE_CONFIG_ENV} was not set during plugin registration")
     if _collector is None:
         tp_rank, tp_size = _tp_context(_config_path)
         config = json.loads(_config_path.read_text(encoding="utf-8"))
+        if config.get("operator_id") == SWIGLU_CLAMP_OPERATOR_ID:
+            from .kernel_call import KernelCallCollector
+
+            collector_type = KernelCallCollector
+        else:
+            from .collector import CandidateCollector
+
+            collector_type = CandidateCollector
         loaded_checkpoint = (
             None
             if "preflight_tp_context" in config
             else _loaded_checkpoint_identity()
         )
-        _collector = CandidateCollector.from_config_path(
+        _collector = collector_type.from_config_path(
             _config_path,
             tp_rank=tp_rank,
             tp_size=tp_size,
@@ -106,11 +114,13 @@ def _loaded_checkpoint_identity() -> dict[str, str]:
     }
 
 
-def _get_replay() -> LoadedModelReplay:
+def _get_replay() -> Any:
     global _replay
     if _config_path is None:
         raise RuntimeError(f"{REPLAY_CONFIG_ENV} was not set during plugin registration")
     if _replay is None:
+        from .replay import LoadedModelReplay
+
         tp_rank, tp_size = _tp_context(_config_path)
         _replay = LoadedModelReplay.from_config_path(
             _config_path,
@@ -156,6 +166,16 @@ def around_step3p5_mlp(original, module, x):
     return output
 
 
+def around_swiglu_clamp(original, x, gemm1_limit):
+    output = original(x, gemm1_limit)
+    _get_collector().record(
+        x,
+        output,
+        gemm1_limit=gemm1_limit,
+    )
+    return output
+
+
 def register() -> None:
     """Register hooks only for launches that explicitly supply a capture config."""
     global _config_path, _mode
@@ -170,8 +190,21 @@ def register() -> None:
         return
     _config_path = Path(configured).resolve()
     _mode = "capture" if capture_config else "replay"
+    config = json.loads(_config_path.read_text(encoding="utf-8"))
 
     from sglang.srt.plugins.hook_registry import HookRegistry, HookType
+
+    if config.get("operator_id") == SWIGLU_CLAMP_OPERATOR_ID:
+        if _mode != "capture":
+            raise RuntimeError(
+                "the standalone SwiGLU replay does not use the SGLang plugin"
+            )
+        HookRegistry.register(
+            SWIGLU_CLAMP_HOOK_TARGET,
+            around_swiglu_clamp,
+            HookType.AROUND,
+        )
+        return
 
     HookRegistry.register(
         FORWARD_HOOK_TARGET,

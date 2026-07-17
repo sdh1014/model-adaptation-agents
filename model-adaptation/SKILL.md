@@ -184,6 +184,10 @@ adapter 完成后，完整读取
 - 直接参数可保存，但完整 checkpoint 和 module state 会被拒绝；
 - 相同样本可以按固定 Precision Gate self-replay。
 
+如果 Working State 的 `execution_site` 是 `CUDA`，但当前会话不在用户指定的 CUDA
+机器，不创建 preflight Run，也不运行合成替代品。只报告 runbook 中的命令和
+GitHub evidence 分支回传要求，保持 Working State 不变并停止本次执行。
+
 正式 CUDA Session 只采集活动算子：
 
 1. 启动固定 checkpoint 的真实 TP8/BF16/eager 模型；采集只增加插件配置，不改变

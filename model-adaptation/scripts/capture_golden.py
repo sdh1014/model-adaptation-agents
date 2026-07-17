@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare and validate bounded CUDA capture for one Semantic Operator."""
+"""Prepare and validate bounded CUDA capture for one selected Kernel Call."""
 
 import argparse
 import hashlib
@@ -20,8 +20,12 @@ from model_adaptation_capture.contracts import (
     CANDIDATE_SERIALIZATION,
     CAPTURE_CONFIG_ENV,
     CONFIG_SCHEMA,
+    KERNEL_CALL_SERIALIZATION,
+    KUNLUN_SWIGLU_TARGET,
     MLP_HOOK_TARGET,
     MODEL_RELATIVE_PATH as MODEL_PATH_TEXT,
+    SWIGLU_CLAMP_OPERATOR_ID,
+    SWIGLU_CLAMP_SOURCE_RELATIVE_PATH,
     checkpoint_metadata,
 )
 from model_adaptation_capture.preflight import (
@@ -255,11 +259,14 @@ def prepare_capture_config(
         operator_id,
         binding.as_result_dict(),
     )
-    if uses_kernel_scan_contract(contract):
-        raise ToolError(
-            f"capture/replay adapter is not implemented for {operator_id!r}; "
-            "do not fall back to the revision 4 Step3p5MLP adapter"
-        )
+    kernel_scan_contract = uses_kernel_scan_contract(contract)
+    if kernel_scan_contract and operator_id != SWIGLU_CLAMP_OPERATOR_ID:
+        raise ToolError(f"capture/replay adapter is not implemented for {operator_id!r}")
+    capture_plan = (
+        find_capture_plan(scan_result, operator_id)
+        if kernel_scan_contract
+        else None
+    )
 
     actual_revision = resolve_git_revision(sglang_worktree)
     expected_revision = contract["source"]["sglang_revision"]
@@ -267,6 +274,16 @@ def prepare_capture_config(
         raise ToolError(
             "SGLang worktree revision does not match Contract Data: "
             f"expected {expected_revision}, got {actual_revision}"
+        )
+    kernel_source_path = (
+        (sglang_worktree / SWIGLU_CLAMP_SOURCE_RELATIVE_PATH).resolve()
+        if kernel_scan_contract
+        else None
+    )
+    if kernel_source_path is not None and not kernel_source_path.is_file():
+        raise ToolError(
+            "SGLang worktree is missing selected Kernel Call source file "
+            f"{SWIGLU_CLAMP_SOURCE_RELATIVE_PATH}"
         )
 
     try:
@@ -283,12 +300,24 @@ def prepare_capture_config(
         "schema": CONFIG_SCHEMA,
         "spec_binding": binding.as_result_dict(),
         "operator_id": operator_id,
-        "activation_guard": contract["operator_boundary"]["activation_guard"],
+        "activation_guard": (
+            operator["activation_guard"]
+            if kernel_scan_contract
+            else contract["operator_boundary"]["activation_guard"]
+        ),
         "model_path": "target",
         "max_shapes": contract["limits"]["max_shapes_per_operator"],
         "tensor_parallel_size": contract["runtime"]["tensor_parallel_size"],
-        "tp_rank": contract["operator_boundary"]["tp_rank"],
-        "serialization": CANDIDATE_SERIALIZATION,
+        "tp_rank": (
+            contract["sample_policy"]["capture_tp_rank"]
+            if kernel_scan_contract
+            else contract["operator_boundary"]["tp_rank"]
+        ),
+        "serialization": (
+            KERNEL_CALL_SERIALIZATION
+            if kernel_scan_contract
+            else CANDIDATE_SERIALIZATION
+        ),
         "capture_device_type": "cuda",
         "dtype": contract["runtime"]["dtype"],
         "checkpoint": checkpoint,
@@ -304,17 +333,43 @@ def prepare_capture_config(
             "model_path": str((sglang_worktree / MODEL_RELATIVE_PATH).resolve()),
         },
         "boundary": operator["boundary"],
-        "state_dependency": operator["state_dependency"],
-        "replay": {
-            "mode": "loaded_model",
-            "checkpoint_id": checkpoint["id"],
-            "weights_in_golden_sample": False,
-        },
     }
+    if kernel_scan_contract:
+        if capture_plan is None:
+            raise ToolError("selected kernel is missing its capture plan")
+        config.update(
+            {
+                "hook_target": capture_plan["hook_target"],
+                "sample_fields": {
+                    "inputs": capture_plan["saved_inputs"],
+                    "parameters": capture_plan["saved_parameters"],
+                    "non_tensor_args": capture_plan["saved_non_tensor_args"],
+                    "outputs": capture_plan["saved_outputs"],
+                },
+                "replay": {
+                    "mode": "standalone-kernel-call",
+                    "cuda_target": SWIGLU_CLAMP_OPERATOR_ID,
+                    "p800_target": KUNLUN_SWIGLU_TARGET,
+                    "weights_in_golden_sample": False,
+                },
+            }
+        )
+        config["source"]["capture_module_path"] = str(kernel_source_path)
+    else:
+        config.update(
+            {
+                "state_dependency": operator["state_dependency"],
+                "replay": {
+                    "mode": "loaded_model",
+                    "checkpoint_id": checkpoint["id"],
+                    "weights_in_golden_sample": False,
+                },
+            }
+        )
     if preflight:
         config["preflight_tp_context"] = {
-            "rank": contract["operator_boundary"]["tp_rank"],
-            "size": contract["runtime"]["tensor_parallel_size"],
+            "rank": config["tp_rank"],
+            "size": config["tensor_parallel_size"],
         }
     write_json(config_path, config)
     return binding, config
@@ -348,6 +403,10 @@ def run_prepare(
         },
         "evidence": ["capture-config.json", "capture.log"],
         "summary": (
+            "The selected existing Kernel Call and fixed source are ready for "
+            "rank-0 CUDA capture in the TP8 model."
+            if config["replay"]["mode"] == "standalone-kernel-call"
+            else
             "The original MLP boundary and fixed source are ready for rank-0 "
             "CUDA capture in the TP8 model."
         ),
@@ -362,7 +421,9 @@ def run_prepare(
                 f"max_shapes={config['max_shapes']}",
                 f"tensor_parallel_size={config['tensor_parallel_size']}",
                 f"tp_rank={config['tp_rank']}",
-                "replay_mode=loaded_model",
+                f"replay_mode={config['replay']['mode']}",
+                f"hook_target={config.get('hook_target', MLP_HOOK_TARGET)}",
+                "weights_in_golden_sample=false",
                 "capture_session_consumed=false",
                 "",
             ]
@@ -401,10 +462,17 @@ def run_preflight(
         "serialization": config["serialization"],
         "evidence": evidence,
         "summary": (
+            "The installed SGLang hook captured rank-0 Kernel Call records and "
+            "a new process self-replayed them through the existing CUDA call; "
+            "the real checkpoint capture remains a later step."
+            if passed and config["replay"]["mode"] == "standalone-kernel-call"
+            else
             "The installed SGLang hook captured rank-0 MLP boundary records; "
             "real checkpoint capture and loaded-model replay remain real-model steps."
             if passed
-            else "CUDA preflight did not prove the original MLP hook and rank-0 format; inspect the preflight logs."
+            else
+            "CUDA preflight did not prove the selected existing hook, rank-0 "
+            "format, and self-replay; inspect the preflight logs."
         ),
     }
     write_json(run_dir / "result.json", result)

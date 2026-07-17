@@ -1,0 +1,21 @@
+run_id=adapter-001
+contract_revision=5
+contract_data_sha256=f683ea62427279da3c899a3ef0afcfa1d16298b7424154664c7e3fac9b13d938
+active_operator=sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul
+capture_boundary=x+gemm1_limit->output
+capture_rank=0
+max_shapes=3
+parameters_saved=none
+cuda_replay_target=sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul
+p800_replay_target=kunlun_ops.swiglu
+precision_gate=torch.testing.assert_close,atol=0.01,rtol=0.02
+tests=73 passed
+python=3.12.13
+torch=2.6.0
+local_test_device=cpu
+cuda_available=false
+cuda_preflight=NOT_RUN
+p800_baseline=NOT_RUN
+consumes_capture_session=false
+result=PASS
+next_action=run runs/cuda-preflight-r5-001 on the CUDA machine and return the complete Run through a GitHub evidence branch

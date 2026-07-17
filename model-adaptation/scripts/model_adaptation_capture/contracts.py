@@ -11,16 +11,30 @@ CONFIG_SCHEMA = "golden-capture-config/v1"
 STATE_SCHEMA = "golden-capture-state/v2"
 CANDIDATE_SAMPLE_SCHEMA = "capture-candidate/v1"
 CANDIDATE_SERIALIZATION = "candidate-torch-save/v2"
+KERNEL_CALL_SAMPLE_SCHEMA = "kernel-call-sample/v1"
+KERNEL_CALL_SERIALIZATION = "kernel-call-torch-save/v1"
+KERNEL_CALL_STATE_SCHEMA = "kernel-call-capture-state/v1"
+KERNEL_REPLAY_CONFIG_SCHEMA = "kernel-call-replay-config/v1"
+KERNEL_REPLAY_RESULT_SCHEMA = "kernel-call-replay-result/v1"
 REPLAY_CONFIG_SCHEMA = "loaded-model-replay-config/v1"
 REPLAY_RESULT_SCHEMA = "loaded-model-replay-result/v1"
 
 OPERATOR_ID = "Step3p5MLP.forward"
+SWIGLU_CLAMP_OPERATOR_ID = (
+    "sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe."
+    "_swiglu_silu_clamp_mul"
+)
 ACTIVATION_GUARD = "self.limit is not None"
 VALIDATION_TP_RANK = 0
 PLUGIN_ENTRY_POINT = "model_adaptation_capture"
 FORWARD_HOOK_TARGET = "sglang.srt.models.step3p5.Step3p5ForCausalLM.forward"
 MLP_HOOK_TARGET = "sglang.srt.models.step3p5.Step3p5MLP.forward"
+SWIGLU_CLAMP_HOOK_TARGET = SWIGLU_CLAMP_OPERATOR_ID
+KUNLUN_SWIGLU_TARGET = "kunlun_ops.swiglu"
 MODEL_RELATIVE_PATH = "python/sglang/srt/models/step3p5.py"
+SWIGLU_CLAMP_SOURCE_RELATIVE_PATH = (
+    "python/sglang/srt/layers/moe/moe_runner/triton_utils/fused_moe.py"
+)
 FIXED_PRECISION_GATE = {
     "comparator": "torch.testing.assert_close",
     "atol": 0.01,

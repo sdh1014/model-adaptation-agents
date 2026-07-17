@@ -211,14 +211,14 @@ Agent 每次动作前完整读取 Contract 与本区；每次动作结束后立�
 ### Current
 
 - `observed_contract_revision`: `5`
-- `state_revision`: `15`
+- `state_revision`: `16`
 - `status`: `ACTIVE`
 - `phase`: `CUDA_CAPTURE`
-- `execution_site`: `SOURCE`
+- `execution_site`: `CUDA`
 - `active_operator`: `sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul`
-- `last_completed_action`: `kernel_level_scan_review_completed`
-- `last_run`: `runs/scan-006`
-- `next_action`: `实现 Ticket 23 的 _swiglu_silu_clamp_mul capture/replay adapter；本地测试通过前不得运行 CUDA preflight`
+- `last_completed_action`: `kernel_capture_replay_adapter_implemented`
+- `last_run`: `runs/adapter-001`
+- `next_action`: `在 CUDA 机器按 cuda-capture-validation.md 执行 runs/cuda-preflight-r5-001，并通过 GitHub evidence 分支回传整个 Run；不得开始正式 Capture`
 
 规则：`ACTIVE` 时 `next_action` 必须恰好一条；`WAITING` 时必须是一条人工动作；`PASS`、`BLOCKED`、`NEEDS_HUMAN` 时必须为 `none`。
 
@@ -281,6 +281,7 @@ baseline replay 不算修复尝试。每轮修改源码前递增 `attempts_used`
 | Contract approved and tool bindings match | `PASS` | `runs/spec-binding-004/result.json` |
 | target-only eager kernel scan complete | `PASS` | `runs/scan-006/result.json` |
 | gap queue and Demo selection complete | `PASS` | `runs/scan-006/result.json` |
+| selected Kernel Call capture/replay adapter implemented | `PASS` | `runs/adapter-001/result.json` |
 | one CUDA Session and at most three samples per operator | `PENDING` | `null` |
 | CUDA self-replay passed | `PENDING` | `null` |
 | bundle verified on CUDA and P800 | `PENDING` | `null` |
@@ -317,5 +318,6 @@ baseline replay 不算修复尝试。每轮修改源码前递增 `attempts_used`
 | `13` | revision 5 Spec 绑定自检通过 | `runs/spec-binding-004/result.json` |
 | `14` | `scan-005` 初稿比较文本与单图 Kernel Call，暂选 `sgl_kernel.gemma_rmsnorm` | `runs/scan-005/result.json` |
 | `15` | 保留 `scan-005`，以 `scan-006` 纠正视觉调用链并补回已有 `_swiglu_silu_clamp_mul` 与 Kunlun 普通 SwiGLU 间的 clamp 语义缺口；因其无需权重且只有一个输出，改为最小 Demo | `runs/scan-006/result.json` |
+| `16` | Ticket 23 完成 revision 5 Kernel Call adapter；本机只封存 CPU 测试和接口证据，CUDA preflight 由人按 runbook 执行并经 GitHub 回传 | `runs/adapter-001/result.json` |
 
 <!-- AGENT-WRITABLE WORKING STATE: END -->
