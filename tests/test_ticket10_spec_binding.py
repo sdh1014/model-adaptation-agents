@@ -592,55 +592,41 @@ class Ticket10SpecBindingTest(unittest.TestCase):
                 (workspace / "runs" / "wrong-speculative-algorithm").exists()
             )
 
-            wrong_decode_graph_backend = approved_contract()
-            wrong_decode_graph_backend["runtime"][
-                "cuda_graph_backend_decode"
-            ] = "full"
-            write_spec(spec_path, wrong_decode_graph_backend)
-            rejected = run_tool(
-                "--spec",
-                str(spec_path),
-                "--run-dir",
-                str(workspace / "runs" / "decode-graph-enabled"),
-                "--mode",
-                "synthetic",
-                "--case",
-                str(case_path),
+            graph_backend_cases = (
+                (
+                    "cuda_graph_backend_decode",
+                    "full",
+                    "decode-graph-enabled",
+                ),
+                (
+                    "cuda_graph_backend_prefill",
+                    "tc_piecewise",
+                    "prefill-graph-enabled",
+                ),
             )
+            for field, invalid_value, run_name in graph_backend_cases:
+                with self.subTest(field=field):
+                    wrong_graph_backend = approved_contract()
+                    wrong_graph_backend["runtime"][field] = invalid_value
+                    write_spec(spec_path, wrong_graph_backend)
+                    run_dir = workspace / "runs" / run_name
+                    rejected = run_tool(
+                        "--spec",
+                        str(spec_path),
+                        "--run-dir",
+                        str(run_dir),
+                        "--mode",
+                        "synthetic",
+                        "--case",
+                        str(case_path),
+                    )
 
-            self.assertEqual(rejected.returncode, 2)
-            self.assertIn(
-                "runtime.cuda_graph_backend_decode must be 'disabled'",
-                rejected.stderr,
-            )
-            self.assertFalse(
-                (workspace / "runs" / "decode-graph-enabled").exists()
-            )
-
-            wrong_prefill_graph_backend = approved_contract()
-            wrong_prefill_graph_backend["runtime"][
-                "cuda_graph_backend_prefill"
-            ] = "tc_piecewise"
-            write_spec(spec_path, wrong_prefill_graph_backend)
-            rejected = run_tool(
-                "--spec",
-                str(spec_path),
-                "--run-dir",
-                str(workspace / "runs" / "prefill-graph-enabled"),
-                "--mode",
-                "synthetic",
-                "--case",
-                str(case_path),
-            )
-
-            self.assertEqual(rejected.returncode, 2)
-            self.assertIn(
-                "runtime.cuda_graph_backend_prefill must be 'disabled'",
-                rejected.stderr,
-            )
-            self.assertFalse(
-                (workspace / "runs" / "prefill-graph-enabled").exists()
-            )
+                    self.assertEqual(rejected.returncode, 2)
+                    self.assertIn(
+                        f"runtime.{field} must be 'disabled'",
+                        rejected.stderr,
+                    )
+                    self.assertFalse(run_dir.exists())
 
             explicit_attention_backend = approved_contract()
             explicit_attention_backend["runtime"]["attention_backend"] = "fa3"
