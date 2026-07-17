@@ -120,23 +120,22 @@ class Ticket18TargetOnlyEagerScanTest(unittest.TestCase):
                 ).hexdigest()
                 self.assertEqual(actual, expected_digest)
 
-    def test_spec_advances_from_historical_scan_to_revision_5_kernel_adapter(self):
+    def test_spec_preserves_revision_5_kernel_adapter_evidence(self):
         spec = (ROOT / "migration-spec.md").read_text(encoding="utf-8")
         self.assertIn("- `scan_run`: `runs/scan-006`", spec)
-        self.assertIn("- `last_run`: `runs/adapter-001`", spec)
         self.assertIn(
-            "- `last_completed_action`: "
-            "`kernel_capture_replay_adapter_implemented`",
+            "- `active_operator`: "
+            "`sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe."
+            "_swiglu_silu_clamp_mul`",
             spec,
         )
+        self.assertIn(
+            "Ticket 23 完成 revision 5 Kernel Call adapter",
+            spec,
+        )
+        self.assertIn("`runs/adapter-001/result.json`", spec)
         self.assertIn("- `draft_coverage`: `NOT_APPLICABLE`", spec)
         self.assertIn("- `phase`: `CUDA_CAPTURE`", spec)
-        self.assertIn(
-            "`next_action`: `在 CUDA 机器按 cuda-capture-validation.md "
-            "执行 runs/cuda-preflight-r5-001，并通过 GitHub evidence "
-            "分支回传整个 Run；不得开始正式 Capture`",
-            spec,
-        )
 
     def test_all_declared_evidence_files_exist(self):
         self.assertTrue(self.result["scan_complete"])

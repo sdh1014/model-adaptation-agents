@@ -342,7 +342,9 @@ P800 actual output 只在内存中参与比较，不落盘。
 当前代码中的 MLP adapter 是 revision 4 历史实现。revision 5 的
 `_swiglu_silu_clamp_mul` adapter 已实现：采集插件 Hook 原调用，rank 0 collector
 保存最多三个 shape，CUDA self-replay 调 SGLang 原函数，P800 baseline 调
-`kunlun_ops.swiglu`。本机只完成 CPU 测试，没有运行 CUDA/P800。
+`kunlun_ops.swiglu`。revision 5 CUDA preflight 已在 A800 上通过并回传
+`runs/cuda-preflight-r5-001`；它未加载 checkpoint，也未消耗正式 Capture Session。
+P800 修改版 Torch 的样本读回仍待验证。
 
 `scan-006` 是不可变证据，所以其中的 `adapter_status=NOT_IMPLEMENTED` 不会被原地
 更新。实现证据保存在新的 `runs/adapter-001`；Working State 通过
@@ -386,11 +388,9 @@ Contract revision 5
 
 ## 13. 当前下一步
 
-在 CUDA 机器按
-`model-adaptation/references/cuda-capture-validation.md` 执行
-`runs/cuda-preflight-r5-001`。preflight 必须同时证明现有函数 Hook、rank 0
-三 shape 格式、rank 1 不落盘和新进程 CUDA self-replay，并明确
-`consumes_capture_session=false`。完成后把整个 Run 提交到独立 GitHub evidence
-分支，先回传审查，不直接开始正式 CUDA Capture。
+`runs/p800-portability-r5-001` 已证明三个 CUDA BF16 样本可由 P800 修改版 Torch
+读回，固定比较器正常 PASS 并能拒绝有意数值偏差，且没有保存 P800 actual Tensor。
+下一步实现 Ticket 13 的 `handoff_bundle.py` build/verify 与聚焦测试，使正式 Golden
+Run 在 CUDA 端可以生成并校验人工交接包。该工具完成前不开始正式 CUDA Capture。
 
 完整机器可读扫描证据见 `runs/scan-006/result.json`；原始 `scan-005` 保留为历史。

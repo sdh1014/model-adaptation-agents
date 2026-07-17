@@ -1,7 +1,7 @@
 # 确认跨 CUDA/P800 的样本格式与精度比较
 
 Type: task
-Status: ready-for-human
+Status: resolved
 Blocked by: none
 
 ## What to build
@@ -66,3 +66,20 @@ Ticket 20 已完成并解除阻塞。revision 4 在 TP8 模型中只采集和重
 2026-07-17 Ticket 23 完成：revision 5 adapter 已实现并通过本地测试，当前不再受
 代码实现阻塞。下一人工动作是在 CUDA 机器执行 revision 5 preflight 并通过 GitHub
 回传 Run；只有该证据通过后，才继续正式 CUDA Capture 和后续 P800 round-trip。
+
+2026-07-17 CUDA evidence 更新：`runs/cuda-preflight-r5-001` 已通过 GitHub 回传。
+简单校验确认结果绑定 Contract revision 5，rank 0 保存三个 shape，rank 1 未写样本，
+CUDA 新进程 self-replay 三个样本全部通过，且
+`consumes_capture_session=false`。本机没有把 Tensor 复算当作验收证据。本票据仍为
+`ready-for-human`：下一步只在 P800 修改版 Torch 上读回这三份样本，记录 P800
+Torch 版本，并用 Contract 固定的 `torch.testing.assert_close` 形成一次 PASS 和
+一次有意 FAIL 的 `runs/p800-portability-r5-001`。该动作只确认格式与比较器，不执行
+`kunlun_ops.swiglu` baseline，也不开始正式 Capture。
+
+2026-07-17 P800 evidence 完成：`runs/p800-portability-r5-001` 直接基于
+`runs/cuda-preflight-r5-001`，在 P800 修改版 Torch `2.5.1+cu118` 上读回三个 BF16
+样本。三个输入/期望输出的结构、shape、dtype、有限值和固定
+`torch.testing.assert_close(atol=0.01, rtol=0.02)` 全部通过；同 shape、同 dtype 的
+有意数值偏差被正确拒绝并保留最小异常信息。Run 记录 CUDA Torch
+`2.11.0+cu129`、P800 Torch 版本和源样本指针，没有保存 P800 actual Tensor。
+跨 CUDA/P800 格式与比较器的最后一项实机证据已补齐，本票据关闭。
