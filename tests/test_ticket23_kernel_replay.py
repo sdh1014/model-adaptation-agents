@@ -1,3 +1,4 @@
+import hashlib
 import json
 from pathlib import Path
 import subprocess
@@ -77,6 +78,7 @@ def write_golden_run(
         "parameters": {},
         "non_tensor_args": {"gemm1_limit": 7.0},
     }
+    sample_path = samples / f"{shape_id}.pt"
     torch.save(
         {
             "schema": "kernel-call-sample/v1",
@@ -90,7 +92,30 @@ def write_golden_run(
             "non_tensor_args": {"gemm1_limit": 7.0},
             "outputs": {"output": expected},
         },
-        samples / f"{shape_id}.pt",
+        sample_path,
+    )
+    (path / "sample-files.json").write_text(
+        json.dumps(
+            {
+                "schema": "golden-sample-files/v1",
+                "spec_binding": binding,
+                "operator_id": OPERATOR_ID,
+                "files": [
+                    {
+                        "shape_id": shape_id,
+                        "path": f"samples/{shape_id}.pt",
+                        "size": sample_path.stat().st_size,
+                        "sha256": hashlib.sha256(
+                            sample_path.read_bytes()
+                        ).hexdigest(),
+                    }
+                ],
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
     )
     (path / "capture-state.json").write_text(
         json.dumps(
@@ -145,6 +170,9 @@ def replay_config(
         "tensor_parallel_size": 8,
         "tp_rank": 0,
         "precision_gate": PRECISION,
+        "sample_files_sha256": hashlib.sha256(
+            (golden_run / "sample-files.json").read_bytes()
+        ).hexdigest(),
         "allow_active_capture": False,
     }
 
@@ -350,6 +378,26 @@ class Ticket23KernelReplayTest(unittest.TestCase):
                 ),
                 sealed_state,
             )
+
+            sealed_state["self_replay"]["sample_files_sha256"] = "0" * 64
+            (golden_run / "capture-state.json").write_text(
+                json.dumps(sealed_state, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            rejected_run = workspace / "p800-baseline-wrong-samples"
+            with self.assertRaisesRegex(
+                replay_compare.ToolError,
+                "sample_files_sha256",
+            ):
+                replay_compare.run_kernel_replay(
+                    ROOT / "migration-spec.md",
+                    rejected_run,
+                    ROOT / "runs" / "scan-006" / "result.json",
+                    OPERATOR_ID,
+                    golden_run,
+                    execution_site="p800",
+                )
+            self.assertFalse(rejected_run.exists())
 
 
 if __name__ == "__main__":

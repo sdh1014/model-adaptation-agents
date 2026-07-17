@@ -12,6 +12,10 @@ Ticket 23 已实现对应 adapter。preflight 只验证现有 SGLang Hook、rank
 格式和新进程 CUDA self-replay；不加载 checkpoint，不启动正式模型，也不消耗唯一
 CUDA Capture Session。
 
+`runs/cuda-preflight-r5-001` 已验证 adapter-001，但随后 `adapter-002` 增加了样本
+摘要与 replay 证据绑定。当前必须生成新的 `cuda-preflight-r5-002`；旧 Run 保留为
+历史，不能解锁正式 Session。
+
 不要使用 revision 4 的 `Step3p5MLP.forward` 命令，不要在本地 Mac 运行本步骤。
 
 ## 1. 在 CUDA 机器拉取实现
@@ -31,7 +35,7 @@ git status --short
 
 ```bash
 export SGLANG_WORKTREE=/替换为已有的/sglang-0.5.14路径
-export PREFLIGHT_RUN=runs/cuda-preflight-r5-001
+export PREFLIGHT_RUN=runs/cuda-preflight-r5-002
 export OPERATOR_ID=sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul
 ```
 
@@ -77,9 +81,11 @@ python -m unittest \
   tests.test_ticket12_sglang_capture_plugin
 ```
 
-测试必须全部通过。
+测试必须全部通过。其中
+`test_latest_adapter_run_records_source_only_hardening` 会检查
+`runs/adapter-002/result.json` 中的源码 SHA 与当前 checkout 完全一致。
 
-## 3. 执行唯一的 revision 5 preflight
+## 3. 执行当前源码的 revision 5 preflight
 
 ```bash
 python model-adaptation/scripts/capture_golden.py \
@@ -104,6 +110,7 @@ python model-adaptation/scripts/capture_golden.py \
 ```bash
 PREFLIGHT_RUN="$PREFLIGHT_RUN" python - <<'PY'
 import json
+import hashlib
 import os
 from pathlib import Path
 
@@ -117,6 +124,13 @@ rank_filter = json.loads(
     (run / "preflight-rank-filter-summary.json").read_text()
 )
 replay = json.loads((run / "worker-result.json").read_text())
+replay_config = json.loads(
+    (run / "preflight-replay-config.json").read_text()
+)
+sample_files_path = run / "sample-files.json"
+sample_files_sha256 = hashlib.sha256(
+    sample_files_path.read_bytes()
+).hexdigest()
 operator = (
     "sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe."
     "_swiglu_silu_clamp_mul"
@@ -142,6 +156,8 @@ assert replay["passed"] is True
 assert replay["invocation_target"] == operator
 assert replay["checked_shape_count"] == 3
 assert replay["actual_tensors_saved"] is False
+assert replay["sample_files_sha256"] == sample_files_sha256
+assert replay_config["sample_files_sha256"] == sample_files_sha256
 
 samples = sorted((run / "samples").glob("*.pt"))
 assert len(samples) == 3
@@ -154,7 +170,7 @@ for path in samples:
     assert payload["inputs"]["x"].dtype == torch.bfloat16
     assert payload["outputs"]["output"].dtype == torch.bfloat16
 
-print("CUDA revision 5 preflight: PASS")
+print("CUDA revision 5 adapter-002 preflight: PASS")
 PY
 ```
 
@@ -165,29 +181,30 @@ PY
 preflight 通过或失败都创建独立 evidence 分支。若分支名已经存在，把末尾编号加一：
 
 ```bash
-git switch -c evidence/cuda-preflight-r5-001
+git switch -c evidence/cuda-preflight-r5-002
 git add "$PREFLIGHT_RUN"
-git commit -m "evidence: add revision 5 CUDA preflight"
-git push -u origin evidence/cuda-preflight-r5-001
+git commit -m "evidence: add adapter-002 CUDA preflight"
+git push -u origin evidence/cuda-preflight-r5-002
 ```
 
 回传以下信息：
 
 ```text
-evidence branch: evidence/cuda-preflight-r5-001
-preflight run: runs/cuda-preflight-r5-001
+evidence branch: evidence/cuda-preflight-r5-002
+preflight run: runs/cuda-preflight-r5-002
 result: PASS 或 FAIL
 ```
 
 整个 Run 都要提交，其中包括三份 `.pt` 样本、`result.json`、`capture-state.json`、
-三份 config、三份 log、两个 capture summary 和 worker result。preflight 样本很小，
-不需要把 checkpoint 提交到 GitHub。
+三份 config、三份 log、两个 capture summary、`sample-files.json` 和 worker
+result。preflight 样本很小，不需要把 checkpoint 提交到 GitHub。
 
 推送完成后停止。不要继续正式模型 Capture；先让当前实现会话检查 evidence。
 
 ## preflight 通过后的正式 Session 边界
 
-正式 Session 仍需下一步明确批准。届时使用固定 checkpoint、TP8、BF16 和 eager，
+只有 `cuda-preflight-r5-002` 回传并通过当前源码校验后，正式 Session 才能继续。
+届时使用固定 checkpoint、TP8、BF16 和 eager，
 不传量化、投机解码、MTP、attention backend 或 MoE backend 参数。采集插件只增加
 环境变量，不改变两端模型启动参数。真实文本请求触发第 43、44 层后，保存最多三个
 rank 0 shape，并通过 `replay_compare.py --mode kernel-replay

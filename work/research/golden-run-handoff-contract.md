@@ -4,7 +4,9 @@
 
 最小 Demo 仍然需要保存输入 Tensor 和 CUDA 期望输出 Tensor，否则 P800 无法离线重放，也无法区分“实现错误”和“输入不同”。但不需要把所有相关对象都保存下来：权重不保存；`epsilon`、`limit` 这类真正参与算子语义的小型非 Tensor 参数按原值写入样本元数据；内部中间 Tensor 默认不采集。
 
-Golden Run 的职责是回答三件事：采到了哪一次真实调用、这些字节能否在一个新 CUDA 进程中重放、交接到 P800 后文件是否仍然完整。它不负责决定 Tensor 底层序列化库，也不绑定某个比较 API。
+Golden Run 的职责是回答三件事：采到了哪一次真实调用、这些字节能否在一个新 CUDA
+进程中重放、交接到 P800 后文件是否仍然完整。它不负责决定 Tensor 底层序列化库；
+比较接口已经由后续 Contract revision 5 固定为 `torch.testing.assert_close`。
 
 以下结论基于 SGLang `kunlun-0.5.14@546ad8c682392922792bbbfe53a8bf575545f118`。文中行号均对应这个固定提交。
 
@@ -16,6 +18,7 @@ Golden Run 的职责是回答三件事：采到了哪一次真实调用、这些
 runs/<golden-run-id>/
 ├── result.json
 ├── capture.log
+├── sample-files.json
 ├── samples/
 │   └── <sample-id>/
 │       ├── metadata.json
@@ -80,7 +83,14 @@ Demo 只接受可由这些内容独立重建的稠密 Tensor 边界。如果正�
 
 ## CUDA self-replay
 
-Golden Sample 只有通过 self-replay 才算有效。self-replay 必须由同一次 CUDA Capture Session 内启动的全新进程执行，而不是复用打桩时还在内存中的 Tensor：
+Golden Sample 只有通过 self-replay 才算有效。停止采集后、启动 self-replay 前，
+先把全部样本文件的相对路径、字节数和 SHA-256 写入 `sample-files.json`；
+同时把这次记录动作保存为独立的不可变 Run。Handoff build 必须重算样本字节、
+校验该 Run 中的 sidecar SHA，并把 record result 与 sidecar 的摘要写入 manifest，
+避免已验证样本随后被替换。self-replay config、worker result、Golden state 和
+wrapper result 必须携带同一个 sidecar SHA，避免换入另一份 shape 相同但字节不同的
+replay 目录。self-replay 必须由同一次 CUDA Capture Session 内启动的全新进程执行，
+而不是复用打桩时还在内存中的 Tensor：
 
 1. 从落盘文件读取并重建输入容器、Tensor dtype/shape/layout/stride 和非 Tensor 参数；
 2. 通过记录的 Semantic Operator 入口执行一次；
@@ -88,7 +98,11 @@ Golden Sample 只有通过 self-replay 才算有效。self-replay 必须由同�
 4. 使用 Contract 中固定的 Precision Gate 比较新输出与已保存的 CUDA 期望输出；
 5. 每个已保留样本都通过后，Golden Run 才可成功；命令、退出码、逐样本结果和日志写入 `self-replay/`。
 
-比较器在这里是一项行为要求，不指定 `torch.testing`、其他 Torch API 或 NumPy。当前 SGLang 打桩在 active CUDA Graph capture 时会跳过 Tensor dump，因此采集命令必须明确其 CUDA Graph 设置，并在允许安全落盘的边界采集；不能在 active graph capture 中强行复制 Tensor。
+当前 Contract 已把比较器固定为
+`torch.testing.assert_close(atol=0.01, rtol=0.02)`，且用户已在 P800 修改版 Torch
+上验证接口可用。当前 SGLang 打桩在 active CUDA Graph capture 时会跳过 Tensor
+dump，因此采集命令必须明确其 CUDA Graph 设置，并在允许安全落盘的边界采集；
+不能在 active graph capture 中强行复制 Tensor。
 
 ## 默认禁止采集的内容
 
@@ -124,11 +138,11 @@ Spec 只记录 `manifest_path`，不记录 `manifest_digest`。如果 manifest �
 ## 本票不做的决定
 
 - Tensor 使用 `torch.save`、safetensors、NumPy 还是其他格式；
-- 比较器最终调用 `torch.testing`、其他 Torch API 还是 NumPy；
 - Handoff Bundle 是否再压缩，以及压缩格式；
 - 最终 CLI 或 Skill 的命令名称。
 
-这些实现选择不能改变上述逻辑数据和校验要求。特别是昆仑修改版 Torch 是否支持某个比较 API，必须等真实 P800 环境验证后再决定。
+这些实现选择不能改变上述逻辑数据和校验要求。比较接口是否可用已经由 P800
+实机验证，不再是本轮未决项。
 
 ## 源码依据
 

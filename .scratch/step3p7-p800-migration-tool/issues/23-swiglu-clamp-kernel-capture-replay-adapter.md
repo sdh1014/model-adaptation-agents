@@ -53,6 +53,11 @@ Kunlun MoE 路径已有普通 SwiGLU，但没有读取 clamp limit。
   self-replay worker；
 - 本机只完成 CPU 测试，没有运行 CUDA/P800，也没有消耗正式 Capture Session。
 
-实现证据封存在 `runs/adapter-001`。当前人工动作是按
-`model-adaptation/references/cuda-capture-validation.md` 在 CUDA 机器执行
-`runs/cuda-preflight-r5-001`，并通过 GitHub evidence 分支回传整个 Run。
+初始实现证据封存在 `runs/adapter-001`。随后
+`runs/cuda-preflight-r5-001` 已由 CUDA 机器回传，
+`runs/p800-portability-r5-001` 也已验证跨端样本读回和固定比较器。
+
+Ticket 13 code review 后，replay config、worker result、Golden state 和 wrapper
+result 增加同一 `sample-files.json` SHA-256 绑定。当前源码摘要和本机元数据测试
+封存在 `runs/adapter-002`；该 Run 没有重跑 CUDA/P800。必须先为当前源码重新执行
+不消耗正式 Session 的 preflight，才能开始 Ticket 15 的唯一 CUDA Session。

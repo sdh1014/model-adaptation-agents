@@ -28,7 +28,7 @@ OPERATOR_ID = (
 CUDA_SOURCE = (
     "python/sglang/srt/layers/moe/moe_runner/triton_utils/fused_moe.py"
 )
-ADAPTER_RUN = ROOT / "runs" / "adapter-001"
+ADAPTER_RUN = ROOT / "runs" / "adapter-002"
 
 
 class Ticket23SwiGLUClampAdapterTest(unittest.TestCase):
@@ -122,7 +122,7 @@ class Ticket23SwiGLUClampAdapterTest(unittest.TestCase):
 
             self.assertFalse(run_dir.exists())
 
-    def test_adapter_run_records_local_validation_without_cuda_evidence(
+    def test_latest_adapter_run_records_source_only_hardening(
         self,
     ) -> None:
         result = json.loads(
@@ -130,16 +130,31 @@ class Ticket23SwiGLUClampAdapterTest(unittest.TestCase):
         )
 
         self.assertTrue(result["passed"])
+        self.assertEqual(
+            result["action"],
+            "harden_kernel_replay_evidence_binding",
+        )
         self.assertEqual(result["adapter_status"], "IMPLEMENTED")
         self.assertEqual(result["active_operator"], OPERATOR_ID)
+        self.assertEqual(result["supersedes"], "runs/adapter-001")
         self.assertEqual(
             result["runtime_validation"],
             {
                 "consumes_capture_session": False,
                 "cuda_available": False,
-                "cuda_preflight": "NOT_RUN",
-                "local_test_device": "cpu",
-                "p800_baseline": "NOT_RUN",
+                "cuda_preflight": "NOT_RERUN_FOR_THIS_SOURCE_REVISION",
+                "local_test_device": "none",
+                "p800_baseline": "NOT_RERUN_FOR_THIS_SOURCE_REVISION",
+            },
+        )
+        self.assertEqual(
+            result["sample_binding"],
+            {
+                "recorded_before_self_replay": True,
+                "replay_config_bound": True,
+                "worker_result_bound": True,
+                "golden_state_bound": True,
+                "handoff_manifest_bound": True,
             },
         )
         self.assertEqual(result["capture_boundary"]["parameters"], [])
@@ -274,6 +289,9 @@ class Ticket23SwiGLUClampAdapterTest(unittest.TestCase):
                         encoding="utf-8",
                     )
                 elif "model_adaptation_capture.kernel_replay" in command:
+                    replay_config = json.loads(
+                        config_path.read_text(encoding="utf-8")
+                    )
                     (run_dir / "worker-result.json").write_text(
                         json.dumps(
                             {
@@ -285,6 +303,9 @@ class Ticket23SwiGLUClampAdapterTest(unittest.TestCase):
                                 "tp_rank": 0,
                                 "tensor_parallel_size": 8,
                                 "precision_gate": config["precision_gate"],
+                                "sample_files_sha256": replay_config[
+                                    "sample_files_sha256"
+                                ],
                                 "passed": True,
                                 "checked_shape_count": 3,
                                 "failed_shape_count": 0,

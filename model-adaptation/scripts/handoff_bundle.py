@@ -1,19 +1,36 @@
 #!/usr/bin/env python3
-"""Build or verify a human-copied Handoff Bundle."""
+"""Record Golden files, then build or verify a human-copied Handoff Bundle."""
 
 import argparse
 import hashlib
 import json
+import math
 from pathlib import Path, PurePosixPath
 import shutil
 import sys
 from typing import Any, Dict
 
-from _lib.spec_contract import SpecContractError, load_spec_binding
-from model_adaptation_capture.contracts import KERNEL_CALL_STATE_SCHEMA
+from _lib.kernel_evidence import (
+    KernelEvidenceError,
+    validate_kernel_worker_result,
+    worker_result_sha256,
+)
+from _lib.spec_contract import (
+    SpecContractError,
+    load_contract_data,
+    load_spec_binding,
+)
+from model_adaptation_capture.contracts import (
+    KERNEL_CALL_STATE_SCHEMA,
+    KERNEL_REPLAY_CONFIG_SCHEMA,
+    SWIGLU_CLAMP_OPERATOR_ID,
+    checkpoint_metadata,
+    shape_id_for,
+)
 
 
 MANIFEST_SCHEMA = "handoff-manifest/v1"
+SAMPLE_FILES_SCHEMA = "golden-sample-files/v1"
 
 
 class ToolError(RuntimeError):
@@ -79,29 +96,18 @@ def regular_files(root: Path) -> list[Path]:
     return files
 
 
-def validate_golden_run(golden_run: Path, binding: Dict[str, Any]) -> None:
-    state = read_json_object(
-        golden_run / "capture-state.json",
-        "Golden capture state",
-    )
-    if state.get("schema") != KERNEL_CALL_STATE_SCHEMA:
-        raise ToolError("Golden capture state schema has drifted")
-    if state.get("spec_binding") != binding:
-        raise ToolError("Golden capture state spec_binding does not match Contract Data")
-    if state.get("status") != "SEALED" or state.get("capture_closed") is not True:
-        raise ToolError("Golden Run must be SEALED and capture_closed")
-    self_replay = state.get("self_replay")
-    if not isinstance(self_replay, dict) or self_replay.get("passed") is not True:
-        raise ToolError("Golden Run self-replay has not passed")
-    samples = state.get("samples")
-    if not isinstance(samples, list) or not 1 <= len(samples) <= 3:
-        raise ToolError("Golden Run must contain one to three samples")
-    if state.get("saved_shape_count") != len(samples):
-        raise ToolError("Golden Run saved_shape_count has drifted")
-    if self_replay.get("checked_shape_count") != len(samples):
-        raise ToolError("Golden Run self-replay did not check every sample")
-    if not is_sha256(self_replay.get("worker_result_sha256")):
-        raise ToolError("Golden Run self_replay worker_result_sha256 is invalid")
+def require_regular_file(path: Path, label: str) -> None:
+    if path.is_symlink() or not path.is_file():
+        raise ToolError(f"{label} must be one regular file")
+
+
+def sample_file_records(
+    golden_run: Path,
+    samples: Any,
+) -> list[Dict[str, Any]]:
+    if not isinstance(samples, list) or not samples:
+        raise ToolError("Golden Run does not contain sample metadata")
+    records = []
     for sample in samples:
         if not isinstance(sample, dict):
             raise ToolError("Golden sample entry must be one object")
@@ -111,13 +117,434 @@ def validate_golden_run(golden_run: Path, binding: Dict[str, Any]) -> None:
             raise ToolError("Golden sample shape_id is invalid")
         if sample.get("file") != expected_file:
             raise ToolError("Golden sample path has drifted")
-        sample_path = (golden_run / expected_file).resolve()
+        unresolved_sample_path = golden_run / expected_file
+        sample_path = unresolved_sample_path.resolve()
         if (
-            not sample_path.is_relative_to(golden_run.resolve())
+            unresolved_sample_path.is_symlink()
+            or not sample_path.is_relative_to(golden_run.resolve())
             or not sample_path.is_file()
         ):
             raise ToolError("Golden sample is missing or escapes its Run")
-    regular_files(golden_run)
+        records.append(
+            {
+                "shape_id": shape_id,
+                "path": expected_file,
+                "size": sample_path.stat().st_size,
+                "sha256": file_sha256(sample_path),
+            }
+        )
+    return records
+
+
+def run_record_samples(
+    spec_path: Path,
+    run_dir: Path,
+    golden_run: Path,
+) -> None:
+    contract = load_contract_data(spec_path)
+    binding = load_spec_binding(spec_path).as_result_dict()
+    golden_run = golden_run.resolve()
+    if paths_overlap(run_dir, golden_run):
+        raise ToolError(
+            "record-samples run directory and Golden Run must not overlap"
+        )
+    state = read_json_object(
+        golden_run / "capture-state.json",
+        "Golden capture state",
+    )
+    try:
+        checkpoint = checkpoint_metadata(
+            contract["checkpoint"]["id"],
+            contract["checkpoint"]["config_digest"],
+        )
+    except (KeyError, TypeError, ValueError) as error:
+        raise ToolError("Contract checkpoint metadata is invalid") from error
+    checks = {
+        "schema": KERNEL_CALL_STATE_SCHEMA,
+        "spec_binding": binding,
+        "operator_id": SWIGLU_CLAMP_OPERATOR_ID,
+        "tp_rank": contract["sample_policy"]["capture_tp_rank"],
+        "tensor_parallel_size": contract["runtime"]["tensor_parallel_size"],
+        "checkpoint": checkpoint,
+        "loaded_checkpoint": {
+            "model_path": checkpoint["model_path"],
+            "revision": checkpoint["revision"],
+        },
+        "status": "ACTIVE",
+        "capture_closed": False,
+    }
+    for field, expected in checks.items():
+        if state.get(field) != expected:
+            raise ToolError(
+                f"record-samples Golden capture state {field} has drifted"
+            )
+    if "self_replay" in state or (golden_run / "self-replay").exists():
+        raise ToolError("record-samples must run before CUDA self-replay")
+    samples = state.get("samples")
+    max_shapes = contract["limits"]["max_shapes_per_operator"]
+    if not isinstance(samples, list) or not 1 <= len(samples) <= max_shapes:
+        raise ToolError("Golden Run must contain one to three samples")
+    if state.get("saved_shape_count") != len(samples):
+        raise ToolError("Golden Run saved_shape_count has drifted")
+    records = sample_file_records(golden_run, samples)
+    evidence_path = golden_run / "sample-files.json"
+    if evidence_path.exists() or evidence_path.is_symlink():
+        raise ToolError("Golden Run sample-files.json already exists")
+
+    evidence = {
+        "schema": SAMPLE_FILES_SCHEMA,
+        "spec_binding": binding,
+        "operator_id": SWIGLU_CLAMP_OPERATOR_ID,
+        "files": records,
+    }
+    create_run_dir(run_dir)
+    temporary = golden_run / ".sample-files.json.tmp"
+    if temporary.exists() or temporary.is_symlink():
+        raise ToolError("temporary sample file evidence already exists")
+    write_json(temporary, evidence)
+    temporary.replace(evidence_path)
+    evidence_digest = file_sha256(evidence_path)
+
+    result = {
+        "tool": "handoff_bundle.py",
+        "action": "record-samples",
+        "spec_binding": binding,
+        "operator_id": SWIGLU_CLAMP_OPERATOR_ID,
+        "passed": True,
+        "actual_tensors_saved": False,
+        "golden_run": str(golden_run),
+        "golden_status": "ACTIVE",
+        "recorded_before_self_replay": True,
+        "sample_file_count": len(records),
+        "sample_files_path": str(evidence_path),
+        "sample_files_sha256": evidence_digest,
+        "evidence": ["handoff.log"],
+        "summary": "Golden Sample file bytes were recorded before CUDA self-replay.",
+    }
+    write_json(run_dir / "result.json", result)
+    (run_dir / "handoff.log").write_text(
+        "\n".join(
+            [
+                "action=record-samples",
+                "passed=true",
+                f"sample_file_count={len(records)}",
+                f"sample_files_sha256={evidence_digest}",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+
+def validate_golden_run(
+    golden_run: Path,
+    binding: Dict[str, Any],
+    contract: Dict[str, Any],
+) -> str:
+    files = regular_files(golden_run)
+    state = read_json_object(
+        golden_run / "capture-state.json",
+        "Golden capture state",
+    )
+    try:
+        checkpoint = checkpoint_metadata(
+            contract["checkpoint"]["id"],
+            contract["checkpoint"]["config_digest"],
+        )
+    except (KeyError, TypeError, ValueError) as error:
+        raise ToolError("Contract checkpoint metadata is invalid") from error
+    checks = {
+        "schema": KERNEL_CALL_STATE_SCHEMA,
+        "spec_binding": binding,
+        "operator_id": SWIGLU_CLAMP_OPERATOR_ID,
+        "tp_rank": contract["sample_policy"]["capture_tp_rank"],
+        "tensor_parallel_size": contract["runtime"]["tensor_parallel_size"],
+        "checkpoint": checkpoint,
+        "loaded_checkpoint": {
+            "model_path": checkpoint["model_path"],
+            "revision": checkpoint["revision"],
+        },
+    }
+    for field, expected in checks.items():
+        if state.get(field) != expected:
+            raise ToolError(f"Golden capture state {field} has drifted")
+    if state.get("status") != "SEALED" or state.get("capture_closed") is not True:
+        raise ToolError("Golden Run must be SEALED and capture_closed")
+    self_replay = state.get("self_replay")
+    if not isinstance(self_replay, dict) or self_replay.get("passed") is not True:
+        raise ToolError("Golden Run self-replay has not passed")
+    samples = state.get("samples")
+    max_shapes = contract["limits"]["max_shapes_per_operator"]
+    if not isinstance(samples, list) or not 1 <= len(samples) <= max_shapes:
+        raise ToolError("Golden Run must contain one to three samples")
+    if state.get("saved_shape_count") != len(samples):
+        raise ToolError("Golden Run saved_shape_count has drifted")
+    if self_replay.get("checked_shape_count") != len(samples):
+        raise ToolError("Golden Run self-replay did not check every sample")
+    recorded_worker_digest = self_replay.get("worker_result_sha256")
+    if not is_sha256(recorded_worker_digest):
+        raise ToolError("Golden Run self_replay worker_result_sha256 is invalid")
+    shape_ids = []
+    for sample in samples:
+        if not isinstance(sample, dict):
+            raise ToolError("Golden sample entry must be one object")
+        shape_id = sample.get("shape_id")
+        signature = sample.get("signature")
+        expected_file = f"samples/{shape_id}.pt"
+        if (
+            not isinstance(shape_id, str)
+            or not shape_id
+            or not isinstance(signature, dict)
+        ):
+            raise ToolError("Golden sample shape_id is invalid")
+        signature_checks = {
+            "operator_id": SWIGLU_CLAMP_OPERATOR_ID,
+            "model_path": "target",
+            "tensor_parallel_size": contract["runtime"]["tensor_parallel_size"],
+            "tp_rank": contract["sample_policy"]["capture_tp_rank"],
+            "parameters": {},
+        }
+        for field, expected in signature_checks.items():
+            if signature.get(field) != expected:
+                raise ToolError(
+                    f"Golden sample signature {field} has drifted"
+                )
+        try:
+            input_shape = signature["inputs"]["x"]["shape"]
+            expected_shape_id = shape_id_for(input_shape)
+        except (KeyError, TypeError, ValueError) as error:
+            raise ToolError("Golden sample input shape metadata has drifted") from error
+        if expected_shape_id != shape_id or shape_id in shape_ids:
+            raise ToolError("Golden sample shape digest has drifted")
+        limit = signature.get("non_tensor_args", {}).get("gemm1_limit")
+        if (
+            isinstance(limit, bool)
+            or not isinstance(limit, (int, float))
+            or not math.isfinite(limit)
+        ):
+            raise ToolError("Golden sample gemm1_limit has drifted")
+        if sample.get("file") != expected_file:
+            raise ToolError("Golden sample path has drifted")
+        sample_path = (golden_run / expected_file).resolve()
+        if (
+            not sample_path.is_relative_to(golden_run.resolve())
+            or sample_path.is_symlink()
+            or not sample_path.is_file()
+        ):
+            raise ToolError("Golden sample is missing or escapes its Run")
+        shape_ids.append(shape_id)
+
+    current_sample_files = sample_file_records(golden_run, samples)
+    expected_sample_file_evidence = {
+        "schema": SAMPLE_FILES_SCHEMA,
+        "spec_binding": binding,
+        "operator_id": SWIGLU_CLAMP_OPERATOR_ID,
+        "files": current_sample_files,
+    }
+    recorded_sample_files = read_json_object(
+        golden_run / "sample-files.json",
+        "Golden sample file evidence",
+    )
+    if recorded_sample_files != expected_sample_file_evidence:
+        raise ToolError(
+            "Golden sample bytes do not match sample-files.json"
+        )
+    sample_files_digest = file_sha256(
+        golden_run / "sample-files.json"
+    )
+    if self_replay.get("sample_files_sha256") != sample_files_digest:
+        raise ToolError(
+            "Golden Run self_replay does not bind sample-files.json"
+        )
+
+    capture_config = read_json_object(
+        golden_run / "capture-config.json",
+        "Golden capture config",
+    )
+    config_checks = {
+        "spec_binding": binding,
+        "operator_id": SWIGLU_CLAMP_OPERATOR_ID,
+        "checkpoint": checkpoint,
+        "tensor_parallel_size": contract["runtime"]["tensor_parallel_size"],
+        "tp_rank": contract["sample_policy"]["capture_tp_rank"],
+        "precision_gate": contract["precision_gate"],
+    }
+    for field, expected in config_checks.items():
+        if capture_config.get(field) != expected:
+            raise ToolError(f"Golden capture config {field} has drifted")
+
+    capture_result = read_json_object(
+        golden_run / "result.json",
+        "Golden capture result",
+    )
+    result_checks = {
+        "tool": "capture_golden.py",
+        "action": "prepare",
+        "spec_binding": binding,
+        "operator_id": SWIGLU_CLAMP_OPERATOR_ID,
+        "passed": True,
+    }
+    for field, expected in result_checks.items():
+        if capture_result.get(field) != expected:
+            raise ToolError(f"Golden capture result {field} has drifted")
+    require_regular_file(golden_run / "capture.log", "Golden capture log")
+
+    replay_dir = golden_run / "self-replay"
+    replay_config = read_json_object(
+        replay_dir / "replay-config.json",
+        "CUDA self-replay config",
+    )
+    replay_config_checks = {
+        "schema": KERNEL_REPLAY_CONFIG_SCHEMA,
+        "spec_binding": binding,
+        "operator_id": SWIGLU_CLAMP_OPERATOR_ID,
+        "execution_site": "cuda",
+        "invocation_target": SWIGLU_CLAMP_OPERATOR_ID,
+        "tensor_parallel_size": contract["runtime"]["tensor_parallel_size"],
+        "tp_rank": contract["sample_policy"]["capture_tp_rank"],
+        "precision_gate": contract["precision_gate"],
+        "sample_files_sha256": sample_files_digest,
+        "allow_active_capture": True,
+    }
+    for field, expected in replay_config_checks.items():
+        if replay_config.get(field) != expected:
+            raise ToolError(f"CUDA self-replay config {field} has drifted")
+
+    worker_result = read_json_object(
+        replay_dir / "worker-result.json",
+        "CUDA self-replay worker result",
+    )
+    recomputed_worker_digest = worker_result_sha256(worker_result)
+    if recomputed_worker_digest != recorded_worker_digest:
+        raise ToolError(
+            "Golden Run self_replay worker_result_sha256 does not match "
+            "worker-result.json"
+        )
+    try:
+        validate_kernel_worker_result(
+            worker_result,
+            spec_binding=binding,
+            operator_id=SWIGLU_CLAMP_OPERATOR_ID,
+            execution_site="cuda",
+            invocation_target=SWIGLU_CLAMP_OPERATOR_ID,
+            tp_rank=contract["sample_policy"]["capture_tp_rank"],
+            tensor_parallel_size=contract["runtime"]["tensor_parallel_size"],
+            precision_gate=contract["precision_gate"],
+            expected_shape_ids=shape_ids,
+            sample_files_sha256=sample_files_digest,
+        )
+    except KernelEvidenceError as error:
+        raise ToolError(str(error)) from error
+    if worker_result.get("passed") is not True:
+        raise ToolError("CUDA self-replay worker did not pass")
+
+    replay_result = read_json_object(
+        replay_dir / "result.json",
+        "CUDA self-replay result",
+    )
+    replay_result_checks = {
+        "tool": "replay_compare.py",
+        "action": "kernel-replay",
+        "spec_binding": binding,
+        "operator_id": SWIGLU_CLAMP_OPERATOR_ID,
+        "execution_site": "cuda",
+        "invocation_target": SWIGLU_CLAMP_OPERATOR_ID,
+        "passed": True,
+        "checked_shape_count": len(shape_ids),
+        "failed_shape_count": 0,
+        "precision_gate": contract["precision_gate"],
+        "sample_files_sha256": sample_files_digest,
+        "actual_tensors_saved": False,
+        "evidence": [
+            "replay-config.json",
+            "worker-result.json",
+            "replay.log",
+        ],
+    }
+    for field, expected in replay_result_checks.items():
+        if replay_result.get(field) != expected:
+            raise ToolError(f"CUDA self-replay result {field} has drifted")
+    require_regular_file(replay_dir / "replay.log", "CUDA self-replay log")
+
+    allowed_files = {
+        "capture-config.json",
+        "capture-state.json",
+        "capture.log",
+        "result.json",
+        "sample-files.json",
+        "self-replay/replay-config.json",
+        "self-replay/replay.log",
+        "self-replay/result.json",
+        "self-replay/worker-result.json",
+        *(f"samples/{shape_id}.pt" for shape_id in shape_ids),
+    }
+    actual_files = {path.relative_to(golden_run).as_posix() for path in files}
+    unexpected = sorted(actual_files - allowed_files)
+    if unexpected:
+        raise ToolError(
+            "Golden Run file is not permitted: " + ", ".join(unexpected)
+        )
+    missing = sorted(allowed_files - actual_files)
+    if missing:
+        raise ToolError("Golden Run required file is missing: " + ", ".join(missing))
+    return SWIGLU_CLAMP_OPERATOR_ID
+
+
+def validate_sample_record_result(
+    result_path: Path,
+    *,
+    golden_run: Path,
+    binding: Dict[str, Any],
+) -> tuple[str, str]:
+    if result_path.is_symlink():
+        raise ToolError("sample record result must not be a symbolic link")
+    result_path = result_path.resolve()
+    if result_path.name != "result.json":
+        raise ToolError("sample record evidence must point to a Run result.json")
+    require_regular_file(result_path, "sample record result")
+    record_run = result_path.parent
+    record_files = {
+        path.relative_to(record_run).as_posix()
+        for path in regular_files(record_run)
+    }
+    if record_files != {"result.json", "handoff.log"}:
+        raise ToolError(
+            "sample record Run must contain only result.json and handoff.log"
+        )
+    result = read_json_object(result_path, "sample record result")
+    sample_files_path = golden_run / "sample-files.json"
+    sample_files = read_json_object(
+        sample_files_path,
+        "Golden sample file evidence",
+    )
+    sample_file_entries = sample_files.get("files")
+    checks = {
+        "tool": "handoff_bundle.py",
+        "action": "record-samples",
+        "spec_binding": binding,
+        "operator_id": SWIGLU_CLAMP_OPERATOR_ID,
+        "passed": True,
+        "actual_tensors_saved": False,
+        "golden_run": str(golden_run),
+        "golden_status": "ACTIVE",
+        "recorded_before_self_replay": True,
+        "sample_file_count": (
+            len(sample_file_entries)
+            if isinstance(sample_file_entries, list)
+            else None
+        ),
+        "sample_files_path": str(sample_files_path),
+        "sample_files_sha256": file_sha256(sample_files_path),
+        "evidence": ["handoff.log"],
+    }
+    for field, expected in checks.items():
+        if result.get(field) != expected:
+            if field == "sample_files_sha256":
+                raise ToolError(
+                    "record-samples result does not match sample-files.json"
+                )
+            raise ToolError(f"sample record result {field} has drifted")
+    return file_sha256(result_path), checks["sample_files_sha256"]
 
 
 def manifest_entries(bundle_dir: Path) -> list[Dict[str, Any]]:
@@ -150,7 +577,9 @@ def run_build(
     run_dir: Path,
     golden_run: Path,
     bundle_spec: Path,
+    sample_record_result: Path,
 ) -> None:
+    contract = load_contract_data(spec_path)
     binding = load_spec_binding(spec_path).as_result_dict()
     bundle_binding = load_spec_binding(bundle_spec).as_result_dict()
     if bundle_binding != binding:
@@ -158,7 +587,21 @@ def run_build(
     if bundle_spec.is_symlink() or not bundle_spec.is_file():
         raise ToolError("bundle Spec must be one regular file")
     golden_run = golden_run.resolve()
-    validate_golden_run(golden_run, binding)
+    if paths_overlap(run_dir, golden_run):
+        raise ToolError("build run directory and Golden Run must not overlap")
+    if paths_overlap(run_dir, sample_record_result.resolve().parent):
+        raise ToolError(
+            "build run directory and sample record Run must not overlap"
+        )
+    operator_id = validate_golden_run(golden_run, binding, contract)
+    (
+        sample_record_result_digest,
+        sample_files_digest,
+    ) = validate_sample_record_result(
+        sample_record_result,
+        golden_run=golden_run,
+        binding=binding,
+    )
 
     create_run_dir(run_dir)
     bundle_dir = run_dir / "bundle"
@@ -171,7 +614,10 @@ def run_build(
     manifest = {
         "schema": MANIFEST_SCHEMA,
         "spec_binding": binding,
+        "operator_id": operator_id,
         "golden_run": f"runs/{golden_run.name}",
+        "sample_record_result_sha256": sample_record_result_digest,
+        "sample_files_sha256": sample_files_digest,
         "files": manifest_entries(bundle_dir),
     }
     manifest_path = bundle_dir / "manifest.json"
@@ -187,6 +633,8 @@ def run_build(
         "manifest_sha256": manifest_digest,
         "file_count": len(manifest["files"]),
         "golden_run": manifest["golden_run"],
+        "sample_record_result_sha256": sample_record_result_digest,
+        "sample_files_sha256": sample_files_digest,
         "evidence": ["bundle/manifest.json", "handoff.log"],
         "summary": "Handoff Bundle and integrity manifest were built.",
     }
@@ -224,21 +672,41 @@ def validate_manifest_entry(entry: Any) -> str:
     return relative
 
 
-def validate_bundle(bundle_dir: Path, binding: Dict[str, Any]) -> tuple[int, str]:
+def validate_bundle(
+    bundle_dir: Path,
+    binding: Dict[str, Any],
+    contract: Dict[str, Any],
+) -> tuple[int, str]:
     manifest_path = bundle_dir / "manifest.json"
     manifest = read_json_object(manifest_path, "Handoff manifest")
     if manifest.get("schema") != MANIFEST_SCHEMA:
         raise ToolError("Handoff manifest schema has drifted")
     if manifest.get("spec_binding") != binding:
         raise ToolError("Handoff manifest spec_binding does not match Contract Data")
+    if manifest.get("operator_id") != SWIGLU_CLAMP_OPERATOR_ID:
+        raise ToolError("Handoff manifest operator_id has drifted")
+    for field in (
+        "sample_record_result_sha256",
+        "sample_files_sha256",
+    ):
+        if not is_sha256(manifest.get(field)):
+            raise ToolError(f"Handoff manifest {field} is invalid")
     bundled_spec = bundle_dir / "migration-spec.md"
     if load_spec_binding(bundled_spec).as_result_dict() != binding:
         raise ToolError("bundled Migration Spec does not match Contract Data")
     golden_relative = manifest.get("golden_run")
+    golden_path = (
+        PurePosixPath(golden_relative)
+        if isinstance(golden_relative, str)
+        else None
+    )
     if (
-        not isinstance(golden_relative, str)
-        or not golden_relative.startswith("runs/")
-        or len(PurePosixPath(golden_relative).parts) != 2
+        golden_path is None
+        or golden_path.is_absolute()
+        or len(golden_path.parts) != 2
+        or golden_path.parts[0] != "runs"
+        or golden_path.parts[1] in {"", ".", ".."}
+        or str(golden_path) != golden_relative
     ):
         raise ToolError("Handoff manifest golden_run is invalid")
 
@@ -248,6 +716,17 @@ def validate_bundle(bundle_dir: Path, binding: Dict[str, Any]) -> tuple[int, str
     paths = [validate_manifest_entry(entry) for entry in entries]
     if paths != sorted(paths) or len(paths) != len(set(paths)):
         raise ToolError("Handoff manifest file paths must be unique and sorted")
+    golden_prefix = golden_relative + "/"
+    not_permitted = [
+        path
+        for path in paths
+        if path != "migration-spec.md" and not path.startswith(golden_prefix)
+    ]
+    if not_permitted:
+        raise ToolError(
+            "Handoff Bundle file is not permitted: "
+            + ", ".join(not_permitted)
+        )
     actual_entries = manifest_entries(bundle_dir)
     actual_paths = [entry["path"] for entry in actual_entries]
     missing = sorted(set(paths) - set(actual_paths))
@@ -263,15 +742,39 @@ def validate_bundle(bundle_dir: Path, binding: Dict[str, Any]) -> tuple[int, str
             raise ToolError(f"Handoff Bundle file size differs: {expected['path']}")
         if expected["sha256"] != actual["sha256"]:
             raise ToolError(f"Handoff Bundle file sha256 differs: {expected['path']}")
-    validate_golden_run(bundle_dir / golden_relative, binding)
+    bundled_golden = bundle_dir / golden_relative
+    validate_golden_run(bundled_golden, binding, contract)
+    if file_sha256(bundled_golden / "sample-files.json") != manifest.get(
+        "sample_files_sha256"
+    ):
+        raise ToolError(
+            "Handoff manifest sample_files_sha256 has drifted"
+        )
     return len(entries), file_sha256(manifest_path)
 
 
+def paths_overlap(first: Path, second: Path) -> bool:
+    first = first.resolve()
+    second = second.resolve()
+    return (
+        first == second
+        or first.is_relative_to(second)
+        or second.is_relative_to(first)
+    )
+
+
 def run_verify(spec_path: Path, run_dir: Path, bundle_dir: Path) -> None:
+    contract = load_contract_data(spec_path)
     binding = load_spec_binding(spec_path).as_result_dict()
     bundle_dir = bundle_dir.resolve()
+    if paths_overlap(run_dir, bundle_dir):
+        raise ToolError("verify run directory and Handoff Bundle must not overlap")
     try:
-        file_count, manifest_digest = validate_bundle(bundle_dir, binding)
+        file_count, manifest_digest = validate_bundle(
+            bundle_dir,
+            binding,
+            contract,
+        )
     except (SpecContractError, ToolError) as error:
         create_run_dir(run_dir)
         result = {
@@ -330,29 +833,67 @@ def run_verify(spec_path: Path, run_dir: Path, bundle_dir: Path) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--mode", required=True, choices=("build", "verify"))
+    parser.add_argument(
+        "--mode",
+        required=True,
+        choices=("record-samples", "build", "verify"),
+    )
     parser.add_argument("--spec", required=True, type=Path)
     parser.add_argument("--run-dir", required=True, type=Path)
     parser.add_argument("--golden-run", type=Path)
     parser.add_argument("--bundle-spec", type=Path)
     parser.add_argument("--bundle-dir", type=Path)
+    parser.add_argument("--sample-record-result", type=Path)
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
     try:
-        if args.mode == "build":
-            if args.golden_run is None or args.bundle_spec is None:
-                raise ToolError("--golden-run and --bundle-spec are required for build")
+        if args.mode == "record-samples":
+            if args.golden_run is None:
+                raise ToolError("--golden-run is required for record-samples")
+            if (
+                args.bundle_spec is not None
+                or args.bundle_dir is not None
+                or args.sample_record_result is not None
+            ):
+                raise ToolError(
+                    "--bundle-spec, --bundle-dir, and --sample-record-result "
+                    "are not valid for record-samples"
+                )
+            run_record_samples(args.spec, args.run_dir, args.golden_run)
+        elif args.mode == "build":
+            if (
+                args.golden_run is None
+                or args.bundle_spec is None
+                or args.sample_record_result is None
+            ):
+                raise ToolError(
+                    "--golden-run, --bundle-spec, and --sample-record-result "
+                    "are required for build"
+                )
             if args.bundle_dir is not None:
                 raise ToolError("--bundle-dir is not valid for build")
-            run_build(args.spec, args.run_dir, args.golden_run, args.bundle_spec)
+            run_build(
+                args.spec,
+                args.run_dir,
+                args.golden_run,
+                args.bundle_spec,
+                args.sample_record_result,
+            )
         else:
             if args.bundle_dir is None:
                 raise ToolError("--bundle-dir is required for verify")
-            if args.golden_run is not None or args.bundle_spec is not None:
-                raise ToolError("--golden-run and --bundle-spec are not valid for verify")
+            if (
+                args.golden_run is not None
+                or args.bundle_spec is not None
+                or args.sample_record_result is not None
+            ):
+                raise ToolError(
+                    "--golden-run, --bundle-spec, and --sample-record-result "
+                    "are not valid for verify"
+                )
             run_verify(args.spec, args.run_dir, args.bundle_dir)
     except (SpecContractError, ToolError, OSError) as error:
         print(f"handoff_bundle.py: {error}", file=sys.stderr)

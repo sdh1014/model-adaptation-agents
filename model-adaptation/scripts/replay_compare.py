@@ -11,6 +11,10 @@ import sys
 from typing import Any, Dict, Optional
 
 from capture_golden import resolve_git_revision, validate_scan_candidate
+from _lib.kernel_evidence import (
+    KernelEvidenceError,
+    validate_kernel_worker_result,
+)
 from _lib.spec_contract import (
     SpecContractError,
     canonical_json_bytes,
@@ -21,7 +25,6 @@ from _lib.spec_contract import (
 from model_adaptation_capture.contracts import (
     KERNEL_CALL_STATE_SCHEMA,
     KERNEL_REPLAY_CONFIG_SCHEMA,
-    KERNEL_REPLAY_RESULT_SCHEMA,
     KUNLUN_SWIGLU_TARGET,
     OPERATOR_ID,
     REPLAY_CONFIG_ENV,
@@ -92,6 +95,55 @@ def read_json_object(path: Path, label: str) -> Dict[str, Any]:
     if not isinstance(value, dict):
         raise ToolError(f"{label} must be one JSON object")
     return value
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    try:
+        with path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+    except OSError as error:
+        raise ToolError(f"cannot hash {path}: {error}") from error
+    return digest.hexdigest()
+
+
+def _kernel_sample_files_sha256(
+    golden_run: Path,
+    binding: Dict[str, Any],
+    operator_id: str,
+    state: Dict[str, Any],
+) -> str:
+    records = []
+    for sample in state["samples"]:
+        shape_id = sample["shape_id"]
+        relative = sample["file"]
+        sample_path = golden_run / relative
+        if sample_path.is_symlink() or not sample_path.is_file():
+            raise ToolError("Kernel Call sample file is missing or symbolic")
+        records.append(
+            {
+                "shape_id": shape_id,
+                "path": relative,
+                "size": sample_path.stat().st_size,
+                "sha256": file_sha256(sample_path),
+            }
+        )
+    expected = {
+        "schema": "golden-sample-files/v1",
+        "spec_binding": binding,
+        "operator_id": operator_id,
+        "files": records,
+    }
+    evidence_path = golden_run / "sample-files.json"
+    if read_json_object(
+        evidence_path,
+        "Golden sample file evidence",
+    ) != expected:
+        raise ToolError(
+            "Golden sample bytes do not match sample-files.json"
+        )
+    return file_sha256(evidence_path)
 
 
 def create_run_dir(run_dir: Path) -> None:
@@ -632,48 +684,23 @@ def _kernel_worker_environment(
 def _validate_kernel_worker_result(
     result: Dict[str, Any],
     config: Dict[str, Any],
+    expected_shape_ids: list[str],
 ) -> None:
-    checks = {
-        "schema": KERNEL_REPLAY_RESULT_SCHEMA,
-        "spec_binding": config["spec_binding"],
-        "operator_id": config["operator_id"],
-        "execution_site": config["execution_site"],
-        "invocation_target": config["invocation_target"],
-        "tp_rank": config["tp_rank"],
-        "tensor_parallel_size": config["tensor_parallel_size"],
-        "precision_gate": config["precision_gate"],
-        "actual_tensors_saved": False,
-    }
-    for field, expected in checks.items():
-        if result.get(field) != expected:
-            raise ToolError(f"kernel replay result {field} has drifted")
-    checked_shapes = result.get("checked_shapes")
-    if not isinstance(checked_shapes, list) or not checked_shapes:
-        raise ToolError("kernel replay checked_shapes is invalid")
-    if result.get("checked_shape_count") != len(checked_shapes):
-        raise ToolError("kernel replay checked shape count has drifted")
-    failed = 0
-    seen = set()
-    for item in checked_shapes:
-        if (
-            not isinstance(item, dict)
-            or set(item) != {"shape_id", "passed"}
-            or not isinstance(item["shape_id"], str)
-            or not item["shape_id"]
-            or not isinstance(item["passed"], bool)
-            or item["shape_id"] in seen
-        ):
-            raise ToolError("kernel replay checked shape entry is invalid")
-        seen.add(item["shape_id"])
-        failed += not item["passed"]
-    if result.get("failed_shape_count") != failed:
-        raise ToolError("kernel replay failed shape count has drifted")
-    passed = result.get("passed")
-    if not isinstance(passed, bool) or passed != (failed == 0):
-        raise ToolError("kernel replay pass result is inconsistent")
-    errors = result.get("errors")
-    if not isinstance(errors, list) or len(errors) != failed:
-        raise ToolError("kernel replay error evidence is inconsistent")
+    try:
+        validate_kernel_worker_result(
+            result,
+            spec_binding=config["spec_binding"],
+            operator_id=config["operator_id"],
+            execution_site=config["execution_site"],
+            invocation_target=config["invocation_target"],
+            tp_rank=config["tp_rank"],
+            tensor_parallel_size=config["tensor_parallel_size"],
+            precision_gate=config["precision_gate"],
+            expected_shape_ids=expected_shape_ids,
+            sample_files_sha256=config["sample_files_sha256"],
+        )
+    except KernelEvidenceError as error:
+        raise ToolError(str(error)) from error
 
 
 def run_kernel_replay(
@@ -728,6 +755,26 @@ def run_kernel_replay(
         checkpoint,
         execution_site=execution_site,
     )
+    sample_files_digest = _kernel_sample_files_sha256(
+        golden_run,
+        binding.as_result_dict(),
+        operator_id,
+        state,
+    )
+    if execution_site == "p800":
+        self_replay = state["self_replay"]
+        if (
+            self_replay.get("sample_files_sha256")
+            != sample_files_digest
+        ):
+            raise ToolError(
+                "Golden self-replay sample_files_sha256 does not match "
+                "the current samples"
+            )
+        if self_replay.get("checked_shape_count") != len(state["samples"]):
+            raise ToolError(
+                "Golden self-replay did not check every current sample"
+            )
     create_run_dir(run_dir)
     invocation_target = (
         SWIGLU_CLAMP_OPERATOR_ID
@@ -745,6 +792,7 @@ def run_kernel_replay(
         "tensor_parallel_size": contract["runtime"]["tensor_parallel_size"],
         "tp_rank": contract["sample_policy"]["capture_tp_rank"],
         "precision_gate": contract["precision_gate"],
+        "sample_files_sha256": sample_files_digest,
         "allow_active_capture": execution_site == "cuda",
     }
     config_path = run_dir / "replay-config.json"
@@ -793,7 +841,28 @@ def run_kernel_replay(
             atomic_write_json(golden_run / "capture-state.json", state)
         raise ToolError("kernel replay worker did not produce trustworthy evidence")
     worker_result = read_json_object(worker_result_path, "kernel replay result")
-    _validate_kernel_worker_result(worker_result, config)
+    if (
+        _kernel_sample_files_sha256(
+            golden_run,
+            binding.as_result_dict(),
+            operator_id,
+            state,
+        )
+        != sample_files_digest
+    ):
+        if execution_site == "cuda":
+            state["status"] = "FAILED"
+            state["self_replay"] = {
+                "passed": False,
+                "error": "Golden Sample bytes changed during CUDA self-replay",
+            }
+            atomic_write_json(golden_run / "capture-state.json", state)
+        raise ToolError("Golden Sample bytes changed during kernel replay")
+    _validate_kernel_worker_result(
+        worker_result,
+        config,
+        [sample["shape_id"] for sample in state["samples"]],
+    )
     if (completed.returncode == 0) != worker_result["passed"]:
         raise ToolError("kernel replay worker exit code contradicts its result")
 
@@ -802,6 +871,7 @@ def run_kernel_replay(
         state["self_replay"] = {
             "passed": worker_result["passed"],
             "checked_shape_count": worker_result["checked_shape_count"],
+            "sample_files_sha256": sample_files_digest,
             "worker_result_sha256": hashlib.sha256(
                 canonical_json_bytes(worker_result)
             ).hexdigest(),
@@ -819,6 +889,7 @@ def run_kernel_replay(
         "checked_shape_count": worker_result["checked_shape_count"],
         "failed_shape_count": worker_result["failed_shape_count"],
         "precision_gate": contract["precision_gate"],
+        "sample_files_sha256": sample_files_digest,
         "actual_tensors_saved": False,
         "evidence": ["replay-config.json", "worker-result.json", "replay.log"],
         "summary": (

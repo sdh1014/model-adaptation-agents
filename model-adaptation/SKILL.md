@@ -152,10 +152,11 @@ verdict 只用 `READY`、`CAPTURE_REQUIRED`、`NEEDS_HUMAN`。
 ### `CUDA_CAPTURE`
 
 先检查 Scan Run 的 `capture_plan.adapter_status`。Scan Run 不可改写；如果其中是
-`NOT_IMPLEMENTED`，只有 Working State 的 `last_completed_action` 已写成
-`kernel_capture_replay_adapter_implemented`，且 `last_run` 指向一个绑定当前
-Contract 与 `active_operator`、`passed: true` 的 adapter Run，才表示后续会话可以
-继续 preflight。
+`NOT_IMPLEMENTED`，只有 Working State 的 Demo Closure Evidence 已把当前
+`active_operator` 的 adapter 标为 `PASS`，且所指 Run 绑定当前 Contract、
+`active_operator`、当前源码摘要和 `passed: true`，才表示后续会话可以继续。
+`last_completed_action` 和 `last_run` 随后可以推进到其他动作，不能因此丢失已经
+封存的 adapter closure evidence。
 
 如果 adapter 尚未实现：
 
@@ -167,7 +168,8 @@ Contract 与 `active_operator`、`passed: true` 的 adapter Run，才表示后�
    compare 调 Scan Run 记录的对应 Kunlun seam；两端都只使用已有调用，不新增模型
    helper 或自定义算子；
 5. 把实现与测试证据写入新的 Run，不改写 Scan Run；随后更新 Working State 的
-   `last_completed_action`、`last_run` 和唯一 preflight 下一动作。
+   Demo Closure Evidence、`last_completed_action`、`last_run` 和唯一 preflight
+   下一动作。
 
 当前仓库中的 `Step3p5MLP.forward` capture/replay adapter 只属于 revision 4
 历史方案，不能消费 revision 5。缺少当前活动 kernel 的 capture/replay adapter
@@ -184,6 +186,10 @@ adapter 完成后，完整读取
 - 直接参数可保存，但完整 checkpoint 和 module state 会被拒绝；
 - 相同样本可以按固定 Precision Gate self-replay。
 
+如果 adapter Run 记录的任一源码 SHA 在最近一次 PASS preflight 后发生变化，旧
+preflight 只能作为历史证据；Demo Closure Evidence 必须把当前源码 preflight 标为
+`PENDING`，且不得开始正式 CUDA Session。先按 runbook 生成新的 preflight Run。
+
 如果 Working State 的 `execution_site` 是 `CUDA`，但当前会话不在用户指定的 CUDA
 机器，不创建 preflight Run，也不运行合成替代品。只报告 runbook 中的命令和
 GitHub evidence 分支回传要求，保持 Working State 不变并停止本次执行。
@@ -194,10 +200,25 @@ GitHub evidence 分支回传要求，保持 Working State 不变并停止本次�
    两端模型启动参数。
 2. 每种真实 shape 最多保存一份 rank 0 样本。样本包含活动调用的输入、直接参数、
    必要标量和 CUDA 期望输出。
-3. 停止采集后，在同一次 CUDA Session 内用现有 kernel 接口完成全部样本
-   self-replay。全部通过才把 Golden Run 标为 `SEALED`。
-4. 构建并校验 Handoff Bundle，把 Working State 原子推进为
-   `WAITING / HANDOFF`。
+3. 停止采集进程后、CUDA self-replay 前，调用 `handoff_bundle.py
+   --mode record-samples`，把每个 Golden Sample 文件的 shape、相对路径、大小和
+   SHA-256 写入 Golden Run 的 `sample-files.json`，并把这次动作保存在独立且不可
+   修改的 record-samples Run。这一步只接受仍为 `ACTIVE`、尚未 self-replay 的
+   Golden Run；失败时不得继续。
+4. 在同一次 CUDA Session 内用现有 kernel 接口完成全部样本 self-replay。全部
+   通过才把 Golden Run 标为 `SEALED`。replay config、worker result、Golden
+   state 和 wrapper result 必须携带同一个 `sample-files.json` SHA-256；后续
+   build 会重新计算并要求它们与当前样本字节完全一致。
+5. Agent 先生成临时 Spec，把其中的 Working State 写成下一状态：
+   `WAITING / HANDOFF`，保留同一个 `active_operator`，写入本次
+   `golden_run`、bundle/manifest 路径，并把唯一 `next_action` 写成人工复制后在
+   P800 校验。`handoff_bundle.py` 按权限边界不解析 Working State，所以这些字段
+   必须由 Agent 逐项核对。
+6. 用临时 Spec 构建 bundle；build 必须显式接收 record-samples Run 的
+   `result.json`，核对它记录的 sidecar SHA，并把 record result 与 sidecar 的
+   SHA-256 写入 manifest。随后在 CUDA 端立即 verify。只有 build、verify 和
+   Contract 绑定全部通过后，才用 bundle 中 `migration-spec.md` 的相同字节原子
+   替换当前 Spec；不得在 manifest 生成后再次编辑该 Spec。
 
 任何步骤失败都要保留证据。Session 已消耗但不能形成可信 Golden 时进入
 `BLOCKED / CUDA_CAPTURE`，不能重开第二次 Session。

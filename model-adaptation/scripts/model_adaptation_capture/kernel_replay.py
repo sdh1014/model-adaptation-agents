@@ -1,6 +1,7 @@
 """Replay the selected Kernel Call through the existing CUDA or Kunlun seam."""
 
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -25,6 +26,25 @@ from .contracts import (
 
 class KernelReplayError(RuntimeError):
     """The standalone replay cannot form trustworthy evidence."""
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    try:
+        with path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+    except OSError as error:
+        raise KernelReplayError(f"cannot hash {path}: {error}") from error
+    return digest.hexdigest()
+
+
+def _is_sha256(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
 
 
 def _read_json_object(path: Path, label: str) -> Dict[str, Any]:
@@ -95,6 +115,10 @@ def _validate_config(config: Dict[str, Any]) -> None:
         raise KernelReplayError("kernel replay invocation target has drifted")
     if not isinstance(config.get("allow_active_capture"), bool):
         raise KernelReplayError("kernel replay active-capture policy has drifted")
+    if not _is_sha256(config.get("sample_files_sha256")):
+        raise KernelReplayError(
+            "kernel replay sample_files_sha256 is invalid"
+        )
     for field in ("golden_run", "run_dir"):
         if not isinstance(config.get(field), str) or not config[field]:
             raise KernelReplayError(f"kernel replay config is missing {field}")
@@ -102,6 +126,12 @@ def _validate_config(config: Dict[str, Any]) -> None:
 
 def _load_state(config: Dict[str, Any]) -> Dict[str, Any]:
     golden_run = Path(config["golden_run"]).resolve()
+    if _file_sha256(golden_run / "sample-files.json") != config.get(
+        "sample_files_sha256"
+    ):
+        raise KernelReplayError(
+            "kernel replay sample file evidence has drifted"
+        )
     state = _read_json_object(
         golden_run / "capture-state.json",
         "Kernel Call capture state",
@@ -336,6 +366,7 @@ def run_kernel_replay_worker(
         "tp_rank": config["tp_rank"],
         "tensor_parallel_size": config["tensor_parallel_size"],
         "precision_gate": precision,
+        "sample_files_sha256": config["sample_files_sha256"],
         "passed": failed_shape_count == 0,
         "checked_shape_count": len(checked_shapes),
         "failed_shape_count": failed_shape_count,

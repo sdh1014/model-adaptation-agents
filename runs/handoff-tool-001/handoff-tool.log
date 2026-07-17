@@ -1,0 +1,8 @@
+action=implement_handoff_bundle
+passed=true
+focused_tests_passed=18
+torch_free_regression_tests_passed=80
+torch_available=false
+formal_cuda_capture_started=false
+actual_tensors_saved=false
+working_state_parsed_by_tool=false

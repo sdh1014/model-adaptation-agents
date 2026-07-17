@@ -211,14 +211,14 @@ Agent 每次动作前完整读取 Contract 与本区；每次动作结束后立�
 ### Current
 
 - `observed_contract_revision`: `5`
-- `state_revision`: `18`
+- `state_revision`: `20`
 - `status`: `ACTIVE`
 - `phase`: `CUDA_CAPTURE`
 - `execution_site`: `SOURCE`
 - `active_operator`: `sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul`
-- `last_completed_action`: `p800_sample_portability_validated`
-- `last_run`: `runs/p800-portability-r5-001`
-- `next_action`: `实现 Ticket 13 的 handoff_bundle.py build/verify 与聚焦测试，使已自回放通过的 Golden Run 可生成并校验人工交接包；不得开始正式 CUDA Capture`
+- `last_completed_action`: `handoff_bundle_tool_implemented`
+- `last_run`: `runs/handoff-tool-001`
+- `next_action`: `实现 Ticket 14 的可恢复五轮修复闭环与测试；不得开始正式 CUDA Capture`
 
 规则：`ACTIVE` 时 `next_action` 必须恰好一条；`WAITING` 时必须是一条人工动作；`PASS`、`BLOCKED`、`NEEDS_HUMAN` 时必须为 `none`。
 
@@ -281,9 +281,11 @@ baseline replay 不算修复尝试。每轮修改源码前递增 `attempts_used`
 | Contract approved and tool bindings match | `PASS` | `runs/spec-binding-004/result.json` |
 | target-only eager kernel scan complete | `PASS` | `runs/scan-006/result.json` |
 | gap queue and Demo selection complete | `PASS` | `runs/scan-006/result.json` |
-| selected Kernel Call capture/replay adapter implemented | `PASS` | `runs/adapter-001/result.json` |
-| revision 5 CUDA preflight passed without consuming formal Session | `PASS` | `runs/cuda-preflight-r5-001/result.json` |
+| selected Kernel Call capture/replay adapter implemented and sample-bound | `PASS` | `runs/adapter-002/result.json` |
+| adapter-001 CUDA preflight passed without consuming formal Session | `PASS` | `runs/cuda-preflight-r5-001/result.json` |
+| current adapter-002 CUDA preflight passed without consuming formal Session | `PENDING` | `null` |
 | CUDA/P800 sample format and fixed comparator validated | `PASS` | `runs/p800-portability-r5-001/result.json` |
+| verifiable manual Handoff Bundle tool implemented | `PASS` | `runs/handoff-tool-001/result.json` |
 | one CUDA Session and at most three samples per operator | `PENDING` | `null` |
 | CUDA self-replay passed | `PENDING` | `null` |
 | bundle verified on CUDA and P800 | `PENDING` | `null` |
@@ -323,5 +325,7 @@ baseline replay 不算修复尝试。每轮修改源码前递增 `attempts_used`
 | `16` | Ticket 23 完成 revision 5 Kernel Call adapter；本机只封存 CPU 测试和接口证据，CUDA preflight 由人按 runbook 执行并经 GitHub 回传 | `runs/adapter-001/result.json` |
 | `17` | revision 5 CUDA preflight 经 GitHub 回传并通过简单结构校验：rank 0 保存三个 shape、rank 1 不落盘、CUDA 新进程 self-replay 通过，且未消耗正式 Session；下一步只在 P800 验证样本读回和固定比较器 | `runs/cuda-preflight-r5-001/result.json` |
 | `18` | 三份 CUDA preflight 样本已由 P800 修改版 Torch 读回；固定比较器正常 PASS 并能拒绝有意数值偏差，且没有保存 P800 actual Tensor；Ticket 12 关闭，下一步实现 Ticket 13 交接包工具 | `runs/p800-portability-r5-001/result.json` |
+| `19` | Ticket 13 完成 self-replay 前样本摘要记录、交接包 build/verify、Golden 自重放证据校验和逐文件完整性校验；下一步先实现 Ticket 14 的可恢复修复闭环，正式 CUDA Session 仍留给 Ticket 15 | `runs/handoff-tool-001/result.json` |
+| `20` | code review 补齐样本字节与 replay config、worker result、Golden state、wrapper result 的同一摘要绑定，防止替换成另一份同 shape replay；`adapter-002` 只封存当前源码与本机元数据测试，旧 `cuda-preflight-r5-001` 只证明 adapter-001，当前源码 preflight 保持 PENDING 并阻止 Ticket 15 正式 Session | `runs/adapter-002/result.json` |
 
 <!-- AGENT-WRITABLE WORKING STATE: END -->

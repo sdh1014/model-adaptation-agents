@@ -16,6 +16,10 @@ _Avoid_: Working state, editable prompt
 The agent-maintained portion of the Migration Spec containing the current phase, gap queue, active operator, Run pointers, next action, decisions, and evidence pointers.
 _Avoid_: Contract, chat history
 
+Working State 中的 `execution_site` 只说明最近动作在哪类环境执行：
+`SOURCE` 表示仅修改或检查仓库文件，没有运行 CUDA/P800 代码；`CUDA` 和 `P800`
+分别表示对应实机。
+
 **Migration Agent**:
 The single decision-making actor that reads the Migration Spec, analyzes source and evidence, selects the next action, generates a permitted repair, and updates Working State.
 _Avoid_: Multi-agent coordinator, deterministic runner

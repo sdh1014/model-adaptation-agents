@@ -49,16 +49,19 @@ Demo。
 - [实现 TP8 rank 0 MLP 采集与模型内重放](issues/20-tp8-rank-local-mlp-capture-replay.md)：每种 shape 只保存 rank 0 的 `x/output`；CUDA 与 P800 都在加载同 checkpoint 的 TP8 模型实例内重放，不新增模型算子函数。
 - [以 kernel 调用为边界重扫并选择最小 Demo](issues/21-kernel-level-scan-and-demo-selection.md)：Contract revision 5 只固定 kernel-call 扫描范围、文本/单图输入和直接参数保存规则；`scan-005` 保留初次结果，`scan-006` 纠正视觉链并补回 clamp SwiGLU 后选择已有 `_swiglu_silu_clamp_mul`。
 - [Gemma RMSNorm kernel adapter（已取消）](issues/22-gemma-rmsnorm-kernel-capture-replay-adapter.md)：保留原票据历史；`scan-006` 改选更小缺口后标记为 `wontfix`。
-- [实现 SwiGLU clamp Kernel Call 采集与重放 adapter](issues/23-swiglu-clamp-kernel-capture-replay-adapter.md)：已完成现有 `_swiglu_silu_clamp_mul` Hook、rank 0 三 shape 样本、CUDA 原函数 self-replay 与 P800 `kunlun_ops.swiglu` baseline 入口；本机未运行实机 preflight。
+- [实现 SwiGLU clamp Kernel Call 采集与重放 adapter](issues/23-swiglu-clamp-kernel-capture-replay-adapter.md)：已完成现有 `_swiglu_silu_clamp_mul` Hook、rank 0 三 shape 样本、CUDA 原函数 self-replay 与 P800 `kunlun_ops.swiglu` baseline 入口；adapter-001 的 preflight 和样本可移植性已由远端实机证据验证。后续样本摘要绑定源码只完成本机校验，必须在 Ticket 15 正式 Session 前重新 preflight。
 - [确认跨 CUDA/P800 的样本格式与精度比较](issues/12-portable-sample-and-precision-compare.md)：CUDA Torch `2.11.0+cu129` 写出的三个 BF16 样本已由 P800 修改版 Torch `2.5.1+cu118` 读回；固定比较器正常 PASS 并正确拒绝有意数值偏差，Run 不保存 P800 actual Tensor。
+- [实现可验证的人工交接包](issues/13-verifiable-manual-handoff-bundle.md)：已完成 pre-replay 样本文件摘要记录、样本摘要与 replay 证据绑定、build/verify、完整允许文件 manifest、CUDA self-replay 结果重算和篡改/错误 Contract 测试；工具不解析 Working State，Agent 按 Skill 校验下一状态临时 Spec 后再原子推进。
 
 ## Not yet specified
 
-- Ticket 13 的 `handoff_bundle.py` build/verify 与篡改校验尚未实现。
+- Ticket 14 的五轮修复闭环和 Ticket 15 的唯一正式 CUDA Capture 尚未实现或执行。
+- 当前 `adapter-002` CUDA preflight 尚未执行；旧 `cuda-preflight-r5-001` 不解锁
+  Ticket 15。
 
 ## Out of scope
 
-- 在 Ticket 13 交接包工具完成前运行正式 CUDA Capture 或 P800 算子 baseline。
+- 在 Ticket 15 前运行正式 CUDA Capture 或 P800 算子 baseline。
 - 重新登录真实 CUDA/P800 环境做其他能力验证；`torch.testing` 可用性直接采用用户已完成的实机验证结论。
 - 自动 SSH、远程执行、自动上传或凭证管理。
 - 新增 C++/自定义 Kernel、底层算子注册或性能优化。

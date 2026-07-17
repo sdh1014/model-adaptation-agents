@@ -1,0 +1,81 @@
+{
+  "action": "implement_handoff_bundle",
+  "active_operator": "sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul",
+  "actual_tensors_saved": false,
+  "consumes_capture_session": false,
+  "evidence": [
+    "handoff-tool.log"
+  ],
+  "passed": true,
+  "run_id": "handoff-tool-001",
+  "source_files": [
+    {
+      "path": "model-adaptation/scripts/handoff_bundle.py",
+      "sha256": "39e3a4d54296d65e1ab1f76c1bdcd42d65db674573f890b0419dd68b318119a3"
+    },
+    {
+      "path": "model-adaptation/scripts/_lib/kernel_evidence.py",
+      "sha256": "99598f350472c7479097c9de977e4a47e73fb451769375c5029cb10ec46e36ab"
+    },
+    {
+      "path": "model-adaptation/scripts/replay_compare.py",
+      "sha256": "9995c34b43b4786f872debfb3bc00362c00a22112dd5f34201d21eb7579b6ca4"
+    },
+    {
+      "path": "model-adaptation/scripts/model_adaptation_capture/preflight.py",
+      "sha256": "41e31ca36cd41a0d48c8263de21d6fac4abb136c92aaa67db5f460b9cbed77c6"
+    },
+    {
+      "path": "model-adaptation/scripts/model_adaptation_capture/kernel_replay.py",
+      "sha256": "063ba0bf8aaab790bf6f81fa2cfdf59e1caa8db051244212dbc127a60962e298"
+    },
+    {
+      "path": "model-adaptation/SKILL.md",
+      "sha256": "b6c2ed0ea3612f85560fa685a3290955895258bcdea95bc00f2da9bf1ddf8a08"
+    }
+  ],
+  "spec_binding": {
+    "contract_data_sha256": "f683ea62427279da3c899a3ef0afcfa1d16298b7424154664c7e3fac9b13d938",
+    "contract_revision": 5,
+    "spec_id": "step3p7-flash-p800-demo"
+  },
+  "tests": {
+    "focused": {
+      "command": "PYTHONPYCACHEPREFIX=/tmp/model-adaptation-agents-pyc python3 -m unittest tests.test_ticket13_handoff_bundle",
+      "passed": 18
+    },
+    "local_environment": {
+      "known_no_torch_cascade_tests_excluded": 1,
+      "python": "3.9.6",
+      "torch_available": false,
+      "torch_import_test_modules_not_run": 6
+    },
+    "torch_free_regression": {
+      "passed": 80
+    }
+  },
+  "tool": "migration-agent",
+  "validation": {
+    "complete_allowed_file_manifest": true,
+    "contract_binding_checked": true,
+    "cuda_self_replay_digest_recomputed": true,
+    "manual_copy_simulated": true,
+    "operator_binding_checked": true,
+    "output_bundle_overlap_rejected": true,
+    "tamper_cases_checked": [
+      "missing-file",
+      "unmanifested-extra-file",
+      "manifested-but-not-permitted-file",
+      "sample-record-run-overlap",
+      "post-record-sample-change",
+      "sample-and-sidecar-change-with-unchanged-record-run",
+      "size-change",
+      "same-size-content-change",
+      "swapped-self-replay-from-different-sample-bytes",
+      "wrong-contract",
+      "wrong-operator",
+      "forged-self-replay"
+    ],
+    "working_state_parsed_by_tool": false
+  }
+}

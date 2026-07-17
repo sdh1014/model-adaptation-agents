@@ -1,0 +1,75 @@
+{
+  "action": "harden_kernel_replay_evidence_binding",
+  "active_operator": "sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul",
+  "adapter_status": "IMPLEMENTED",
+  "capture_boundary": {
+    "inputs": [
+      "x"
+    ],
+    "non_tensor_args": [
+      "gemm1_limit"
+    ],
+    "outputs": [
+      "output"
+    ],
+    "parameters": []
+  },
+  "evidence": [
+    "adapter.log"
+  ],
+  "passed": true,
+  "replay_targets": {
+    "cuda": "sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul",
+    "p800": "kunlun_ops.swiglu"
+  },
+  "run_id": "adapter-002",
+  "runtime_validation": {
+    "consumes_capture_session": false,
+    "cuda_available": false,
+    "cuda_preflight": "NOT_RERUN_FOR_THIS_SOURCE_REVISION",
+    "local_test_device": "none",
+    "p800_baseline": "NOT_RERUN_FOR_THIS_SOURCE_REVISION"
+  },
+  "sample_binding": {
+    "golden_state_bound": true,
+    "handoff_manifest_bound": true,
+    "recorded_before_self_replay": true,
+    "replay_config_bound": true,
+    "worker_result_bound": true
+  },
+  "source_files": [
+    {
+      "path": "model-adaptation/scripts/replay_compare.py",
+      "sha256": "9995c34b43b4786f872debfb3bc00362c00a22112dd5f34201d21eb7579b6ca4"
+    },
+    {
+      "path": "model-adaptation/scripts/model_adaptation_capture/preflight.py",
+      "sha256": "41e31ca36cd41a0d48c8263de21d6fac4abb136c92aaa67db5f460b9cbed77c6"
+    },
+    {
+      "path": "model-adaptation/scripts/model_adaptation_capture/kernel_replay.py",
+      "sha256": "063ba0bf8aaab790bf6f81fa2cfdf59e1caa8db051244212dbc127a60962e298"
+    },
+    {
+      "path": "model-adaptation/scripts/_lib/kernel_evidence.py",
+      "sha256": "99598f350472c7479097c9de977e4a47e73fb451769375c5029cb10ec46e36ab"
+    },
+    {
+      "path": "model-adaptation/scripts/handoff_bundle.py",
+      "sha256": "39e3a4d54296d65e1ab1f76c1bdcd42d65db674573f890b0419dd68b318119a3"
+    }
+  ],
+  "spec_binding": {
+    "contract_data_sha256": "f683ea62427279da3c899a3ef0afcfa1d16298b7424154664c7e3fac9b13d938",
+    "contract_revision": 5,
+    "spec_id": "step3p7-flash-p800-demo"
+  },
+  "supersedes": "runs/adapter-001",
+  "tests": {
+    "focused_source_and_metadata": {
+      "passed": 24,
+      "torch_available": false
+    }
+  },
+  "tool": "migration-agent"
+}

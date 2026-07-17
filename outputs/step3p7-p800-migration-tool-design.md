@@ -336,7 +336,7 @@ P800 actual output 只在内存中参与比较，不落盘。
 | `capture_golden.py` | 校验 Scan/Contract、生成采集配置、控制三 shape/rank 0 | 选择算子、修改 Contract |
 | 采集插件 | Hook 现有调用、保存允许的输入/参数/输出 | 新增 helper 或自定义算子 |
 | `replay_compare.py` | self-replay、P800 replay、结构与精度比较 | 放宽容差、决定修复 |
-| `handoff_bundle.py` | 生成与校验 manifest | 自动跨机器复制 |
+| `handoff_bundle.py` | self-replay 前记录样本文件摘要，生成与校验 manifest | 自动跨机器复制 |
 | `workspace_guard.py` | 固定基线、保存 patch、检查唯一修改 | 自动 commit/push |
 
 当前代码中的 MLP adapter 是 revision 4 历史实现。revision 5 的
@@ -344,12 +344,14 @@ P800 actual output 只在内存中参与比较，不落盘。
 保存最多三个 shape，CUDA self-replay 调 SGLang 原函数，P800 baseline 调
 `kunlun_ops.swiglu`。revision 5 CUDA preflight 已在 A800 上通过并回传
 `runs/cuda-preflight-r5-001`；它未加载 checkpoint，也未消耗正式 Capture Session。
-P800 修改版 Torch 的样本读回仍待验证。
+三个样本也已由 P800 修改版 Torch 读回，固定比较器正常通过并能拒绝有意数值偏差；
+证据在 `runs/p800-portability-r5-001`，且没有保存 P800 actual Tensor。
 
 `scan-006` 是不可变证据，所以其中的 `adapter_status=NOT_IMPLEMENTED` 不会被原地
-更新。实现证据保存在新的 `runs/adapter-001`；Working State 通过
-`last_completed_action`、`last_run` 和 `next_action` 判断现在可以进入 CUDA
-preflight。
+更新。初始实现证据保存在 `runs/adapter-001`；交接包 code review 后的当前源码
+摘要与样本/replay 绑定证据保存在 `runs/adapter-002`。后者只做本机源码与元数据
+校验，没有重跑 CUDA/P800；必须在 Ticket 15 的唯一正式 Session 前完成新的
+不消耗 Session 的 CUDA preflight。
 
 ## 11. 运行流程
 
@@ -362,6 +364,7 @@ Contract revision 5
   -> 实现并测试该 kernel 的 adapter
   -> CUDA preflight（不消耗正式 Session）
   -> 一次 CUDA Golden Capture，最多三个 shape
+  -> 记录 Golden Sample 文件大小与 SHA-256
   -> CUDA self-replay
   -> 构建并校验 Handoff Bundle
   -> 人工复制
@@ -390,7 +393,18 @@ Contract revision 5
 
 `runs/p800-portability-r5-001` 已证明三个 CUDA BF16 样本可由 P800 修改版 Torch
 读回，固定比较器正常 PASS 并能拒绝有意数值偏差，且没有保存 P800 actual Tensor。
-下一步实现 Ticket 13 的 `handoff_bundle.py` build/verify 与聚焦测试，使正式 Golden
-Run 在 CUDA 端可以生成并校验人工交接包。该工具完成前不开始正式 CUDA Capture。
+Ticket 13 已实现 `handoff_bundle.py` 的 record-samples/build/verify：正式
+self-replay 前先记录每个 Golden Sample 文件的大小和 SHA-256，并保存独立的
+record-samples Run；build 显式核对该 Run、sidecar、当前 kernel、checkpoint、
+TP8/rank 0、全部 shape、样本字节、CUDA self-replay 结果与摘要；replay config、
+worker result、Golden state 和 wrapper result 还必须绑定同一 sidecar SHA。最后
+把 record result/sidecar 摘要和完整允许文件集合写入 manifest，以检测缺失、额外
+或篡改。
+
+下一步实现 Ticket 14 的可恢复五轮修复闭环。真实 Golden、CUDA 端 bundle 和
+`WAITING / HANDOFF` 状态仍由 Ticket 15 在唯一正式 CUDA Session 中产生；当前
+源码工作区不得把测试夹具当成正式 Golden。进入 Ticket 15 前还必须用
+`adapter-002` 当前源码重跑 CUDA preflight；旧 `cuda-preflight-r5-001` 只作为
+adapter-001 的历史实机证据。
 
 完整机器可读扫描证据见 `runs/scan-006/result.json`；原始 `scan-005` 保留为历史。

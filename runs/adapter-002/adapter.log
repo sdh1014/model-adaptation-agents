@@ -1,0 +1,16 @@
+run_id=adapter-002
+action=harden_kernel_replay_evidence_binding
+supersedes=runs/adapter-001
+contract_revision=5
+active_operator=sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul
+sample_files_recorded_before_self_replay=true
+replay_config_bound=true
+worker_result_bound=true
+golden_state_bound=true
+handoff_manifest_bound=true
+focused_source_and_metadata_tests=24 passed
+torch_available=false
+cuda_preflight=NOT_RERUN_FOR_THIS_SOURCE_REVISION
+p800_baseline=NOT_RERUN_FOR_THIS_SOURCE_REVISION
+consumes_capture_session=false
+result=PASS

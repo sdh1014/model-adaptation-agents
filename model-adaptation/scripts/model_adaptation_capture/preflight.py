@@ -212,6 +212,31 @@ def run_capture_preflight(
     ):
         return False, evidence
 
+    sample_file_records = []
+    for sample_path in sorted((run_dir / "samples").glob("*.pt")):
+        sample_file_records.append(
+            {
+                "shape_id": sample_path.stem,
+                "path": str(sample_path.relative_to(run_dir)),
+                "size": sample_path.stat().st_size,
+                "sha256": hashlib.sha256(sample_path.read_bytes()).hexdigest(),
+            }
+        )
+    sample_files_path = run_dir / "sample-files.json"
+    write_json(
+        sample_files_path,
+        {
+            "schema": "golden-sample-files/v1",
+            "spec_binding": config["spec_binding"],
+            "operator_id": config["operator_id"],
+            "files": sample_file_records,
+        },
+    )
+    sample_files_digest = hashlib.sha256(
+        sample_files_path.read_bytes()
+    ).hexdigest()
+    evidence.append("sample-files.json")
+
     replay_config = {
         "schema": KERNEL_REPLAY_CONFIG_SCHEMA,
         "spec_binding": config["spec_binding"],
@@ -223,6 +248,7 @@ def run_capture_preflight(
         "tensor_parallel_size": config["tensor_parallel_size"],
         "tp_rank": config["tp_rank"],
         "precision_gate": config["precision_gate"],
+        "sample_files_sha256": sample_files_digest,
         "allow_active_capture": True,
     }
     replay_config_path = run_dir / "preflight-replay-config.json"
@@ -277,6 +303,7 @@ def run_capture_preflight(
         "tp_rank": config["tp_rank"],
         "tensor_parallel_size": config["tensor_parallel_size"],
         "precision_gate": config["precision_gate"],
+        "sample_files_sha256": sample_files_digest,
         "actual_tensors_saved": False,
         "checked_shape_count": 3,
         "failed_shape_count": 0,

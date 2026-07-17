@@ -1,7 +1,7 @@
 # 实现可验证的人工交接包
 
 Type: task
-Status: ready-for-agent
+Status: resolved
 Blocked by: 12
 
 ## What to build
@@ -24,3 +24,34 @@ manifest 必须列出允许出现的完整文件集合，并为每个文件记�
 ## Comments
 
 真实跨机器复制是人工步骤，不属于工具权限。
+
+- 已实现 `model-adaptation/scripts/handoff_bundle.py` 的 build/verify。manifest
+  覆盖 Spec、Golden Run 和 CUDA self-replay 的完整允许文件集，并记录大小与
+  SHA-256。
+- build 会重新读取 `self-replay/worker-result.json`、按规范 JSON 重算摘要，并
+  校验当前 `_swiglu_silu_clamp_mul`、TP8/rank 0、checkpoint、全部 shape 与固定
+  Precision Gate；只看 `passed: true` 或一个形似 SHA 的字符串不再足够。
+- 为避免 self-replay 后、build 前替换样本仍被接受，同一脚本增加
+  `record-samples`：Ticket 15 必须在停止采集后、self-replay 前写入
+  `sample-files.json` 和独立的不可变 Run；build 会重算每个 `.pt` 的大小和
+  SHA-256，校验该 Run 中记录的 sidecar SHA，并把两项摘要写入 manifest。即使
+  同时修改样本与 sidecar，也不能绕过未修改的 record-samples Run。
+- CUDA self-replay 的 config、worker result、Golden state 和 wrapper result
+  都必须携带同一个 `sample-files.json` SHA-256。这样不能把另一个 Golden Run
+  中 shape 相同、字节不同的 self-replay 目录替换进来。
+- 这项绑定会修改 replay 相关源码，因此保留 `runs/adapter-001` 及其 CUDA/P800
+  实机证据作为历史，并用 `runs/adapter-002` 记录当前源码摘要和本机元数据测试。
+  `adapter-002` 明确没有重跑 CUDA/P800；当前源码 preflight 必须在 Ticket 15 的
+  正式 Session 前重新执行。
+- Working State 仍由 Agent 校验和推进。Skill 已明确先形成
+  `WAITING / HANDOFF` 临时 Spec，CUDA build + verify 全部通过后再用 bundle 中
+  相同字节原子替换当前 Spec；工具继续不解析 Working State。
+- 18 个 Ticket 13 聚焦测试通过；80 个不依赖 Torch 的回归测试通过。本机没有
+  Torch，因此 6 个 Torch 测试模块及一个会间接启动 Torch 测试文件的 runbook
+  用例没有作为本票通过证据。完整记录见
+  `runs/handoff-tool-001/result.json`。
+
+## Answer
+
+交接包工具已经完成。它只生成和校验本地目录，不包含 SSH、上传、登录或自动复制；
+真实 Golden 仍要等 Ticket 15 在 CUDA 机器上的唯一正式 Session 产生。

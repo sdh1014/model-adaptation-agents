@@ -11,19 +11,27 @@ Session。消费 revision 5 的 `scan-006.capture_plan`，只采集扫描后选�
 `_swiglu_silu_clamp_mul`，而不是把 revision 4 的 MLP 或全部候选混进最小 Demo。
 
 rank 0 按输入 shape 去重，最多保存三份 `x + gemm1_limit -> CUDA output`。
-停止采集后，在同一次 CUDA Session 内直接调用现有函数完成全部样本 self-replay；
-通过后构建并校验 Handoff Bundle。
+停止采集后，先用 `handoff_bundle.py --mode record-samples` 固化全部样本文件的
+大小和 SHA-256，再在同一次 CUDA Session 内直接调用现有函数完成全部样本
+self-replay；通过后构建并校验 Handoff Bundle。
 
 ## Acceptance criteria
 
 - Session 前确认 Contract revision 5、`spec-binding-004`、`scan-006` 和
   adapter 证据绑定一致。
+- `runs/adapter-002` 记录的当前源码摘要必须匹配，且基于该源码的新 CUDA preflight
+  已 PASS；旧 `cuda-preflight-r5-001` 只属于 adapter-001，不能解锁正式 Session。
 - 正式启动使用固定 checkpoint、TP8、BF16、target-only eager；两端命令一致且不
   显式指定 attention/MoE backend。
 - 只 Hook 已有 `_swiglu_silu_clamp_mul`，不新增 helper、自定义算子函数或模型
   wrapper。
 - 最多保存三个 rank 0 shape；重复和第四种 shape 只计数。
 - 样本不保存参数 Tensor，并拒绝完整 checkpoint、module `state_dict` 和无关参数。
+- `record-samples` 在 self-replay 前生成 `sample-files.json`；self-replay 后若任一
+  样本字节变化，bundle build 必须失败。record-samples Run 保持不可变，build
+  显式接收其 `result.json` 并把 result/sidecar 摘要写入 manifest。
+- self-replay config、worker result、Golden state 和 wrapper result 必须携带同一个
+  `sample-files.json` SHA-256；不能接受另一个 Golden Run 的 replay 目录。
 - self-replay 覆盖全部样本，使用 Contract 固定 Precision Gate；任一失败都会阻止
   Golden Run 封存。
 - bundle 在 CUDA 端 build + verify 通过后，Spec 原子进入
