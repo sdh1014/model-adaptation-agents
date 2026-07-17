@@ -1,0 +1,53 @@
+{
+  "activation_guard": "self.limit is not None",
+  "boundary": "x to output",
+  "capture_device_type": "cuda",
+  "checkpoint": {
+    "config_digest": "8d740ba5819e574b7a606ea7aa6d7d381142ed5cc77cab96dde2892c10414042",
+    "id": "stepfun-ai/Step-3.7-Flash@5f6244077ac62e04eec3f320501ff8c2b293373a",
+    "model_path": "stepfun-ai/Step-3.7-Flash",
+    "revision": "5f6244077ac62e04eec3f320501ff8c2b293373a"
+  },
+  "dtype": "bfloat16",
+  "max_shapes": 3,
+  "model_path": "target",
+  "operator_id": "Step3p5MLP.forward",
+  "precision_gate": {
+    "atol": 0.01,
+    "check_stride": false,
+    "comparator": "torch.testing.assert_close",
+    "require_exact_structure": true,
+    "require_finite": true,
+    "require_same_dtype": true,
+    "rtol": 0.02
+  },
+  "preflight_tp_context": {
+    "rank": 0,
+    "size": 8
+  },
+  "replay": {
+    "checkpoint_id": "stepfun-ai/Step-3.7-Flash@5f6244077ac62e04eec3f320501ff8c2b293373a",
+    "mode": "loaded_model",
+    "weights_in_golden_sample": false
+  },
+  "run_dir": "/ssd1/sdh/model-adaptation-agents/runs/cuda-preflight-001",
+  "scan_result": {
+    "path": "/ssd1/sdh/model-adaptation-agents/runs/scan-004/result.json",
+    "sha256": "6b0d7531937a06a116a323d3211a9a3cfb29b7233f2f067e421ca3cd22cb01c5"
+  },
+  "schema": "golden-capture-config/v1",
+  "serialization": "candidate-torch-save/v2",
+  "source": {
+    "model_path": "/ssd1/sdh/sglang/python/sglang/srt/models/step3p5.py",
+    "sglang_revision": "49e384ce9d304648e9959666ecb8ce8cd98d0deb",
+    "sglang_worktree": "/ssd1/sdh/sglang"
+  },
+  "spec_binding": {
+    "contract_data_sha256": "8536c27c52a7b48f97fca9415d9b7dc90a3401aea9776f35d0dbf61e01f8660a",
+    "contract_revision": 4,
+    "spec_id": "step3p7-flash-p800-demo"
+  },
+  "state_dependency": "same checkpoint, TP8, current-rank model weights",
+  "tensor_parallel_size": 8,
+  "tp_rank": 0
+}

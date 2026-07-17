@@ -1,0 +1,17 @@
+{
+  "applied_hooks": [
+    "sglang.srt.models.step3p5.Step3p5ForCausalLM.forward",
+    "sglang.srt.models.step3p5.Step3p5MLP.forward"
+  ],
+  "checkpoint_loaded": false,
+  "cuda_device": "NVIDIA A800-SXM4-80GB",
+  "loaded_model_replay_performed": false,
+  "loaded_model_source": "/ssd1/sdh/sglang/python/sglang/srt/models/step3p5.py",
+  "rank_zero_format_only": true,
+  "repeated_call_count": 1,
+  "saved_shape_count": 3,
+  "skipped_call_count": 1,
+  "tensor_parallel_size": 8,
+  "torch_version": "2.11.0+cu129",
+  "tp_rank": 0
+}

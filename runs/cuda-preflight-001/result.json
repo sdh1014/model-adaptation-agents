@@ -1,0 +1,21 @@
+{
+  "action": "preflight",
+  "capture_status": "PREFLIGHT_PASSED",
+  "consumes_capture_session": false,
+  "evidence": [
+    "capture-config.json",
+    "preflight-capture.log",
+    "capture-state.json",
+    "preflight-capture-summary.json"
+  ],
+  "operator_id": "Step3p5MLP.forward",
+  "passed": true,
+  "serialization": "candidate-torch-save/v2",
+  "spec_binding": {
+    "contract_data_sha256": "8536c27c52a7b48f97fca9415d9b7dc90a3401aea9776f35d0dbf61e01f8660a",
+    "contract_revision": 4,
+    "spec_id": "step3p7-flash-p800-demo"
+  },
+  "summary": "The installed SGLang hook captured rank-0 MLP boundary records; real checkpoint capture and loaded-model replay remain real-model steps.",
+  "tool": "capture_golden.py"
+}
