@@ -1,0 +1,5 @@
+worker_mode=cuda-self-replay
+returncode=0
+--- stdout ---
+
+--- stderr ---

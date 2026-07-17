@@ -1,0 +1,146 @@
+{
+  "capture_closed": false,
+  "checkpoint": {
+    "config_digest": "8d740ba5819e574b7a606ea7aa6d7d381142ed5cc77cab96dde2892c10414042",
+    "id": "stepfun-ai/Step-3.7-Flash@5f6244077ac62e04eec3f320501ff8c2b293373a",
+    "model_path": "stepfun-ai/Step-3.7-Flash",
+    "revision": "5f6244077ac62e04eec3f320501ff8c2b293373a"
+  },
+  "loaded_checkpoint": null,
+  "operator_id": "sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul",
+  "repeated_call_count": 1,
+  "samples": [
+    {
+      "file": "samples/a6373c992b411bb6ad5a5472c7f15b8c3c443c2f68cb8c40c0aab8bb3c70c9b7.pt",
+      "repeat_count": 0,
+      "shape_id": "a6373c992b411bb6ad5a5472c7f15b8c3c443c2f68cb8c40c0aab8bb3c70c9b7",
+      "signature": {
+        "inputs": {
+          "x": {
+            "dtype": "bfloat16",
+            "kind": "tensor",
+            "layout": "strided",
+            "shape": [
+              1,
+              16
+            ],
+            "stride": [
+              16,
+              1
+            ]
+          }
+        },
+        "model_path": "target",
+        "non_tensor_args": {
+          "gemm1_limit": 7.0
+        },
+        "operator_id": "sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul",
+        "parameters": {},
+        "tensor_parallel_size": 8,
+        "tp_rank": 0
+      }
+    },
+    {
+      "file": "samples/0e4b2019979d881300ae0cfe47f845c08f1641b9d84f36f6befa963dd5459d7b.pt",
+      "repeat_count": 1,
+      "shape_id": "0e4b2019979d881300ae0cfe47f845c08f1641b9d84f36f6befa963dd5459d7b",
+      "signature": {
+        "inputs": {
+          "x": {
+            "dtype": "bfloat16",
+            "kind": "tensor",
+            "layout": "strided",
+            "shape": [
+              2,
+              16
+            ],
+            "stride": [
+              16,
+              1
+            ]
+          }
+        },
+        "model_path": "target",
+        "non_tensor_args": {
+          "gemm1_limit": 7.0
+        },
+        "operator_id": "sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul",
+        "parameters": {},
+        "tensor_parallel_size": 8,
+        "tp_rank": 0
+      }
+    },
+    {
+      "file": "samples/5f0aa83cf1e39715be3fb1e566b7ffaca31b949aeaea0633c16e5ff82c72872d.pt",
+      "repeat_count": 0,
+      "shape_id": "5f0aa83cf1e39715be3fb1e566b7ffaca31b949aeaea0633c16e5ff82c72872d",
+      "signature": {
+        "inputs": {
+          "x": {
+            "dtype": "bfloat16",
+            "kind": "tensor",
+            "layout": "strided",
+            "shape": [
+              4,
+              16
+            ],
+            "stride": [
+              16,
+              1
+            ]
+          }
+        },
+        "model_path": "target",
+        "non_tensor_args": {
+          "gemm1_limit": 7.0
+        },
+        "operator_id": "sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul",
+        "parameters": {},
+        "tensor_parallel_size": 8,
+        "tp_rank": 0
+      }
+    }
+  ],
+  "saved_shape_count": 3,
+  "schema": "kernel-call-capture-state/v1",
+  "skipped_call_count": 1,
+  "skipped_signatures": [
+    {
+      "call_count": 1,
+      "shape_id": "2e0707437157c5029152a2dd495a933f05d72e970958f8656a35ef07d0d5f9db",
+      "signature": {
+        "inputs": {
+          "x": {
+            "dtype": "bfloat16",
+            "kind": "tensor",
+            "layout": "strided",
+            "shape": [
+              8,
+              16
+            ],
+            "stride": [
+              16,
+              1
+            ]
+          }
+        },
+        "model_path": "target",
+        "non_tensor_args": {
+          "gemm1_limit": 7.0
+        },
+        "operator_id": "sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul",
+        "parameters": {},
+        "tensor_parallel_size": 8,
+        "tp_rank": 0
+      }
+    }
+  ],
+  "spec_binding": {
+    "contract_data_sha256": "f683ea62427279da3c899a3ef0afcfa1d16298b7424154664c7e3fac9b13d938",
+    "contract_revision": 5,
+    "spec_id": "step3p7-flash-p800-demo"
+  },
+  "status": "ACTIVE",
+  "tensor_parallel_size": 8,
+  "tp_rank": 0
+}
