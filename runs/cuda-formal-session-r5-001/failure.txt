@@ -1,0 +1,53 @@
+Formal CUDA capture failed after the unique session reservation was pushed.
+
+Reservation: evidence/cuda-formal-capture-r5-001 pushed as [new branch]
+  -> per runbook, the one and only formal Capture Session is CONSUMED.
+  -> no second session created; no retry with a new run/branch name.
+
+Failing step: Section 5 (launch real TP8/BF16 server).
+
+Failing command:
+  python -m sglang.launch_server \
+    --model-path stepfun-ai/Step-3.7-Flash \
+    --revision 5f6244077ac62e04eec3f320501ff8c2b293373a \
+    --tp-size 8 \
+    --dtype bfloat16 \
+    --cuda-graph-backend-decode disabled \
+    --cuda-graph-backend-prefill disabled \
+    --host 127.0.0.1 --port 30000
+
+Outcome: server process (PID 98141) exited during startup, before the model
+loaded and before the /health endpoint ever came up. It never reached the
+capture hook, so no samples were produced.
+
+Error summary (from server.log):
+  '[Errno 101] Network is unreachable' thrown while requesting HEAD
+  https://huggingface.co/stepfun-ai/Step-3.7-Flash/resolve/5f6244077ac62e04eec3f320501ff8c2b293373a/config.json
+  OSError: Can't load the configuration of 'stepfun-ai/Step-3.7-Flash'.
+  ... make sure 'stepfun-ai/Step-3.7-Flash' is the correct path to a directory
+  containing a config.json file
+
+Root cause:
+  - The model checkpoint is NOT available locally. The HF cache dir
+    /root/.cache/huggingface/hub/models--stepfun-ai--Step-3.7-Flash exists and
+    refs/main -> 5f6244077ac62e04eec3f320501ff8c2b293373a, but snapshots/ is
+    empty: the pinned revision's config.json and weights were never downloaded.
+  - huggingface.co is unreachable from this host (Errno 101). The model server
+    does not use the git proxy, so it cannot fetch the config/weights.
+  - Because there is no cached snapshot, HF_HUB_OFFLINE=1 would not help either.
+  - This is an environment/model-availability failure, not a capture-logic
+    failure. All non-consuming prerequisites (contract/scan/adapter/preflight,
+    fixed SGLang SHA 49e384ce..., >=8 CUDA devices, port 30000 free, golden
+    prepare) had passed before launch.
+
+Prerequisites that were satisfied before the failure:
+  - runs/spec-binding-004/result.json, runs/scan-006/result.json,
+    runs/adapter-002/result.json, runs/cuda-preflight-r5-002/result.json all
+    validated (formal CUDA prerequisites: PASS).
+  - SGLang worktree /ssd1/sdh/sglang at 49e384ce9d304648e9959666ecb8ce8cd98d0deb.
+  - torch 2.11.0+cu129, 8x NVIDIA A800-SXM4-80GB, port 30000 available.
+  - Golden prepare (runs/cuda-golden-r5-001) produced capture-config.json with
+    capture_status=PREPARED, consumes_capture_session=false.
+
+Next: waiting for the Agent to set the Spec to BLOCKED / CUDA_CAPTURE with this
+evidence. No bundle build, no next-state Spec, no P800 baseline started.

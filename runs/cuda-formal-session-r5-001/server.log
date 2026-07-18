@@ -1,0 +1,100 @@
+/ssd1/sdh/sglang/python/sglang/launch_server.py:55: UserWarning: 'python -m sglang.launch_server' is still supported, but 'sglang serve' is the recommended entrypoint.
+  Example: sglang serve --model-path <model> [options]
+  warnings.warn(
+'[Errno 101] Network is unreachable' thrown while requesting HEAD https://huggingface.co/stepfun-ai/Step-3.7-Flash/resolve/5f6244077ac62e04eec3f320501ff8c2b293373a/config.json
+[2026-07-18 11:10:23] '[Errno 101] Network is unreachable' thrown while requesting HEAD https://huggingface.co/stepfun-ai/Step-3.7-Flash/resolve/5f6244077ac62e04eec3f320501ff8c2b293373a/config.json
+Retrying in 1s [Retry 1/5].
+[2026-07-18 11:10:23] Retrying in 1s [Retry 1/5].
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.12/dist-packages/transformers/configuration_utils.py", line 737, in _get_config_dict
+    resolved_config_file = cached_file(
+                           ^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/transformers/utils/hub.py", line 278, in cached_file
+    file = cached_files(path_or_repo_id=path_or_repo_id, filenames=[filename], **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/transformers/utils/hub.py", line 512, in cached_files
+    raise e
+  File "/usr/local/lib/python3.12/dist-packages/transformers/utils/hub.py", line 422, in cached_files
+    hf_hub_download(
+  File "/usr/local/lib/python3.12/dist-packages/huggingface_hub/utils/_validators.py", line 88, in _inner_fn
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/huggingface_hub/file_download.py", line 1016, in hf_hub_download
+    return _hf_hub_download_to_cache_dir(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/huggingface_hub/file_download.py", line 1149, in _hf_hub_download_to_cache_dir
+    _get_metadata_or_catch_error(
+  File "/usr/local/lib/python3.12/dist-packages/huggingface_hub/file_download.py", line 1691, in _get_metadata_or_catch_error
+    metadata = get_hf_file_metadata(
+               ^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/huggingface_hub/utils/_validators.py", line 88, in _inner_fn
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/huggingface_hub/file_download.py", line 1613, in get_hf_file_metadata
+    response = _httpx_follow_relative_redirects_with_backoff(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/huggingface_hub/utils/_http.py", line 700, in _httpx_follow_relative_redirects_with_backoff
+    response = http_backoff(
+               ^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/huggingface_hub/utils/_http.py", line 574, in http_backoff
+    return next(
+           ^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/huggingface_hub/utils/_http.py", line 482, in _http_backoff_base
+    response = client.request(method=method, url=url, **kwargs)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/httpx/_client.py", line 825, in request
+    return self.send(request, auth=auth, follow_redirects=follow_redirects)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/httpx/_client.py", line 901, in send
+    raise RuntimeError("Cannot send a request, as the client has been closed.")
+RuntimeError: Cannot send a request, as the client has been closed.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/ssd1/sdh/sglang/python/sglang/launch_server.py", line 67, in <module>
+    server_args = prepare_server_args(sys.argv[1:])
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/ssd1/sdh/sglang/python/sglang/srt/server_args.py", line 7232, in prepare_server_args
+    return ServerArgs.from_cli_args(raw_args)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/ssd1/sdh/sglang/python/sglang/srt/server_args.py", line 6506, in from_cli_args
+    return cls(**{attr: getattr(args, attr) for attr in attrs})
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<string>", line 407, in __init__
+  File "/ssd1/sdh/sglang/python/sglang/srt/server_args.py", line 2524, in __post_init__
+    self._handle_gpu_memory_settings(gpu_mem)
+  File "/ssd1/sdh/sglang/python/sglang/srt/server_args.py", line 3243, in _handle_gpu_memory_settings
+    if not self.use_mla_backend():
+           ^^^^^^^^^^^^^^^^^^^^^^
+  File "/ssd1/sdh/sglang/python/sglang/srt/server_args.py", line 6575, in use_mla_backend
+    model_config = self.get_model_config()
+                   ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/ssd1/sdh/sglang/python/sglang/srt/server_args.py", line 6556, in get_model_config
+    self.model_config = ModelConfig.from_server_args(self)
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/ssd1/sdh/sglang/python/sglang/srt/configs/model_config.py", line 500, in from_server_args
+    return ModelConfig(
+           ^^^^^^^^^^^^
+  File "/ssd1/sdh/sglang/python/sglang/srt/configs/model_config.py", line 274, in __init__
+    get_config(
+  File "/ssd1/sdh/sglang/python/sglang/srt/utils/common.py", line 3558, in wrapper
+    result = func(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^
+  File "/ssd1/sdh/sglang/python/sglang/srt/utils/hf_transformers/config.py", line 249, in get_config
+    config = parser.parse(
+             ^^^^^^^^^^^^^
+  File "/ssd1/sdh/sglang/python/sglang/srt/utils/hf_transformers/config.py", line 63, in parse
+    config = AutoConfig.from_pretrained(
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/transformers/models/auto/configuration_auto.py", line 374, in from_pretrained
+    config_dict, unused_kwargs = PreTrainedConfig.get_config_dict(pretrained_model_name_or_path, **kwargs)
+                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/transformers/configuration_utils.py", line 682, in get_config_dict
+    config_dict, kwargs = cls._get_config_dict(pretrained_model_name_or_path, **kwargs)
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/transformers/configuration_utils.py", line 759, in _get_config_dict
+    raise OSError(
+OSError: Can't load the configuration of 'stepfun-ai/Step-3.7-Flash'. If you were trying to load it from 'https://huggingface.co/models', make sure you don't have a local directory with the same name. Otherwise, make sure 'stepfun-ai/Step-3.7-Flash' is the correct path to a directory containing a config.json file
