@@ -6,7 +6,8 @@
 >
 > 当前选择：`sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul`
 >
-> 证据边界：当前只是静态源码缺口，尚未完成 CUDA Golden Capture 或 P800 baseline
+> 证据边界：正式 CUDA Session 已失败且后续重启产物未被接受；尚无有效 Golden，
+> 也未开始 P800 baseline
 
 ## 1. 目标
 
@@ -408,18 +409,17 @@ worker result、Golden state 和 wrapper result 还必须绑定同一 sidecar SH
 上限；证据为
 `runs/repair-loop-tool-001`，只来自临时 Git 仓库和 synthetic replay。
 
-下一步执行 Ticket 15。真实 Golden、CUDA 端 bundle 和 `WAITING / HANDOFF` 状态
-必须由唯一正式 CUDA Session 产生；当前源码工作区不得把 preflight 或 Ticket 14
-测试夹具当成正式 Golden。
+Ticket 15 已回传正式 evidence，但没有进入 Handoff。唯一 Session 占位后，首次
+服务 PID `98141` 因 checkpoint 不可用而退出；失败 Run 已明确记录 Session 消耗。
+后续成功采集使用不同服务 PID `114828`。Agent 静态核对确认三份样本文件与
+sidecar 记录的大小和 SHA-256 一致，且 CUDA self-replay 声称通过；本机没有
+反序列化 Tensor。这些产物来自终止性失败后的第二次模型启动，不满足 revision 5
+的一次性 Contract。
 
-由于 Agent 与 CUDA 机器之间通过 GitHub 交换证据，Ticket 15 分成两个交接点。
-第一段在 CUDA 机只启动一次真实模型，完成采集、`record-samples` 和 CUDA
-self-replay，然后回传 Session、Golden 与 record-samples 三份 Run。Agent 先核对
-真实 shape、样本摘要和自回放，再生成临时 `WAITING / HANDOFF` Spec。第二段在
-CUDA 机只用这份临时 Spec build + verify bundle，不再启动模型，因此不构成第二个
-Capture Session。第一次启动模型前，必须先把 Session 标记推到固定 GitHub
-evidence 分支；成功或失败都只向同一分支追加证据，不能用新分支绕过一次性限制。
-完整命令见
-`model-adaptation/references/formal-cuda-capture.md`。
+因此当前 Working State 为 `BLOCKED / CUDA_CAPTURE`，`golden_run` 保持 `null`，
+不生成临时 Handoff Spec、不构建 bundle，也不开始 P800 baseline。若要把环境准备
+完成后的启动视为允许的重试，必须由人批准新的 Contract revision；Agent 不能仅改
+Working State 绕过该限制。审计证据见
+`runs/cuda-formal-review-r5-001/result.json`。
 
 完整机器可读扫描证据见 `runs/scan-006/result.json`；原始 `scan-005` 保留为历史。

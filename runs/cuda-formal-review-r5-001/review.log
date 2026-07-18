@@ -1,0 +1,20 @@
+Formal CUDA evidence review
+
+reservation commit: 971eaf3ca821cf5dd7c054c526872c29a07d64b3
+failure commit: fb8d9d53cd3e8e23edef1173c7af65d09d094e61
+later capture commit: 32397bbbb34c0ba985cf41eee352bfa09cf0c1fa
+
+The failure commit records server PID 98141, says the unique Session was
+consumed, and directs the Agent to enter BLOCKED / CUDA_CAPTURE. The later
+capture commit changes server.pid to 114828 and replaces server.log with output
+from the later launch.
+
+Static validation did not deserialize any Tensor. All three sample files match
+the sizes and SHA-256 values in sample-files.json. The same sidecar SHA-256 is
+present in the record-samples result, Golden state, and CUDA self-replay result.
+Those checks establish byte integrity only; they do not repair the provenance
+violation.
+
+Decision: reject the later Golden artifacts, keep every uploaded file as
+evidence, set the formal Session to FAILED, and enter BLOCKED / CUDA_CAPTURE.
+Resuming requires a human-approved Contract revision.

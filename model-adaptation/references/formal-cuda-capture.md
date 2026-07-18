@@ -1,5 +1,10 @@
 # Ticket 15：唯一正式 CUDA Capture Session
 
+> **不要再次执行。** `cuda-formal-session-r5-001` 已在首次模型启动失败时消耗。
+> 后续不同 PID 产生的 Golden 因违反一次性 Contract 未被接受；当前状态为
+> `BLOCKED / CUDA_CAPTURE`。证据见
+> `runs/cuda-formal-review-r5-001/result.json`。
+
 ## 这一步会做什么
 
 本页只在 CUDA 机器执行。它会启动一次真实的 Step-3.7-Flash TP8 服务，采集当前

@@ -1,0 +1,57 @@
+{
+  "accepted_golden_run": null,
+  "action": "review-formal-cuda-capture",
+  "capture_session_id": "cuda-formal-session-r5-001",
+  "commit_chain": {
+    "failure": "fb8d9d53cd3e8e23edef1173c7af65d09d094e61",
+    "later_capture": "32397bbbb34c0ba985cf41eee352bfa09cf0c1fa",
+    "reservation": "971eaf3ca821cf5dd7c054c526872c29a07d64b3"
+  },
+  "contract_decision": {
+    "next_status": "BLOCKED",
+    "phase": "CUDA_CAPTURE",
+    "reason": "The reserved formal Session failed before capture and was recorded as consumed; a later model launch used a different PID, so its Golden artifacts cannot satisfy the one-Session Contract.",
+    "resume_requires_contract_revision": true
+  },
+  "evidence": [
+    "review.log"
+  ],
+  "reviewed_artifacts": [
+    "runs/cuda-formal-session-r5-001/session-start.json",
+    "runs/cuda-formal-session-r5-001/failure.txt",
+    "runs/cuda-formal-session-r5-001/server.pid",
+    "runs/cuda-formal-session-r5-001/server.log",
+    "runs/cuda-golden-r5-001/sample-files.json",
+    "runs/cuda-golden-r5-001/capture-state.json",
+    "runs/cuda-golden-r5-001/self-replay/result.json",
+    "runs/cuda-golden-r5-001-sample-record/result.json"
+  ],
+  "evidence_branch": "evidence/cuda-formal-capture-r5-001",
+  "later_capture_accepted": false,
+  "observations": {
+    "failed_run_files_modified_by_later_capture": [
+      "runs/cuda-formal-session-r5-001/server.log",
+      "runs/cuda-formal-session-r5-001/server.pid"
+    ],
+    "failed_server_pid": "98141",
+    "failure_record_declared_session_consumed": true,
+    "first_launch_reached_capture": false,
+    "later_cuda_self_replay_claimed_pass": true,
+    "later_sample_file_count": 3,
+    "later_sample_files_sha256": "38e332423445ad4b4f1b0be934501a0f02ab4751d3f9948ce7916334e779d8ff",
+    "later_server_pid": "114828",
+    "sample_bytes_match_sidecar": true,
+    "server_process_restarted": true,
+    "tensor_payloads_deserialized_during_source_review": false
+  },
+  "passed": false,
+  "reservation_id": "228f6f6522734bf8b7ce4565dda71945",
+  "session_status": "FAILED",
+  "spec_binding": {
+    "contract_data_sha256": "f683ea62427279da3c899a3ef0afcfa1d16298b7424154664c7e3fac9b13d938",
+    "contract_revision": 5,
+    "spec_id": "step3p7-flash-p800-demo"
+  },
+  "summary": "The uploaded sample files match the sidecar size and SHA-256 metadata, but no Tensor payload was deserialized during this source review. The later successful capture followed an already-recorded terminal failure and a second server launch, so no Golden Run is accepted and no Handoff Bundle may be built.",
+  "tool": "migration-agent"
+}

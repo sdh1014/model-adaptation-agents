@@ -211,14 +211,14 @@ Agent 每次动作前完整读取 Contract 与本区；每次动作结束后立�
 ### Current
 
 - `observed_contract_revision`: `5`
-- `state_revision`: `23`
-- `status`: `ACTIVE`
+- `state_revision`: `24`
+- `status`: `BLOCKED`
 - `phase`: `CUDA_CAPTURE`
 - `execution_site`: `SOURCE`
 - `active_operator`: `sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul`
-- `last_completed_action`: `repair_loop_tool_implemented`
-- `last_run`: `runs/repair-loop-tool-001`
-- `next_action`: `在 CUDA 机器按 model-adaptation/references/formal-cuda-capture.md 执行 Ticket 15 第一段：运行唯一正式 Session，完成 record-samples 与 CUDA self-replay，并通过 GitHub 回传三份 Run；不得重开 Session、提前构建 bundle 或自行修改 Spec`
+- `last_completed_action`: `formal_cuda_capture_evidence_reviewed`
+- `last_run`: `runs/cuda-formal-review-r5-001`
+- `next_action`: `none`
 
 规则：`ACTIVE` 时 `next_action` 必须恰好一条；`WAITING` 时必须是一条人工动作；`PASS`、`BLOCKED`、`NEEDS_HUMAN` 时必须为 `none`。
 
@@ -233,7 +233,7 @@ Agent 每次动作前完整读取 Contract 与本区；每次动作结束后立�
 
 | operator_id | scan_verdict | golden | demo_role | repair | evidence |
 |---|---|---|---|---|---|
-| `sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul` | `CAPTURE_REQUIRED` | `PLANNED` | 首选最小 Demo | Kunlun MoE 的普通 SwiGLU 没有接收 clamp limit；待 P800 baseline 证明真实失败 | `runs/scan-006/result.json` |
+| `sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul` | `CAPTURE_REQUIRED` | `FAILED` | 首选最小 Demo | 唯一正式 Session 首次启动失败后又以不同 PID 重启；后续 Golden 不满足一次性采集 Contract | `runs/cuda-formal-review-r5-001/result.json` |
 | `sgl_kernel.gemma_rmsnorm` | `CAPTURE_REQUIRED` | `NOT_PLANNED` | 对比候选 | 缺少 Gemma symbol，且样本需要保存一个直接参数 `weight` | `runs/scan-006/result.json` |
 | `sgl_kernel.gemma_fused_add_rmsnorm` | `CAPTURE_REQUIRED` | `NOT_PLANNED` | 后续缺口 | 双 in-place 输出比首选边界复杂 | `runs/scan-006/result.json` |
 | `sgl_kernel.topk_sigmoid` | `CAPTURE_REQUIRED` | `NOT_PLANNED` | 对比候选 | 权重与 ids 双输出、排序语义比首选复杂 | `runs/scan-006/result.json` |
@@ -249,8 +249,8 @@ preflight 输入。
 
 ### CUDA Capture
 
-- `capture_session_id`: `null`
-- `session_status`: `NOT_STARTED`
+- `capture_session_id`: `cuda-formal-session-r5-001`
+- `session_status`: `FAILED`
 - `golden_run`: `null`
 - `captured_sample_counts`: `{}`
 
@@ -287,20 +287,20 @@ baseline replay 不算修复尝试。每轮修改源码前递增 `attempts_used`
 | CUDA/P800 sample format and fixed comparator validated | `PASS` | `runs/p800-portability-r5-001/result.json` |
 | verifiable manual Handoff Bundle tool implemented | `PASS` | `runs/handoff-tool-001/result.json` |
 | recoverable five-attempt repair loop tool implemented | `PASS` | `runs/repair-loop-tool-001/result.json` |
-| one CUDA Session and at most three samples per operator | `PENDING` | `null` |
-| CUDA self-replay passed | `PENDING` | `null` |
+| one CUDA Session and at most three samples per operator | `BLOCKED` | `runs/cuda-formal-review-r5-001/result.json` |
+| CUDA self-replay passed | `BLOCKED` | `runs/cuda-formal-review-r5-001/result.json` |
 | bundle verified on CUDA and P800 | `PENDING` | `null` |
 | selected operator failed P800 baseline | `PENDING` | `null` |
 | repair stayed inside boundary and attempt limit | `PENDING` | `null` |
 | all selected samples passed Precision Gate | `PENDING` | `null` |
 | passing patch is the only workspace change | `PENDING` | `null` |
-| failed Runs traceable and next_action none | `PENDING` | `null` |
+| failed Runs traceable and next_action none | `PASS` | `runs/cuda-formal-review-r5-001/result.json` |
 
 ### Stop reason
 
-- `stop_reason`: `null`
+- `stop_reason`: `唯一正式 Session 首次模型启动失败后已记录为消耗；随后使用不同 PID 再次启动模型，后续 Golden 不满足一次性采集 Contract`
 - `human_question`: `null`
-- `resume_requires_contract_revision`: `false`
+- `resume_requires_contract_revision`: `true`
 
 ### Decisions
 
@@ -331,5 +331,6 @@ baseline replay 不算修复尝试。每轮修改源码前递增 `attempts_used`
 | `21` | 当前 `adapter-002` 的 CUDA preflight 已经 GitHub 回传并通过结构校验：三个 rank-0 shape、样本摘要绑定和新进程 self-replay 均通过，且未消耗正式 Capture Session | `runs/cuda-preflight-r5-002/result.json` |
 | `22` | Ticket 14 完成基线检查、baseline 判定、连续且不可复用的单一假设 Run、replay 前完整 patch 保存、patch/replay 联合摘要、失败恢复、通过保留和五轮上限；正式 Spec 只接受 P800 kernel-replay，下一步进入 Ticket 15 的唯一正式 CUDA Session | `runs/repair-loop-tool-001/result.json` |
 | `23` | 在 SOURCE 准备 Ticket 15 正式 runbook，下一动作转到 CUDA；唯一模型 Session 必须先在固定 GitHub evidence 分支原子占位，再运行真实 Golden 采集、自回放和样本摘要，Agent 核验后才生成临时交接 Spec；当前仍未消耗 Session | `model-adaptation/references/formal-cuda-capture.md` |
+| `24` | 正式 Session 占位后首次模型启动因 checkpoint 不可用而失败，失败 Run 明确记录 Session 已消耗；随后上传的成功采集使用另一个服务 PID，样本字节虽完整但来源违反一次性 Contract，因此不接受 Golden、不构建 bundle，并进入 `BLOCKED / CUDA_CAPTURE` | `runs/cuda-formal-review-r5-001/result.json` |
 
 <!-- AGENT-WRITABLE WORKING STATE: END -->

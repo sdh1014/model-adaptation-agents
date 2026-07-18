@@ -57,3 +57,15 @@ revision 5 当前选择。
   失败都只向同一分支追加证据，避免换 checkout 后误开第二个 Session；
 - 当前最近动作仍在 SOURCE，`next_action` 指向 CUDA，且 `session_status` 仍是
   `NOT_STARTED`。本机没有创建正式 Run，也没有消耗 Session。
+
+2026-07-18 正式 evidence 回传后的审计结论：
+
+- `971eaf3` 完成唯一 Session 占位；
+- `fb8d9d5` 记录首次服务 PID `98141` 因 checkpoint 不可用而退出，并明确写明
+  Session 已消耗、不得重试；
+- `32397bb` 后续成功证据来自另一个服务 PID `114828`。三份样本文件与 sidecar
+  记录的大小和 SHA-256 一致，CUDA self-replay 也声称通过；本机没有反序列化
+  Tensor，且这些产物产生在终止性失败之后；
+- 按 revision 5 Contract，不接受该 Golden，不生成 Handoff Spec 或 bundle。
+  Working State 已进入 `BLOCKED / CUDA_CAPTURE`，恢复必须先由人批准新的 Contract
+  revision。完整审计见 `runs/cuda-formal-review-r5-001/result.json`。

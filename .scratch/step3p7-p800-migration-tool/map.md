@@ -5,8 +5,8 @@
 交付一份可直接指导最小 Demo 实现的中文方案设计文档：说明一个 Spec 驱动、单 Agent、少量确定性脚本组成的算子迁移工具，如何完成 Step-3.7-Flash 真实路径扫描、一次性 CUDA Golden 采集、人工跨机器交接，以及 P800 上单算子最多三种 shape 的自动修复与精度验收。
 
 最终文档保存为 `outputs/step3p7-p800-migration-tool-design.md`。设计形成后，本地图
-继续记录通过 tickets 实现最小 Demo 的范围变化；当前仍未运行正式 CUDA/P800
-Demo。
+继续记录通过 tickets 实现最小 Demo 的范围变化。正式 CUDA Session 已消耗并进入
+`BLOCKED / CUDA_CAPTURE`，没有接受 Golden，也没有开始 P800 Demo。
 
 ## Notes
 
@@ -53,14 +53,16 @@ Demo。
 - [确认跨 CUDA/P800 的样本格式与精度比较](issues/12-portable-sample-and-precision-compare.md)：CUDA Torch `2.11.0+cu129` 写出的三个 BF16 样本已由 P800 修改版 Torch `2.5.1+cu118` 读回；固定比较器正常 PASS 并正确拒绝有意数值偏差，Run 不保存 P800 actual Tensor。
 - [实现可验证的人工交接包](issues/13-verifiable-manual-handoff-bundle.md)：已完成 pre-replay 样本文件摘要记录、样本摘要与 replay 证据绑定、build/verify、完整允许文件 manifest、CUDA self-replay 结果重算和篡改/错误 Contract 测试；工具不解析 Working State，Agent 按 Skill 校验下一状态临时 Spec 后再原子推进。
 - [实现可恢复的五轮修复闭环](issues/14-five-attempt-repair-loop.md)：已完成固定 Kunlun revision/干净工作区检查、baseline 零计数判定、连续且不可复用的单一假设 Run、replay 前完整 patch 固化、patch/replay 联合摘要、失败恢复、通过保留、未知修改保护和第五轮上限；synthetic 只允许绑定测试 Spec，不冒充 P800 实机闭环。
+- [一次性采集已选择的 kernel 调用](issues/15-one-time-cuda-capture-for-selected-kernel.md)：唯一正式 Session 首次启动失败后已记录为消耗；后续成功采集来自另一个服务 PID，样本文件虽与 sidecar 大小和 SHA-256 一致，但不满足一次性 Contract，当前为 `BLOCKED / CUDA_CAPTURE`。
 
 ## Not yet specified
 
-- Ticket 15 的唯一正式 CUDA Capture 尚未执行。
+- 若要接受环境准备完成后的第二次模型启动，必须由人批准新的 Contract revision；
+  Agent 不能把当前后续 Golden 直接升级为正式证据。
 
 ## Out of scope
 
-- 在 Ticket 15 前运行正式 CUDA Capture 或 P800 算子 baseline。
+- 在当前 `BLOCKED / CUDA_CAPTURE` 状态下构建 bundle 或运行 P800 baseline。
 - 重新登录真实 CUDA/P800 环境做其他能力验证；`torch.testing` 可用性直接采用用户已完成的实机验证结论。
 - 自动 SSH、远程执行、自动上传或凭证管理。
 - 新增 C++/自定义 Kernel、底层算子注册或性能优化。
