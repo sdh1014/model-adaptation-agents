@@ -88,11 +88,10 @@ class Ticket15FormalCudaEvidenceReviewTest(unittest.TestCase):
         self.assertEqual(record["sample_files_sha256"], sidecar_sha)
         self.assertTrue(replay["passed"])
 
-    def test_review_rejects_later_capture_and_blocks_working_state(self) -> None:
+    def test_initial_review_preserves_the_rejected_interpretation(self) -> None:
         review = json.loads(
             (REVIEW_RUN / "result.json").read_text(encoding="utf-8")
         )
-        spec = SPEC.read_text(encoding="utf-8")
 
         self.assertFalse(review["passed"])
         self.assertEqual(review["session_status"], "FAILED")
@@ -112,20 +111,6 @@ class Ticket15FormalCudaEvidenceReviewTest(unittest.TestCase):
         self.assertEqual(
             review["commit_chain"]["later_capture"],
             LATER_CAPTURE_COMMIT,
-        )
-        self.assertIn("- `status`: `BLOCKED`", spec)
-        self.assertIn("- `phase`: `CUDA_CAPTURE`", spec)
-        self.assertIn("- `session_status`: `FAILED`", spec)
-        self.assertIn("- `golden_run`: `null`", spec)
-        self.assertIn("- `next_action`: `none`", spec)
-        self.assertIn(
-            "| CUDA self-replay passed | `BLOCKED` | "
-            "`runs/cuda-formal-review-r5-001/result.json` |",
-            spec,
-        )
-        self.assertIn(
-            "- `resume_requires_contract_revision`: `true`",
-            spec,
         )
 
 

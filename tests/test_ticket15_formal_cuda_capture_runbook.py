@@ -239,20 +239,23 @@ class Ticket15FormalCudaCaptureRunbookTest(unittest.TestCase):
         self.assertIn('"kind": "captured-hook-plus-fixed-source"', self.runbook)
         self.assertNotIn('"schema": "cuda-runtime-profile/v1"', self.runbook)
 
-    def test_spec_blocks_reuse_after_the_uploaded_session_failed(
+    def test_spec_routes_only_to_handoff_after_capture_is_accepted(
         self,
     ) -> None:
         self.assertIn("- `execution_site`: `SOURCE`", self.spec)
         self.assertIn("formal-cuda-capture.md", self.spec)
-        self.assertIn("- `status`: `BLOCKED`", self.spec)
-        self.assertIn("- `session_status`: `FAILED`", self.spec)
-        self.assertIn("- `golden_run`: `null`", self.spec)
-        self.assertIn("- `next_action`: `none`", self.spec)
+        self.assertIn("- `status`: `ACTIVE`", self.spec)
+        self.assertIn("- `session_status`: `SEALED`", self.spec)
         self.assertIn(
-            "runs/cuda-formal-review-r5-001/result.json",
+            "- `golden_run`: `runs/cuda-golden-r5-001`",
             self.spec,
         )
-        self.assertIn("不要再次执行", self.runbook)
+        self.assertIn(
+            "model-adaptation/references/formal-cuda-handoff.md",
+            self.spec,
+        )
+        self.assertIn("采集已经完成，不要再次执行", self.runbook)
+        self.assertIn("不得重启模型", self.runbook)
 
 
 if __name__ == "__main__":

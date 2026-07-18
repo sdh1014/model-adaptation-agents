@@ -1,0 +1,21 @@
+Formal CUDA evidence review after human clarification
+
+Human decision:
+The startup failure caused by the wrong model loading path did not load the
+model, did not reach the capture hook, and produced no sample. It does not
+count as a Capture Session.
+
+Applied to the uploaded evidence:
+- PID 98141 failed before model load and produced no sample: not counted.
+- PID 114828 loaded the fixed checkpoint and produced all three saved shapes:
+  counted as the one formal Capture Session.
+- The three sample files match sample-files.json size and SHA-256 metadata.
+- The record-samples result, Golden state, and CUDA self-replay result bind the
+  same sample-files.json SHA-256.
+- Source-side review did not deserialize Tensor payloads; CUDA self-replay is
+  accepted from its sealed runtime evidence.
+
+Decision:
+Supersede cuda-formal-review-r5-001, accept runs/cuda-golden-r5-001, mark the
+formal Session SEALED, and prepare the CUDA-side Handoff Bundle build/verify
+without restarting the model.

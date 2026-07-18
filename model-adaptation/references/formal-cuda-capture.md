@@ -1,9 +1,9 @@
 # Ticket 15：唯一正式 CUDA Capture Session
 
-> **不要再次执行。** `cuda-formal-session-r5-001` 已在首次模型启动失败时消耗。
-> 后续不同 PID 产生的 Golden 因违反一次性 Contract 未被接受；当前状态为
-> `BLOCKED / CUDA_CAPTURE`。证据见
-> `runs/cuda-formal-review-r5-001/result.json`。
+> **采集已经完成，不要再次执行。** 人已明确模型加载前、未进入 Hook 且没有产生
+> 样本的失败不计入 Capture Session。PID `114828` 是唯一实际采集 Session，
+> `runs/cuda-golden-r5-001` 已接受并封存。下一步只执行
+> `model-adaptation/references/formal-cuda-handoff.md`，不得重启模型。
 
 ## 这一步会做什么
 

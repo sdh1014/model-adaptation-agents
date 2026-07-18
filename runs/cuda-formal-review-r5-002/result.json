@@ -1,0 +1,42 @@
+{
+  "accepted_golden_run": "runs/cuda-golden-r5-001",
+  "action": "review-formal-cuda-capture",
+  "capture_session_id": "cuda-formal-session-r5-001",
+  "counting_rule": {
+    "model_load_failure_counts_as_session": false,
+    "sample_producing_run_counts_as_session": true
+  },
+  "evidence": [
+    "review.log"
+  ],
+  "human_decision": "模型加载路径错误且未进入采集 Hook、未产生样本的启动失败不计入 Capture Session。",
+  "observations": {
+    "ignored_model_load_failure_pid": "98141",
+    "ignored_model_load_failure_reached_capture": false,
+    "sample_bytes_match_sidecar": true,
+    "sample_files_sha256": "38e332423445ad4b4f1b0be934501a0f02ab4751d3f9948ce7916334e779d8ff",
+    "sample_producing_pid": "114828",
+    "saved_shape_count": 3,
+    "self_replay_passed": true,
+    "tensor_payloads_deserialized_during_source_review": false
+  },
+  "passed": true,
+  "reviewed_artifacts": [
+    "runs/cuda-formal-session-r5-001/failure.txt",
+    "runs/cuda-formal-session-r5-001/session-start.json",
+    "runs/cuda-formal-session-r5-001/result.json",
+    "runs/cuda-golden-r5-001/capture-state.json",
+    "runs/cuda-golden-r5-001/sample-files.json",
+    "runs/cuda-golden-r5-001/self-replay/result.json",
+    "runs/cuda-golden-r5-001-sample-record/result.json"
+  ],
+  "session_status": "SEALED",
+  "spec_binding": {
+    "contract_data_sha256": "f683ea62427279da3c899a3ef0afcfa1d16298b7424154664c7e3fac9b13d938",
+    "contract_revision": 5,
+    "spec_id": "step3p7-flash-p800-demo"
+  },
+  "summary": "The pre-model-load path failure did not reach the capture hook and is excluded by the human counting decision. PID 114828 produced the only captured samples; its three sample files match the sidecar metadata and CUDA self-replay passed. The Golden Run is accepted for Handoff preparation.",
+  "supersedes": "runs/cuda-formal-review-r5-001",
+  "tool": "migration-agent"
+}

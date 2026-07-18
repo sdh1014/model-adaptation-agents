@@ -211,14 +211,14 @@ Agent 每次动作前完整读取 Contract 与本区；每次动作结束后立�
 ### Current
 
 - `observed_contract_revision`: `5`
-- `state_revision`: `25`
-- `status`: `ACTIVE`
-- `phase`: `CUDA_CAPTURE`
-- `execution_site`: `SOURCE`
+- `state_revision`: `26`
+- `status`: `WAITING`
+- `phase`: `HANDOFF`
+- `execution_site`: `CUDA`
 - `active_operator`: `sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul`
-- `last_completed_action`: `formal_cuda_capture_accepted_after_human_clarification`
-- `last_run`: `runs/cuda-formal-review-r5-002`
-- `next_action`: `在 CUDA 机器按 model-adaptation/references/formal-cuda-handoff.md 使用临时 Spec 构建并校验 Handoff Bundle；不得重启模型、重新采集或开始 P800 baseline`
+- `last_completed_action`: `handoff_bundle_built_and_verified_on_cuda`
+- `last_run`: `runs/handoff-verify-cuda-r5-001`
+- `next_action`: `人工复制 runs/handoff-build-r5-001/bundle 到 P800，在读取任何 Golden Tensor 前运行 manifest verify，并通过 GitHub 回传 P800 verification Run`
 
 规则：`ACTIVE` 时 `next_action` 必须恰好一条；`WAITING` 时必须是一条人工动作；`PASS`、`BLOCKED`、`NEEDS_HUMAN` 时必须为 `none`。
 
@@ -233,7 +233,7 @@ Agent 每次动作前完整读取 Contract 与本区；每次动作结束后立�
 
 | operator_id | scan_verdict | golden | demo_role | repair | evidence |
 |---|---|---|---|---|---|
-| `sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul` | `CAPTURE_REQUIRED` | `SEALED` | 首选最小 Demo | PID `114828` 是唯一产生样本的正式 Session；等待 CUDA 端构建并校验 bundle | `runs/cuda-formal-review-r5-002/result.json` |
+| `sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul` | `CAPTURE_REQUIRED` | `SEALED` | 首选最小 Demo | PID `114828` 是唯一产生样本的正式 Session；CUDA 端 bundle 已构建并校验，等待人工复制到 P800 | `runs/handoff-verify-cuda-r5-001/result.json` |
 | `sgl_kernel.gemma_rmsnorm` | `CAPTURE_REQUIRED` | `NOT_PLANNED` | 对比候选 | 缺少 Gemma symbol，且样本需要保存一个直接参数 `weight` | `runs/scan-006/result.json` |
 | `sgl_kernel.gemma_fused_add_rmsnorm` | `CAPTURE_REQUIRED` | `NOT_PLANNED` | 后续缺口 | 双 in-place 输出比首选边界复杂 | `runs/scan-006/result.json` |
 | `sgl_kernel.topk_sigmoid` | `CAPTURE_REQUIRED` | `NOT_PLANNED` | 对比候选 | 权重与 ids 双输出、排序语义比首选复杂 | `runs/scan-006/result.json` |
@@ -258,9 +258,9 @@ preflight 输入。
 
 ### Handoff
 
-- `bundle_status`: `NOT_BUILT`
-- `bundle_path`: `null`
-- `manifest_path`: `null`
+- `bundle_status`: `VALID`
+- `bundle_path`: `runs/handoff-build-r5-001/bundle`
+- `manifest_path`: `runs/handoff-build-r5-001/bundle/manifest.json`
 - `p800_verification_run`: `null`
 
 `bundle_status` 只用 `NOT_BUILT | VALID | COPIED | VERIFIED_ON_P800`。
@@ -289,7 +289,7 @@ baseline replay 不算修复尝试。每轮修改源码前递增 `attempts_used`
 | recoverable five-attempt repair loop tool implemented | `PASS` | `runs/repair-loop-tool-001/result.json` |
 | one CUDA Session and at most three samples per operator | `PASS` | `runs/cuda-formal-review-r5-002/result.json` |
 | CUDA self-replay passed | `PASS` | `runs/cuda-golden-r5-001/self-replay/result.json` |
-| bundle verified on CUDA and P800 | `PENDING` | `null` |
+| bundle verified on CUDA and P800 | `PENDING` | CUDA: `runs/handoff-verify-cuda-r5-001/result.json`; P800: `null` |
 | selected operator failed P800 baseline | `PENDING` | `null` |
 | repair stayed inside boundary and attempt limit | `PENDING` | `null` |
 | all selected samples passed Precision Gate | `PENDING` | `null` |
@@ -333,5 +333,6 @@ baseline replay 不算修复尝试。每轮修改源码前递增 `attempts_used`
 | `23` | 在 SOURCE 准备 Ticket 15 正式 runbook，下一动作转到 CUDA；唯一模型 Session 必须先在固定 GitHub evidence 分支原子占位，再运行真实 Golden 采集、自回放和样本摘要，Agent 核验后才生成临时交接 Spec；当前仍未消耗 Session | `model-adaptation/references/formal-cuda-capture.md` |
 | `24` | 正式 Session 占位后首次模型启动因 checkpoint 不可用而失败，失败 Run 明确记录 Session 已消耗；随后上传的成功采集使用另一个服务 PID，样本字节虽完整但来源违反一次性 Contract，因此不接受 Golden、不构建 bundle，并进入 `BLOCKED / CUDA_CAPTURE` | `runs/cuda-formal-review-r5-001/result.json` |
 | `25` | 人明确澄清模型加载路径错误、未进入采集 Hook 且没有产生样本的启动失败不计入 Capture Session；因此 PID `114828` 是唯一实际采集 Session，三份样本与 sidecar 元数据一致且 CUDA self-replay 通过，接受 Golden 并进入 Handoff Bundle 准备 | `runs/cuda-formal-review-r5-002/result.json` |
+| `26` | CUDA 端 Handoff Bundle build 与 verify 通过，bundle 中 Spec、Golden 和 manifest 完整，进入 `WAITING / HANDOFF`；下一动作仅为人工复制到 P800 后先校验 manifest | `runs/handoff-build-r5-001/result.json`、`runs/handoff-verify-cuda-r5-001/result.json` |
 
 <!-- AGENT-WRITABLE WORKING STATE: END -->

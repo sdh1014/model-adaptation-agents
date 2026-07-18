@@ -69,3 +69,12 @@ revision 5 当前选择。
 - 按 revision 5 Contract，不接受该 Golden，不生成 Handoff Spec 或 bundle。
   Working State 已进入 `BLOCKED / CUDA_CAPTURE`，恢复必须先由人批准新的 Contract
   revision。完整审计见 `runs/cuda-formal-review-r5-001/result.json`。
+
+2026-07-18 人类澄清后重新审计：
+
+- 模型加载路径错误、未进入采集 Hook 且没有产生样本的 PID `98141` 不计入
+  Capture Session；
+- PID `114828` 是唯一实际产生 Golden Sample 的正式 Session；
+- `runs/cuda-formal-review-r5-002` supersede 前一轮拒绝判断，接受
+  `runs/cuda-golden-r5-001`；当前不需要重新采集，下一步只在 CUDA 端 build +
+  verify Handoff Bundle。

@@ -1,0 +1,10 @@
+action=prepare-handoff-spec
+passed=true
+current_state_revision=25
+candidate_state_revision=26
+accepted_golden_run=runs/cuda-golden-r5-001
+candidate_spec=runs/handoff-plan-r5-001/migration-spec.md
+replacement_guard=CUDA build and verify must pass first
+model_restart=false
+recapture=false
+actual_tensors_saved=false
