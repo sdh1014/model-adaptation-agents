@@ -1,0 +1,11 @@
+action=harden_p800_replay_failure_classification
+passed=true
+active_operator=sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul
+invocation_runtime_or_type_error=operator_execution_failure
+missing_dependency=tool_error
+device_transfer_failure=tool_error
+comparator_runtime_failure=tool_error
+cuda_capture=already_sealed
+p800_baseline=pending
+torch_free_tests_passed=110
+torch_behavior_cases_added=3

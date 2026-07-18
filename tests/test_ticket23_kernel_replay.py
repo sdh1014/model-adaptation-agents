@@ -245,6 +245,71 @@ class Ticket23KernelReplayTest(unittest.TestCase):
             self.assertEqual(result["errors"][0]["type"], "AssertionError")
             self.assertFalse(list(run_dir.rglob("*.pt")))
 
+    def test_p800_invocation_failure_is_recorded_as_an_operator_gap(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            golden_run = workspace / "golden-001"
+            write_golden_run(golden_run)
+            run_dir = workspace / "p800-replay"
+
+            def unsupported_call(_x, _limit):
+                raise RuntimeError("P800 SwiGLU invocation is unsupported")
+
+            result = run_kernel_replay_worker(
+                replay_config(golden_run, run_dir, "p800"),
+                p800_call=unsupported_call,
+                device=torch.device("cpu"),
+            )
+
+            self.assertFalse(result["passed"])
+            self.assertEqual(result["failed_shape_count"], 1)
+            self.assertEqual(result["errors"][0]["type"], "RuntimeError")
+            self.assertIn("unsupported", result["errors"][0]["message"])
+
+    def test_missing_p800_dependency_is_a_tool_error(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            golden_run = workspace / "golden-001"
+            write_golden_run(golden_run)
+            run_dir = workspace / "p800-replay"
+
+            def missing_dependency(_x, _limit):
+                raise ImportError("kunlun_ops is unavailable")
+
+            with self.assertRaisesRegex(ImportError, "kunlun_ops"):
+                run_kernel_replay_worker(
+                    replay_config(golden_run, run_dir, "p800"),
+                    p800_call=missing_dependency,
+                    device=torch.device("cpu"),
+                )
+
+            self.assertFalse((run_dir / "worker-result.json").exists())
+
+    def test_comparator_runtime_failure_is_a_tool_error(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            golden_run = workspace / "golden-001"
+            write_golden_run(golden_run)
+            run_dir = workspace / "p800-replay"
+
+            with patch.object(
+                torch.testing,
+                "assert_close",
+                side_effect=RuntimeError("comparator unavailable"),
+            ), self.assertRaisesRegex(RuntimeError, "comparator unavailable"):
+                run_kernel_replay_worker(
+                    replay_config(golden_run, run_dir, "p800"),
+                    p800_call=lambda x, limit: torch.tensor(
+                        [[2.0, 4.0]],
+                        dtype=x.dtype,
+                    ),
+                    device=torch.device("cpu"),
+                )
+
+            self.assertFalse((run_dir / "worker-result.json").exists())
+
     def test_rejects_non_tensor_argument_drift_between_state_and_payload(
         self,
     ) -> None:

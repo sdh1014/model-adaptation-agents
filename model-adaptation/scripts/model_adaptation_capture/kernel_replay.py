@@ -315,12 +315,24 @@ def run_kernel_replay_worker(
     for sample in state["samples"]:
         payload = _load_sample(config, sample)
         shape_id = sample["shape_id"]
+        x = payload["inputs"]["x"].to(selected_device)
         try:
-            x = payload["inputs"]["x"].to(selected_device)
             actual = invoke(
                 x,
                 float(payload["non_tensor_args"]["gemm1_limit"]),
             )
+        except (RuntimeError, TypeError) as error:
+            checked_shapes.append({"shape_id": shape_id, "passed": False})
+            errors.append(
+                {
+                    "shape_id": shape_id,
+                    "type": type(error).__name__,
+                    "message": str(error),
+                }
+            )
+            continue
+
+        try:
             if not isinstance(actual, torch.Tensor):
                 raise KernelReplayError("existing Kernel Call did not return a Tensor")
             if not bool(torch.isfinite(actual).all().item()):
@@ -346,7 +358,7 @@ def run_kernel_replay_worker(
                 check_stride=precision["check_stride"],
             )
             checked_shapes.append({"shape_id": shape_id, "passed": True})
-        except (AssertionError, ImportError, KernelReplayError, RuntimeError, TypeError) as error:
+        except (AssertionError, KernelReplayError) as error:
             checked_shapes.append({"shape_id": shape_id, "passed": False})
             errors.append(
                 {

@@ -28,7 +28,8 @@ OPERATOR_ID = (
 CUDA_SOURCE = (
     "python/sglang/srt/layers/moe/moe_runner/triton_utils/fused_moe.py"
 )
-ADAPTER_RUN = ROOT / "runs" / "adapter-002"
+ADAPTER_002_RUN = ROOT / "runs" / "adapter-002"
+ADAPTER_003_RUN = ROOT / "runs" / "adapter-003"
 
 
 class Ticket23SwiGLUClampAdapterTest(unittest.TestCase):
@@ -122,11 +123,11 @@ class Ticket23SwiGLUClampAdapterTest(unittest.TestCase):
 
             self.assertFalse(run_dir.exists())
 
-    def test_latest_adapter_run_records_source_only_hardening(
+    def test_adapter_002_preserves_source_only_hardening_history(
         self,
     ) -> None:
         result = json.loads(
-            (ADAPTER_RUN / "result.json").read_text(encoding="utf-8")
+            (ADAPTER_002_RUN / "result.json").read_text(encoding="utf-8")
         )
 
         self.assertTrue(result["passed"])
@@ -164,11 +165,51 @@ class Ticket23SwiGLUClampAdapterTest(unittest.TestCase):
             "kunlun_ops.swiglu",
         )
         for source in result["source_files"]:
+            self.assertRegex(source["sha256"], r"^[0-9a-f]{64}$")
+
+    def test_latest_adapter_separates_operator_and_tool_failures(
+        self,
+    ) -> None:
+        result = json.loads(
+            (ADAPTER_003_RUN / "result.json").read_text(encoding="utf-8")
+        )
+
+        self.assertTrue(result["passed"])
+        self.assertEqual(
+            result["action"],
+            "harden_p800_replay_failure_classification",
+        )
+        self.assertEqual(result["active_operator"], OPERATOR_ID)
+        self.assertEqual(result["supersedes"], "runs/adapter-002")
+        self.assertEqual(
+            result["runtime_validation"]["p800_baseline"],
+            "PENDING",
+        )
+        for source in result["source_files"]:
             self.assertEqual(
                 hashlib.sha256((ROOT / source["path"]).read_bytes()).hexdigest(),
                 source["sha256"],
                 source["path"],
             )
+
+        worker = (
+            ROOT
+            / "model-adaptation"
+            / "scripts"
+            / "model_adaptation_capture"
+            / "kernel_replay.py"
+        ).read_text(encoding="utf-8")
+        invocation = worker.index("actual = invoke(")
+        invocation_failure = worker.index(
+            "except (RuntimeError, TypeError) as error:",
+            invocation,
+        )
+        comparison_failure = worker.index(
+            "except (AssertionError, KernelReplayError) as error:",
+            invocation_failure,
+        )
+        self.assertLess(invocation, invocation_failure)
+        self.assertLess(invocation_failure, comparison_failure)
 
     def test_plugin_registers_only_the_existing_swiglu_kernel_call(self) -> None:
         calls = []

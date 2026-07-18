@@ -211,14 +211,14 @@ Agent 每次动作前完整读取 Contract 与本区；每次动作结束后立�
 ### Current
 
 - `observed_contract_revision`: `5`
-- `state_revision`: `26`
-- `status`: `WAITING`
-- `phase`: `HANDOFF`
-- `execution_site`: `CUDA`
+- `state_revision`: `28`
+- `status`: `ACTIVE`
+- `phase`: `P800_REPAIR`
+- `execution_site`: `SOURCE`
 - `active_operator`: `sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul`
-- `last_completed_action`: `handoff_bundle_built_and_verified_on_cuda`
-- `last_run`: `runs/handoff-verify-cuda-r5-001`
-- `next_action`: `人工复制 runs/handoff-build-r5-001/bundle 到 P800，在读取任何 Golden Tensor 前运行 manifest verify，并通过 GitHub 回传 P800 verification Run`
+- `last_completed_action`: `p800_replay_failure_classification_hardened`
+- `last_run`: `runs/adapter-003`
+- `next_action`: `在 P800 固定 Kunlun revision 和干净工作区执行 P800 baseline replay：依次封存 workspace check、全部 bundle Golden Samples 的 kernel replay 与 baseline assessment，并通过 GitHub 回传三个 Run`
 
 规则：`ACTIVE` 时 `next_action` 必须恰好一条；`WAITING` 时必须是一条人工动作；`PASS`、`BLOCKED`、`NEEDS_HUMAN` 时必须为 `none`。
 
@@ -233,7 +233,7 @@ Agent 每次动作前完整读取 Contract 与本区；每次动作结束后立�
 
 | operator_id | scan_verdict | golden | demo_role | repair | evidence |
 |---|---|---|---|---|---|
-| `sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul` | `CAPTURE_REQUIRED` | `SEALED` | 首选最小 Demo | PID `114828` 是唯一产生样本的正式 Session；CUDA 端 bundle 已构建并校验，等待人工复制到 P800 | `runs/handoff-verify-cuda-r5-001/result.json` |
+| `sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul` | `CAPTURE_REQUIRED` | `SEALED` | 首选最小 Demo | bundle 已在 CUDA 与 P800 校验；等待 P800 baseline 判定是否为真实 correctness gap | `runs/p800-handoff-review-r5-001/result.json` |
 | `sgl_kernel.gemma_rmsnorm` | `CAPTURE_REQUIRED` | `NOT_PLANNED` | 对比候选 | 缺少 Gemma symbol，且样本需要保存一个直接参数 `weight` | `runs/scan-006/result.json` |
 | `sgl_kernel.gemma_fused_add_rmsnorm` | `CAPTURE_REQUIRED` | `NOT_PLANNED` | 后续缺口 | 双 in-place 输出比首选边界复杂 | `runs/scan-006/result.json` |
 | `sgl_kernel.topk_sigmoid` | `CAPTURE_REQUIRED` | `NOT_PLANNED` | 对比候选 | 权重与 ids 双输出、排序语义比首选复杂 | `runs/scan-006/result.json` |
@@ -258,10 +258,10 @@ preflight 输入。
 
 ### Handoff
 
-- `bundle_status`: `VALID`
+- `bundle_status`: `VERIFIED_ON_P800`
 - `bundle_path`: `runs/handoff-build-r5-001/bundle`
 - `manifest_path`: `runs/handoff-build-r5-001/bundle/manifest.json`
-- `p800_verification_run`: `null`
+- `p800_verification_run`: `runs/handoff-verify-p800-r5-001`
 
 `bundle_status` 只用 `NOT_BUILT | VALID | COPIED | VERIFIED_ON_P800`。
 
@@ -281,7 +281,7 @@ baseline replay 不算修复尝试。每轮修改源码前递增 `attempts_used`
 | Contract approved and tool bindings match | `PASS` | `runs/spec-binding-004/result.json` |
 | target-only eager kernel scan complete | `PASS` | `runs/scan-006/result.json` |
 | gap queue and Demo selection complete | `PASS` | `runs/scan-006/result.json` |
-| selected Kernel Call capture/replay adapter implemented and sample-bound | `PASS` | `runs/adapter-002/result.json` |
+| selected Kernel Call capture/replay adapter implemented and sample-bound | `PASS` | `runs/adapter-003/result.json` |
 | adapter-001 CUDA preflight passed without consuming formal Session | `PASS` | `runs/cuda-preflight-r5-001/result.json` |
 | current adapter-002 CUDA preflight passed without consuming formal Session | `PASS` | `runs/cuda-preflight-r5-002/result.json` |
 | CUDA/P800 sample format and fixed comparator validated | `PASS` | `runs/p800-portability-r5-001/result.json` |
@@ -289,7 +289,7 @@ baseline replay 不算修复尝试。每轮修改源码前递增 `attempts_used`
 | recoverable five-attempt repair loop tool implemented | `PASS` | `runs/repair-loop-tool-001/result.json` |
 | one CUDA Session and at most three samples per operator | `PASS` | `runs/cuda-formal-review-r5-002/result.json` |
 | CUDA self-replay passed | `PASS` | `runs/cuda-golden-r5-001/self-replay/result.json` |
-| bundle verified on CUDA and P800 | `PENDING` | CUDA: `runs/handoff-verify-cuda-r5-001/result.json`; P800: `null` |
+| bundle verified on CUDA and P800 | `PASS` | CUDA: `runs/handoff-verify-cuda-r5-001/result.json`; P800: `runs/handoff-verify-p800-r5-001/result.json` |
 | selected operator failed P800 baseline | `PENDING` | `null` |
 | repair stayed inside boundary and attempt limit | `PENDING` | `null` |
 | all selected samples passed Precision Gate | `PENDING` | `null` |
@@ -334,5 +334,7 @@ baseline replay 不算修复尝试。每轮修改源码前递增 `attempts_used`
 | `24` | 正式 Session 占位后首次模型启动因 checkpoint 不可用而失败，失败 Run 明确记录 Session 已消耗；随后上传的成功采集使用另一个服务 PID，样本字节虽完整但来源违反一次性 Contract，因此不接受 Golden、不构建 bundle，并进入 `BLOCKED / CUDA_CAPTURE` | `runs/cuda-formal-review-r5-001/result.json` |
 | `25` | 人明确澄清模型加载路径错误、未进入采集 Hook 且没有产生样本的启动失败不计入 Capture Session；因此 PID `114828` 是唯一实际采集 Session，三份样本与 sidecar 元数据一致且 CUDA self-replay 通过，接受 Golden 并进入 Handoff Bundle 准备 | `runs/cuda-formal-review-r5-002/result.json` |
 | `26` | CUDA 端 Handoff Bundle build 与 verify 通过，bundle 中 Spec、Golden 和 manifest 完整，进入 `WAITING / HANDOFF`；下一动作仅为人工复制到 P800 后先校验 manifest | `runs/handoff-build-r5-001/result.json`、`runs/handoff-verify-cuda-r5-001/result.json` |
+| `27` | P800 verification Run 与唯一 evidence 提交核验通过，13 个 bundle 文件匹配 CUDA manifest；未反序列化 Tensor。进入 `ACTIVE / P800_REPAIR`，下一动作只执行零次计数的 baseline replay | `runs/handoff-verify-p800-r5-001/result.json`、`runs/p800-handoff-review-r5-001/result.json` |
+| `28` | baseline 审查发现旧 worker 会把依赖、设备或比较器异常误记为 Operator Gap；`adapter-003` 把可信 FAIL 收紧为现有 Kunlun 调用本身的执行失败或明确输出/精度失败，下一动作仍为 P800 baseline | `runs/adapter-003/result.json` |
 
 <!-- AGENT-WRITABLE WORKING STATE: END -->

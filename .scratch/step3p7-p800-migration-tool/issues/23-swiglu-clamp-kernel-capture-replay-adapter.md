@@ -65,3 +65,8 @@ result 增加同一 `sample-files.json` SHA-256 绑定。当前源码摘要和�
 2026-07-17 后续证据更新：`runs/cuda-preflight-r5-002` 已由 CUDA 机器回传并通过
 当前源码校验。它验证三个 rank-0 shape、样本摘要绑定和新进程 CUDA self-replay，
 没有消耗正式 Session；因此 Ticket 15 的这项前置条件已经满足。
+
+2026-07-18 P800 baseline 前补充 `runs/adapter-003`：不改变调用边界、Golden
+格式或比较门槛，只把 worker 的失败捕获收紧。现有 Kunlun 调用本身的
+`RuntimeError/TypeError` 仍是执行失败；依赖导入、设备搬运和比较器运行异常改为
+工具错误，不能冒充 Operator Gap。

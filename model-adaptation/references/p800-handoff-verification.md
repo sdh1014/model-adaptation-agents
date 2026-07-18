@@ -1,5 +1,9 @@
 # Ticket 15：在 P800 校验 Handoff Bundle
 
+> **本步骤已经完成，不要重新执行。** P800 verification Run 已由 Agent 核验，
+> 当前唯一下一步见
+> `model-adaptation/references/p800-baseline-replay.md`。
+
 > 本页只把已由 CUDA 校验过的 bundle 复制到 P800，并在 P800 重新校验完整
 > manifest。它不会调用 Tensor 反序列化接口，不会重放算子，不会修改
 > `migration-spec.md`，也不会开始 baseline。

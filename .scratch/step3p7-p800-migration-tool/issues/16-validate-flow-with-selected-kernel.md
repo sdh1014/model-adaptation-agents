@@ -1,7 +1,7 @@
 # 使用扫描后选中的 kernel 验证端到端流程
 
 Type: task
-Status: ready-for-agent
+Status: ready-for-human
 Blocked by: 14, 15
 
 ## What to build
@@ -36,3 +36,18 @@ Gap。源码缺少绑定或预期性能较慢都不能代替 baseline。
 
 本票据只关闭一个真实缺口来证明流程。剩余 gap queue 后续按一个 kernel 一张票据
 扩展。
+
+2026-07-18 已接受 P800 manifest verification：
+
+- `runs/p800-handoff-review-r5-001` 确认 P800 verification 分支只新增一个 Run，
+  13 个文件与 CUDA manifest 一致，审查未读取 Tensor；
+- Working State 已进入 revision 28 `ACTIVE / P800_REPAIR`，baseline 尚未执行，
+  `attempts_used` 仍为 0；
+- `model-adaptation/references/p800-baseline-replay.md` 固定三个全新 Run：
+  workspace check、bundle Golden kernel replay 和 baseline assessment；
+- baseline 只调用现有 `kunlun_ops.swiglu`，不启动完整模型、不修改
+  SGLang-Kunlun。数值 FAIL 是正常的 gap 证据，全部 PASS 则按 Contract
+  `BLOCKED`，两种结果都先上传后停止。
+- `runs/adapter-003` 收紧失败分类：只有现有 Kunlun 调用本身的执行失败或明确的
+  输出/精度失败形成 baseline FAIL；依赖、设备搬运或比较器异常属于工具错误，
+  不能写成 Operator Gap。

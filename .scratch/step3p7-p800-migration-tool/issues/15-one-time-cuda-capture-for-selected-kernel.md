@@ -1,7 +1,7 @@
 # 一次性采集已选择的 kernel 调用
 
 Type: task
-Status: ready-for-human
+Status: resolved
 Blocked by: 13
 
 ## What to build
@@ -89,3 +89,13 @@ revision 5 当前选择。
 - Working State 已进入 `WAITING / HANDOFF`。下一步只按
   `model-adaptation/references/p800-handoff-verification.md` 在 P800 校验
   manifest 并回传 verification Run，不得提前执行 baseline。
+
+2026-07-18 P800 Handoff evidence 回传并核验：
+
+- `e7f861a` 基于最新准备提交，只新增
+  `runs/handoff-verify-p800-r5-001`；
+- P800 端重新校验 13 个 bundle 文件通过，manifest SHA-256 与 CUDA 端一致；
+- Agent 核验提交边界和结果绑定时没有反序列化 Tensor，审计封存在
+  `runs/p800-handoff-review-r5-001`；
+- Ticket 15 至此关闭。Working State 进入 `ACTIVE / P800_REPAIR`，后续由
+  Ticket 16 执行不计修复轮数的 baseline。

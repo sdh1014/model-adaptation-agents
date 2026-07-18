@@ -1,0 +1,56 @@
+{
+  "action": "harden_p800_replay_failure_classification",
+  "active_operator": "sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul",
+  "adapter_status": "IMPLEMENTED",
+  "evidence": [
+    "adapter.log"
+  ],
+  "passed": true,
+  "replay_targets": {
+    "cuda": "sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul",
+    "p800": "kunlun_ops.swiglu"
+  },
+  "run_id": "adapter-003",
+  "runtime_validation": {
+    "cuda_preflight": "NOT_RERUN_AFTER_SEALED_CAPTURE",
+    "local_test_device": "none",
+    "p800_baseline": "PENDING"
+  },
+  "source_files": [
+    {
+      "path": "model-adaptation/scripts/replay_compare.py",
+      "sha256": "9995c34b43b4786f872debfb3bc00362c00a22112dd5f34201d21eb7579b6ca4"
+    },
+    {
+      "path": "model-adaptation/scripts/model_adaptation_capture/preflight.py",
+      "sha256": "41e31ca36cd41a0d48c8263de21d6fac4abb136c92aaa67db5f460b9cbed77c6"
+    },
+    {
+      "path": "model-adaptation/scripts/model_adaptation_capture/kernel_replay.py",
+      "sha256": "4c451cc492b2b88c2ae841bd3307ed863d77aeb5ae4932659e0a50b32526b8ca"
+    },
+    {
+      "path": "model-adaptation/scripts/_lib/kernel_evidence.py",
+      "sha256": "99598f350472c7479097c9de977e4a47e73fb451769375c5029cb10ec46e36ab"
+    },
+    {
+      "path": "model-adaptation/scripts/handoff_bundle.py",
+      "sha256": "39e3a4d54296d65e1ab1f76c1bdcd42d65db674573f890b0419dd68b318119a3"
+    }
+  ],
+  "spec_binding": {
+    "contract_data_sha256": "f683ea62427279da3c899a3ef0afcfa1d16298b7424154664c7e3fac9b13d938",
+    "contract_revision": 5,
+    "spec_id": "step3p7-flash-p800-demo"
+  },
+  "summary": "P800 replay now records RuntimeError or TypeError only around the existing Kunlun invocation. Missing dependencies, device transfer failures, and comparator failures remain tool errors and cannot become Operator Gap evidence.",
+  "supersedes": "runs/adapter-002",
+  "tests": {
+    "local_torch_available": false,
+    "p800_behavior_cases_added": 3,
+    "source_and_metadata_suite": {
+      "passed": 110
+    }
+  },
+  "tool": "migration-agent"
+}

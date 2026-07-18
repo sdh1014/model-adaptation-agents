@@ -6,8 +6,8 @@
 
 最终文档保存为 `outputs/step3p7-p800-migration-tool-design.md`。设计形成后，本地图
 继续记录通过 tickets 实现最小 Demo 的范围变化。唯一实际采集 Session 已封存并
-接受 Golden；CUDA Handoff Bundle 已 build + verify 通过，当前为
-`WAITING / HANDOFF`，只等待 P800 manifest 校验，尚未开始 baseline。
+接受 Golden；Handoff Bundle 已在 CUDA 与 P800 两端通过 manifest 校验，当前为
+`ACTIVE / P800_REPAIR`，唯一下一步是在 P800 执行不计修复轮数的 baseline。
 
 ## Notes
 
@@ -54,16 +54,17 @@
 - [确认跨 CUDA/P800 的样本格式与精度比较](issues/12-portable-sample-and-precision-compare.md)：CUDA Torch `2.11.0+cu129` 写出的三个 BF16 样本已由 P800 修改版 Torch `2.5.1+cu118` 读回；固定比较器正常 PASS 并正确拒绝有意数值偏差，Run 不保存 P800 actual Tensor。
 - [实现可验证的人工交接包](issues/13-verifiable-manual-handoff-bundle.md)：已完成 pre-replay 样本文件摘要记录、样本摘要与 replay 证据绑定、build/verify、完整允许文件 manifest、CUDA self-replay 结果重算和篡改/错误 Contract 测试；工具不解析 Working State，Agent 按 Skill 校验下一状态临时 Spec 后再原子推进。
 - [实现可恢复的五轮修复闭环](issues/14-five-attempt-repair-loop.md)：已完成固定 Kunlun revision/干净工作区检查、baseline 零计数判定、连续且不可复用的单一假设 Run、replay 前完整 patch 固化、patch/replay 联合摘要、失败恢复、通过保留、未知修改保护和第五轮上限；synthetic 只允许绑定测试 Spec，不冒充 P800 实机闭环。
-- [一次性采集已选择的 kernel 调用](issues/15-one-time-cuda-capture-for-selected-kernel.md)：PID `114828` 是唯一实际采集 Session；三份 Golden Sample 和 CUDA Handoff Bundle 已通过校验，当前只等待 P800 manifest verification Run。
+- [一次性采集已选择的 kernel 调用](issues/15-one-time-cuda-capture-for-selected-kernel.md)：PID `114828` 是唯一实际采集 Session；三份 Golden Sample 和 Handoff Bundle 已在 CUDA/P800 两端通过校验，Ticket 15 已关闭。
+- [使用扫描后选中的 kernel 验证端到端流程](issues/16-validate-flow-with-selected-kernel.md)：已进入 revision 28 `ACTIVE / P800_REPAIR`；`adapter-003` 已阻止工具/环境异常冒充 gap，下一步按固定 runbook 对三个 bundle Golden Sample 执行 `kunlun_ops.swiglu` baseline，结果回传前不开始 attempt 1。
 
 ## Not yet specified
 
-- P800 baseline 是否能证明 clamp 语义是实机 correctness gap，要等 bundle 人工复制
-  并在 P800 校验后才能确定。
+- P800 baseline 是否能证明 clamp 语义是实机 correctness gap，要等当前三个
+  baseline Run 回传后才能确定。
 
 ## Out of scope
 
-- 在 CUDA bundle build/verify 和人工复制完成前运行 P800 baseline。
+- 在 baseline Run 被 Agent 接受前修改 SGLang-Kunlun 或开始 attempt 1。
 - 重新登录真实 CUDA/P800 环境做其他能力验证；`torch.testing` 可用性直接采用用户已完成的实机验证结论。
 - 自动 SSH、远程执行、自动上传或凭证管理。
 - 新增 C++/自定义 Kernel、底层算子注册或性能优化。

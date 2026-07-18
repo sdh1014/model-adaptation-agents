@@ -3,7 +3,13 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SPEC = ROOT / "migration-spec.md"
+BUNDLED_SPEC = (
+    ROOT
+    / "runs"
+    / "handoff-build-r5-001"
+    / "bundle"
+    / "migration-spec.md"
+)
 RUNBOOK = (
     ROOT
     / "model-adaptation"
@@ -13,10 +19,10 @@ RUNBOOK = (
 
 
 class Ticket15P800HandoffVerificationTest(unittest.TestCase):
-    def test_current_state_waits_only_for_p800_manifest_verification(
+    def test_bundled_spec_waits_only_for_p800_manifest_verification(
         self,
     ) -> None:
-        spec = SPEC.read_text(encoding="utf-8")
+        spec = BUNDLED_SPEC.read_text(encoding="utf-8")
 
         self.assertIn("- `state_revision`: `26`", spec)
         self.assertIn("- `status`: `WAITING`", spec)

@@ -6,8 +6,8 @@
 >
 > 当前选择：`sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul`
 >
-> 证据边界：唯一实际采集 Session 和 CUDA Handoff Bundle 已封存并通过校验；
-> Working State 为 `WAITING / HANDOFF`，尚未完成 P800 manifest 校验或 baseline
+> 证据边界：唯一实际采集 Session 和 Handoff Bundle 已封存，manifest 已在
+> CUDA/P800 两端通过；Working State 为 `ACTIVE / P800_REPAIR`，尚未执行 baseline
 
 ## 1. 目标
 
@@ -402,7 +402,7 @@ worker result、Golden state 和 wrapper result 还必须绑定同一 sidecar SH
 把 record result/sidecar 摘要和完整允许文件集合写入 manifest，以检测缺失、额外
 或篡改。
 
-`runs/cuda-preflight-r5-002` 已验证 adapter-002 当前源码的三个 rank-0 shape、
+`runs/cuda-preflight-r5-002` 已验证正式采集时 adapter-002 源码的三个 rank-0 shape、
 样本摘要绑定和 CUDA 新进程 self-replay，且未消耗正式 Session。Ticket 14 也已实现
 `workspace_guard.py` 的基线检查、baseline 零计数判定、连续且不可复用的 attempt
 编号、replay 前完整 patch 固化、patch/replay 联合摘要、失败恢复、通过保留和五轮
@@ -420,8 +420,17 @@ self-replay 的 sealed 证据通过。
 `runs/handoff-verify-cuda-r5-001` 在 CUDA 端通过，manifest 含 13 个允许文件，
 SHA-256 为
 `c7886622083e8516e335df6946321858ef58dfdec8f33d268aed7140eb13a83a`。
-当前 Working State 为 `WAITING / HANDOFF`；下一步只在 P800 校验 manifest 并回传
-verification Run，不读取 Golden Tensor、不执行 baseline，也不修改
-SGLang-Kunlun。
+`runs/handoff-verify-p800-r5-001` 又在 P800 对同一 manifest 校验通过，Agent
+核验提交边界时没有读取 Tensor，结果封存在
+`runs/p800-handoff-review-r5-001`。
+
+P800 baseline 审查又发现旧 worker 会把依赖、设备或比较器异常与算子执行失败一起
+写成 `passed: false`。`runs/adapter-003` 已把可信 FAIL 收紧为现有 Kunlun 调用
+本身的执行失败或明确输出/精度失败；这项修改不改变已封存 Golden 或比较门槛。
+
+当前 Working State 为 revision 28 `ACTIVE / P800_REPAIR`。下一步按
+`model-adaptation/references/p800-baseline-replay.md` 依次封存干净工作区检查、
+三个 bundle Golden Sample 的 `kunlun_ops.swiglu` replay 和 baseline assessment。
+baseline 不计修复轮数；结果回传前不修改 SGLang-Kunlun，也不开始 attempt 1。
 
 完整机器可读扫描证据见 `runs/scan-006/result.json`；原始 `scan-005` 保留为历史。

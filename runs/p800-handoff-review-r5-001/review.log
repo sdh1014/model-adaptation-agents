@@ -1,0 +1,8 @@
+action=review_p800_handoff_verification
+passed=true
+source_commit=3a482820ddd710d44036f647eac56d0852f072d6
+evidence_commit=e7f861af61242be1625277725fbe75f14c36a0fe
+reviewed_run=runs/handoff-verify-p800-r5-001
+file_count=13
+manifest_sha256=c7886622083e8516e335df6946321858ef58dfdec8f33d268aed7140eb13a83a
+tensor_payloads_deserialized=false

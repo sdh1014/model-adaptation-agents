@@ -1,0 +1,20 @@
+{
+  "action": "review_p800_handoff_verification",
+  "evidence": [
+    "review.log"
+  ],
+  "evidence_commit": "e7f861af61242be1625277725fbe75f14c36a0fe",
+  "file_count": 13,
+  "manifest_sha256": "c7886622083e8516e335df6946321858ef58dfdec8f33d268aed7140eb13a83a",
+  "passed": true,
+  "reviewed_run": "runs/handoff-verify-p800-r5-001",
+  "source_commit": "3a482820ddd710d44036f647eac56d0852f072d6",
+  "spec_binding": {
+    "contract_data_sha256": "f683ea62427279da3c899a3ef0afcfa1d16298b7424154664c7e3fac9b13d938",
+    "contract_revision": 5,
+    "spec_id": "step3p7-flash-p800-demo"
+  },
+  "summary": "The P800 verification commit adds only one fresh verification Run and confirms all 13 Handoff Bundle files against the CUDA-generated manifest. Baseline replay may now begin.",
+  "tensor_payloads_deserialized": false,
+  "tool": "migration-agent"
+}
