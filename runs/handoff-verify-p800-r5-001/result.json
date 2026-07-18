@@ -1,0 +1,19 @@
+{
+  "action": "verify",
+  "bundle_path": "/root/model-adaptation-agents/runs/handoff-build-r5-001/bundle",
+  "evidence": [
+    "handoff.log"
+  ],
+  "file_count": 13,
+  "manifest_path": "/root/model-adaptation-agents/runs/handoff-build-r5-001/bundle/manifest.json",
+  "manifest_sha256": "c7886622083e8516e335df6946321858ef58dfdec8f33d268aed7140eb13a83a",
+  "manifest_verified": true,
+  "passed": true,
+  "spec_binding": {
+    "contract_data_sha256": "f683ea62427279da3c899a3ef0afcfa1d16298b7424154664c7e3fac9b13d938",
+    "contract_revision": 5,
+    "spec_id": "step3p7-flash-p800-demo"
+  },
+  "summary": "Handoff Bundle matches its complete integrity manifest.",
+  "tool": "handoff_bundle.py"
+}
