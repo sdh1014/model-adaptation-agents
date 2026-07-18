@@ -1,0 +1,74 @@
+{
+  "activation_guard": "unquantized routed MoE layers 43 and 44 with gemm1_clamp_limit=7 and the CUDA legacy Triton runner",
+  "boundary": {
+    "inputs": [
+      "x"
+    ],
+    "non_tensor_args": [
+      "gemm1_limit"
+    ],
+    "outputs": [
+      "output"
+    ],
+    "parameters": []
+  },
+  "capture_device_type": "cuda",
+  "checkpoint": {
+    "config_digest": "8d740ba5819e574b7a606ea7aa6d7d381142ed5cc77cab96dde2892c10414042",
+    "id": "stepfun-ai/Step-3.7-Flash@5f6244077ac62e04eec3f320501ff8c2b293373a",
+    "model_path": "stepfun-ai/Step-3.7-Flash",
+    "revision": "5f6244077ac62e04eec3f320501ff8c2b293373a"
+  },
+  "dtype": "bfloat16",
+  "hook_target": "sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul",
+  "max_shapes": 3,
+  "model_path": "target",
+  "operator_id": "sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul",
+  "precision_gate": {
+    "atol": 0.01,
+    "check_stride": false,
+    "comparator": "torch.testing.assert_close",
+    "require_exact_structure": true,
+    "require_finite": true,
+    "require_same_dtype": true,
+    "rtol": 0.02
+  },
+  "replay": {
+    "cuda_target": "sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul",
+    "mode": "standalone-kernel-call",
+    "p800_target": "kunlun_ops.swiglu",
+    "weights_in_golden_sample": false
+  },
+  "run_dir": "/ssd1/sdh/model-adaptation-agents/runs/cuda-golden-r5-001",
+  "sample_fields": {
+    "inputs": [
+      "x"
+    ],
+    "non_tensor_args": [
+      "gemm1_limit"
+    ],
+    "outputs": [
+      "output"
+    ],
+    "parameters": []
+  },
+  "scan_result": {
+    "path": "/ssd1/sdh/model-adaptation-agents/runs/scan-006/result.json",
+    "sha256": "cae18fa5fb74f009a19a1c20e64d622fc450414acb3d774e46d870613f17c601"
+  },
+  "schema": "golden-capture-config/v1",
+  "serialization": "kernel-call-torch-save/v1",
+  "source": {
+    "capture_module_path": "/ssd1/sdh/sglang/python/sglang/srt/layers/moe/moe_runner/triton_utils/fused_moe.py",
+    "model_path": "/ssd1/sdh/sglang/python/sglang/srt/models/step3p5.py",
+    "sglang_revision": "49e384ce9d304648e9959666ecb8ce8cd98d0deb",
+    "sglang_worktree": "/ssd1/sdh/sglang"
+  },
+  "spec_binding": {
+    "contract_data_sha256": "f683ea62427279da3c899a3ef0afcfa1d16298b7424154664c7e3fac9b13d938",
+    "contract_revision": 5,
+    "spec_id": "step3p7-flash-p800-demo"
+  },
+  "tensor_parallel_size": 8,
+  "tp_rank": 0
+}
