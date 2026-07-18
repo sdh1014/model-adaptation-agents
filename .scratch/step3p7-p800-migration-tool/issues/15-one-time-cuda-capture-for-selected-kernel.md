@@ -1,7 +1,7 @@
 # 一次性采集已选择的 kernel 调用
 
 Type: task
-Status: ready-for-agent
+Status: ready-for-human
 Blocked by: 13
 
 ## What to build
@@ -43,3 +43,17 @@ self-replay；通过后构建并校验 Handoff Bundle。
 
 revision 3/4 的特殊 SwiGLU 和 MLP capture 决策作为历史保留；本票据只消费
 revision 5 当前选择。
+
+2026-07-18 已完成正式执行前的本地准备：
+
+- `runs/cuda-preflight-r5-002` 已通过并绑定当前 adapter-002；
+- `model-adaptation/references/formal-cuda-capture.md` 固定唯一 Session 的前置
+  检查、真实 TP8/BF16/eager 启动、rank 0 一到三种 shape、先
+  `record-samples` 后 CUDA self-replay 的顺序；
+- 跨机器执行分两次 GitHub 回传。第一次只回传 Session、Golden 和
+  record-samples 三份 Run；Agent 核验真实样本后才生成临时
+  `WAITING / HANDOFF` Spec，第二次只 build/verify bundle，不重启模型；
+- 正式模型启动前，先把唯一 Session 标记推到固定 GitHub evidence 分支；成功和
+  失败都只向同一分支追加证据，避免换 checkout 后误开第二个 Session；
+- 当前最近动作仍在 SOURCE，`next_action` 指向 CUDA，且 `session_status` 仍是
+  `NOT_STARTED`。本机没有创建正式 Run，也没有消耗 Session。

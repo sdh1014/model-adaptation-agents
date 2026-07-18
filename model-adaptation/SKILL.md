@@ -194,6 +194,23 @@ preflight 只能作为历史证据；Demo Closure Evidence 必须把当前源码
 机器，不创建 preflight Run，也不运行合成替代品。只报告 runbook 中的命令和
 GitHub evidence 分支回传要求，保持 Working State 不变并停止本次执行。
 
+preflight 通过且唯一下一动作已进入正式 Session 时，完整读取
+[references/formal-cuda-capture.md](references/formal-cuda-capture.md)。跨机器由
+GitHub 回传时分成两段：
+
+1. 人在 CUDA 机运行唯一真实模型 Session，完成 `record-samples` 和 CUDA
+   self-replay，回传 Session Run、Golden Run 和 record-samples Run 后停止；
+2. Agent 核验真实样本与自回放证据，生成包含 `WAITING / HANDOFF` Working State
+   的临时 Spec；人再回到同一 CUDA 环境 build + verify bundle。第二段不得重启
+   模型，不是第二个 Capture Session。
+
+正式模型启动前，必须先把 `session-start.json` 和 prepare 证据提交到 runbook
+固定的 GitHub evidence 分支。只有首次 push 成功才消耗并授权该 Session；成功或
+失败都只向同一分支追加，不能换分支或 Run 名重试。
+
+不得在真实 Golden 回传前预填 shape 数量或伪造临时 Spec，也不得让人自行修改
+Working State。
+
 正式 CUDA Session 只采集活动算子：
 
 1. 启动固定 checkpoint 的真实 TP8/BF16/eager 模型；采集只增加插件配置，不改变

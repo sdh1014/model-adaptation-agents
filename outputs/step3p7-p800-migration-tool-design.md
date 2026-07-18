@@ -412,4 +412,14 @@ worker result、Golden state 和 wrapper result 还必须绑定同一 sidecar SH
 必须由唯一正式 CUDA Session 产生；当前源码工作区不得把 preflight 或 Ticket 14
 测试夹具当成正式 Golden。
 
+由于 Agent 与 CUDA 机器之间通过 GitHub 交换证据，Ticket 15 分成两个交接点。
+第一段在 CUDA 机只启动一次真实模型，完成采集、`record-samples` 和 CUDA
+self-replay，然后回传 Session、Golden 与 record-samples 三份 Run。Agent 先核对
+真实 shape、样本摘要和自回放，再生成临时 `WAITING / HANDOFF` Spec。第二段在
+CUDA 机只用这份临时 Spec build + verify bundle，不再启动模型，因此不构成第二个
+Capture Session。第一次启动模型前，必须先把 Session 标记推到固定 GitHub
+evidence 分支；成功或失败都只向同一分支追加证据，不能用新分支绕过一次性限制。
+完整命令见
+`model-adaptation/references/formal-cuda-capture.md`。
+
 完整机器可读扫描证据见 `runs/scan-006/result.json`；原始 `scan-005` 保留为历史。
