@@ -120,22 +120,27 @@ class Ticket18TargetOnlyEagerScanTest(unittest.TestCase):
                 ).hexdigest()
                 self.assertEqual(actual, expected_digest)
 
-    def test_spec_preserves_revision_5_kernel_adapter_evidence(self):
-        spec = (ROOT / "migration-spec.md").read_text(encoding="utf-8")
-        self.assertIn("- `scan_run`: `runs/scan-006`", spec)
-        self.assertIn(
-            "- `active_operator`: "
-            "`sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe."
-            "_swiglu_silu_clamp_mul`",
-            spec,
+    def test_revision_5_kernel_adapter_evidence_is_preserved_in_runs(self):
+        scan = json.loads(
+            (ROOT / "runs" / "scan-006" / "result.json").read_text(
+                encoding="utf-8"
+            )
         )
-        self.assertIn(
-            "Ticket 23 完成 revision 5 Kernel Call adapter",
-            spec,
+        adapter = json.loads(
+            (ROOT / "runs" / "adapter-001" / "result.json").read_text(
+                encoding="utf-8"
+            )
         )
-        self.assertIn("`runs/adapter-001/result.json`", spec)
-        self.assertIn("- `draft_coverage`: `NOT_APPLICABLE`", spec)
-        self.assertIn("- `phase`: `CUDA_CAPTURE`", spec)
+        operator = (
+            "sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe."
+            "_swiglu_silu_clamp_mul"
+        )
+
+        self.assertEqual(scan["spec_binding"]["contract_revision"], 5)
+        self.assertEqual(scan["selection"]["active_operator"], operator)
+        self.assertTrue(adapter["passed"])
+        self.assertEqual(adapter["active_operator"], operator)
+        self.assertEqual(adapter["adapter_status"], "IMPLEMENTED")
 
     def test_all_declared_evidence_files_exist(self):
         self.assertTrue(self.result["scan_complete"])

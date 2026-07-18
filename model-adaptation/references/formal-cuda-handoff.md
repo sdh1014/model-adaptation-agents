@@ -1,9 +1,10 @@
 # Ticket 15：用已接受的 Golden 构建 CUDA Handoff Bundle
 
-> 本页是正式采集后的第二步，只构建和校验交接包。不要启动 SGLang、不要重新采集、
-> 不要执行 CUDA 或 P800 kernel replay。PID `98141` 的模型路径失败不计入
-> Capture Session；PID `114828` 产生的 `runs/cuda-golden-r5-001` 是已接受的
-> 唯一正式 Golden。
+> **本页已经执行完成，不要再次执行。** CUDA build/verify 结果已保存在
+> `runs/handoff-build-r5-001` 和 `runs/handoff-verify-cuda-r5-001`，manifest
+> SHA-256 为 `c7886622083e8516e335df6946321858ef58dfdec8f33d268aed7140eb13a83a`。
+> 下一步只执行 `model-adaptation/references/p800-handoff-verification.md`。
+> 不要启动 SGLang、不要重新采集、不要执行 CUDA 或 P800 kernel replay。
 
 ## 1. 拉取已接受 Golden 的执行分支
 

@@ -4,13 +4,18 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SPEC = ROOT / "migration-spec.md"
 REVIEW = ROOT / "runs" / "cuda-formal-review-r5-002" / "result.json"
 HANDOFF_SPEC = (
     ROOT
     / "runs"
     / "handoff-plan-r5-001"
     / "migration-spec.md"
+)
+HANDOFF_RESULT = (
+    ROOT
+    / "runs"
+    / "handoff-plan-r5-001"
+    / "result.json"
 )
 RUNBOOK = (
     ROOT
@@ -28,7 +33,6 @@ def contract_data(path: Path) -> dict:
 class Ticket15HandoffPlanTest(unittest.TestCase):
     def test_human_clarification_accepts_the_only_actual_capture(self) -> None:
         review = json.loads(REVIEW.read_text(encoding="utf-8"))
-        current = SPEC.read_text(encoding="utf-8")
 
         self.assertTrue(review["passed"])
         self.assertEqual(
@@ -46,20 +50,28 @@ class Ticket15HandoffPlanTest(unittest.TestCase):
             "runs/cuda-golden-r5-001",
         )
         self.assertEqual(review["session_status"], "SEALED")
-        self.assertIn("- `state_revision`: `25`", current)
-        self.assertIn("- `status`: `ACTIVE`", current)
-        self.assertIn("- `phase`: `CUDA_CAPTURE`", current)
-        self.assertIn("- `session_status`: `SEALED`", current)
-        self.assertIn(
-            "- `golden_run`: `runs/cuda-golden-r5-001`",
-            current,
-        )
-        self.assertIn("formal-cuda-handoff.md", current)
+        self.assertEqual(review["spec_binding"]["contract_revision"], 5)
 
     def test_candidate_spec_is_the_waiting_handoff_state(self) -> None:
         candidate = HANDOFF_SPEC.read_text(encoding="utf-8")
+        result = json.loads(HANDOFF_RESULT.read_text(encoding="utf-8"))
 
-        self.assertEqual(contract_data(HANDOFF_SPEC), contract_data(SPEC))
+        self.assertTrue(result["passed"])
+        self.assertEqual(
+            result["candidate_spec"],
+            "runs/handoff-plan-r5-001/migration-spec.md",
+        )
+        self.assertEqual(
+            result["candidate_state"],
+            {
+                "bundle_status": "VALID",
+                "execution_site": "CUDA",
+                "phase": "HANDOFF",
+                "state_revision": 26,
+                "status": "WAITING",
+            },
+        )
+        self.assertEqual(contract_data(HANDOFF_SPEC)["contract_revision"], 5)
         self.assertIn("- `state_revision`: `26`", candidate)
         self.assertIn("- `status`: `WAITING`", candidate)
         self.assertIn("- `phase`: `HANDOFF`", candidate)

@@ -6,8 +6,8 @@
 >
 > 当前选择：`sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul`
 >
-> 证据边界：唯一实际采集 Session 已封存并接受三个 Golden Sample；bundle 尚未
-> 构建，也未开始 P800 baseline
+> 证据边界：唯一实际采集 Session 和 CUDA Handoff Bundle 已封存并通过校验；
+> Working State 为 `WAITING / HANDOFF`，尚未完成 P800 manifest 校验或 baseline
 
 ## 1. 目标
 
@@ -416,8 +416,12 @@ PID `114828` 是唯一实际采集 Session，保存三个 rank-0 shape。Agent �
 self-replay 的 sealed 证据通过。
 
 `runs/cuda-formal-review-r5-002` 已 supersede 前一轮拒绝审计并接受
-`runs/cuda-golden-r5-001`。当前 Working State 恢复为 `ACTIVE / CUDA_CAPTURE`；
-下一步只在 CUDA 机器用 Agent 生成的临时 Spec build + verify bundle，不重启模型、
-不重新采集，也不提前开始 P800 baseline。
+`runs/cuda-golden-r5-001`。随后 `runs/handoff-build-r5-001` 和
+`runs/handoff-verify-cuda-r5-001` 在 CUDA 端通过，manifest 含 13 个允许文件，
+SHA-256 为
+`c7886622083e8516e335df6946321858ef58dfdec8f33d268aed7140eb13a83a`。
+当前 Working State 为 `WAITING / HANDOFF`；下一步只在 P800 校验 manifest 并回传
+verification Run，不读取 Golden Tensor、不执行 baseline，也不修改
+SGLang-Kunlun。
 
 完整机器可读扫描证据见 `runs/scan-006/result.json`；原始 `scan-005` 保留为历史。

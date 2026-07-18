@@ -76,5 +76,16 @@ revision 5 当前选择。
   Capture Session；
 - PID `114828` 是唯一实际产生 Golden Sample 的正式 Session；
 - `runs/cuda-formal-review-r5-002` supersede 前一轮拒绝判断，接受
-  `runs/cuda-golden-r5-001`；当前不需要重新采集，下一步只在 CUDA 端 build +
+  `runs/cuda-golden-r5-001`；当时不需要重新采集，后续动作只是在 CUDA 端 build +
   verify Handoff Bundle。
+
+2026-07-18 CUDA Handoff evidence 回传并核验：
+
+- `a7042d2` 只在准备提交 `ffc0602` 之后追加 bundle、CUDA verify Run 和
+  revision 26 Spec；
+- CUDA build 与 verify 均通过，完整 manifest 含 13 个允许文件，SHA-256 为
+  `c7886622083e8516e335df6946321858ef58dfdec8f33d268aed7140eb13a83a`；
+- Agent 在本机用相同工具重新校验通过，没有反序列化 `.pt`；
+- Working State 已进入 `WAITING / HANDOFF`。下一步只按
+  `model-adaptation/references/p800-handoff-verification.md` 在 P800 校验
+  manifest 并回传 verification Run，不得提前执行 baseline。

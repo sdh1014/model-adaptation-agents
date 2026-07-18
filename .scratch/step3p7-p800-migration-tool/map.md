@@ -6,7 +6,8 @@
 
 最终文档保存为 `outputs/step3p7-p800-migration-tool-design.md`。设计形成后，本地图
 继续记录通过 tickets 实现最小 Demo 的范围变化。唯一实际采集 Session 已封存并
-接受 Golden；当前等待 CUDA 端 build + verify Handoff Bundle，尚未开始 P800 Demo。
+接受 Golden；CUDA Handoff Bundle 已 build + verify 通过，当前为
+`WAITING / HANDOFF`，只等待 P800 manifest 校验，尚未开始 baseline。
 
 ## Notes
 
@@ -53,7 +54,7 @@
 - [确认跨 CUDA/P800 的样本格式与精度比较](issues/12-portable-sample-and-precision-compare.md)：CUDA Torch `2.11.0+cu129` 写出的三个 BF16 样本已由 P800 修改版 Torch `2.5.1+cu118` 读回；固定比较器正常 PASS 并正确拒绝有意数值偏差，Run 不保存 P800 actual Tensor。
 - [实现可验证的人工交接包](issues/13-verifiable-manual-handoff-bundle.md)：已完成 pre-replay 样本文件摘要记录、样本摘要与 replay 证据绑定、build/verify、完整允许文件 manifest、CUDA self-replay 结果重算和篡改/错误 Contract 测试；工具不解析 Working State，Agent 按 Skill 校验下一状态临时 Spec 后再原子推进。
 - [实现可恢复的五轮修复闭环](issues/14-five-attempt-repair-loop.md)：已完成固定 Kunlun revision/干净工作区检查、baseline 零计数判定、连续且不可复用的单一假设 Run、replay 前完整 patch 固化、patch/replay 联合摘要、失败恢复、通过保留、未知修改保护和第五轮上限；synthetic 只允许绑定测试 Spec，不冒充 P800 实机闭环。
-- [一次性采集已选择的 kernel 调用](issues/15-one-time-cuda-capture-for-selected-kernel.md)：人明确模型加载前且未产生样本的失败不计入 Capture Session；PID `114828` 是唯一实际采集 Session，三份 Golden Sample 已接受，下一步只构建和校验 bundle。
+- [一次性采集已选择的 kernel 调用](issues/15-one-time-cuda-capture-for-selected-kernel.md)：PID `114828` 是唯一实际采集 Session；三份 Golden Sample 和 CUDA Handoff Bundle 已通过校验，当前只等待 P800 manifest verification Run。
 
 ## Not yet specified
 
