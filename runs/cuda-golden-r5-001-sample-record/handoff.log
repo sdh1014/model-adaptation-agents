@@ -1,0 +1,4 @@
+action=record-samples
+passed=true
+sample_file_count=3
+sample_files_sha256=38e332423445ad4b4f1b0be934501a0f02ab4751d3f9948ce7916334e779d8ff

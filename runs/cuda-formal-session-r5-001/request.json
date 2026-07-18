@@ -1,0 +1,7 @@
+{
+  "sampling_params": {
+    "max_new_tokens": 8,
+    "temperature": 0
+  },
+  "text": "请用一句话说明模型迁移。"
+}

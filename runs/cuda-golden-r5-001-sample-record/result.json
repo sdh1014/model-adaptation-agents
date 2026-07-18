@@ -1,0 +1,22 @@
+{
+  "action": "record-samples",
+  "actual_tensors_saved": false,
+  "evidence": [
+    "handoff.log"
+  ],
+  "golden_run": "/ssd1/sdh/model-adaptation-agents/runs/cuda-golden-r5-001",
+  "golden_status": "ACTIVE",
+  "operator_id": "sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul",
+  "passed": true,
+  "recorded_before_self_replay": true,
+  "sample_file_count": 3,
+  "sample_files_path": "/ssd1/sdh/model-adaptation-agents/runs/cuda-golden-r5-001/sample-files.json",
+  "sample_files_sha256": "38e332423445ad4b4f1b0be934501a0f02ab4751d3f9948ce7916334e779d8ff",
+  "spec_binding": {
+    "contract_data_sha256": "f683ea62427279da3c899a3ef0afcfa1d16298b7424154664c7e3fac9b13d938",
+    "contract_revision": 5,
+    "spec_id": "step3p7-flash-p800-demo"
+  },
+  "summary": "Golden Sample file bytes were recorded before CUDA self-replay.",
+  "tool": "handoff_bundle.py"
+}

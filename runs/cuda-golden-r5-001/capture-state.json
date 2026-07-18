@@ -1,0 +1,125 @@
+{
+  "capture_closed": true,
+  "checkpoint": {
+    "config_digest": "8d740ba5819e574b7a606ea7aa6d7d381142ed5cc77cab96dde2892c10414042",
+    "id": "stepfun-ai/Step-3.7-Flash@5f6244077ac62e04eec3f320501ff8c2b293373a",
+    "model_path": "stepfun-ai/Step-3.7-Flash",
+    "revision": "5f6244077ac62e04eec3f320501ff8c2b293373a"
+  },
+  "loaded_checkpoint": {
+    "model_path": "stepfun-ai/Step-3.7-Flash",
+    "revision": "5f6244077ac62e04eec3f320501ff8c2b293373a"
+  },
+  "operator_id": "sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul",
+  "repeated_call_count": 33,
+  "samples": [
+    {
+      "file": "samples/c470e627c339ba879391e5a73d580b8c01cbd3d9f73e21e22270dfdf7f5f3b90.pt",
+      "repeat_count": 1,
+      "shape_id": "c470e627c339ba879391e5a73d580b8c01cbd3d9f73e21e22270dfdf7f5f3b90",
+      "signature": {
+        "inputs": {
+          "x": {
+            "dtype": "bfloat16",
+            "kind": "tensor",
+            "layout": "strided",
+            "shape": [
+              1504,
+              320
+            ],
+            "stride": [
+              320,
+              1
+            ]
+          }
+        },
+        "model_path": "target",
+        "non_tensor_args": {
+          "gemm1_limit": 7.0
+        },
+        "operator_id": "sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul",
+        "parameters": {},
+        "tensor_parallel_size": 8,
+        "tp_rank": 0
+      }
+    },
+    {
+      "file": "samples/36d6b394385e539174b2c81dc84e34d2ad4df470b290c06143fea3ed49f41276.pt",
+      "repeat_count": 31,
+      "shape_id": "36d6b394385e539174b2c81dc84e34d2ad4df470b290c06143fea3ed49f41276",
+      "signature": {
+        "inputs": {
+          "x": {
+            "dtype": "bfloat16",
+            "kind": "tensor",
+            "layout": "strided",
+            "shape": [
+              8,
+              320
+            ],
+            "stride": [
+              320,
+              1
+            ]
+          }
+        },
+        "model_path": "target",
+        "non_tensor_args": {
+          "gemm1_limit": 7.0
+        },
+        "operator_id": "sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul",
+        "parameters": {},
+        "tensor_parallel_size": 8,
+        "tp_rank": 0
+      }
+    },
+    {
+      "file": "samples/0848f7a6fecb9eca717b50e179a283753eaa57095b30e01dd95f604e4b2c4cde.pt",
+      "repeat_count": 1,
+      "shape_id": "0848f7a6fecb9eca717b50e179a283753eaa57095b30e01dd95f604e4b2c4cde",
+      "signature": {
+        "inputs": {
+          "x": {
+            "dtype": "bfloat16",
+            "kind": "tensor",
+            "layout": "strided",
+            "shape": [
+              56,
+              320
+            ],
+            "stride": [
+              320,
+              1
+            ]
+          }
+        },
+        "model_path": "target",
+        "non_tensor_args": {
+          "gemm1_limit": 7.0
+        },
+        "operator_id": "sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul",
+        "parameters": {},
+        "tensor_parallel_size": 8,
+        "tp_rank": 0
+      }
+    }
+  ],
+  "saved_shape_count": 3,
+  "schema": "kernel-call-capture-state/v1",
+  "self_replay": {
+    "checked_shape_count": 3,
+    "passed": true,
+    "sample_files_sha256": "38e332423445ad4b4f1b0be934501a0f02ab4751d3f9948ce7916334e779d8ff",
+    "worker_result_sha256": "89af53b60b2c9248d961049e14ca6d9b6d7f990601902d5e098de59a38eb3aa7"
+  },
+  "skipped_call_count": 0,
+  "skipped_signatures": [],
+  "spec_binding": {
+    "contract_data_sha256": "f683ea62427279da3c899a3ef0afcfa1d16298b7424154664c7e3fac9b13d938",
+    "contract_revision": 5,
+    "spec_id": "step3p7-flash-p800-demo"
+  },
+  "status": "SEALED",
+  "tensor_parallel_size": 8,
+  "tp_rank": 0
+}
