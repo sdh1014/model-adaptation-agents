@@ -1,0 +1,22 @@
+{
+  "action": "build",
+  "bundle_path": "/ssd1/sdh/model-adaptation-agents/runs/handoff-build-r5-001/bundle",
+  "evidence": [
+    "bundle/manifest.json",
+    "handoff.log"
+  ],
+  "file_count": 13,
+  "golden_run": "runs/cuda-golden-r5-001",
+  "manifest_path": "/ssd1/sdh/model-adaptation-agents/runs/handoff-build-r5-001/bundle/manifest.json",
+  "manifest_sha256": "c7886622083e8516e335df6946321858ef58dfdec8f33d268aed7140eb13a83a",
+  "passed": true,
+  "sample_files_sha256": "38e332423445ad4b4f1b0be934501a0f02ab4751d3f9948ce7916334e779d8ff",
+  "sample_record_result_sha256": "7b17dffca5a19449baffe122a8895c06a702fa2485ca23d1960ed8ec6e9357b8",
+  "spec_binding": {
+    "contract_data_sha256": "f683ea62427279da3c899a3ef0afcfa1d16298b7424154664c7e3fac9b13d938",
+    "contract_revision": 5,
+    "spec_id": "step3p7-flash-p800-demo"
+  },
+  "summary": "Handoff Bundle and integrity manifest were built.",
+  "tool": "handoff_bundle.py"
+}

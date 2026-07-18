@@ -1,0 +1,4 @@
+action=verify
+passed=true
+file_count=13
+manifest_sha256=c7886622083e8516e335df6946321858ef58dfdec8f33d268aed7140eb13a83a

@@ -1,0 +1,10 @@
+action=prepare
+operator_id=sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul
+sglang_revision=49e384ce9d304648e9959666ecb8ce8cd98d0deb
+max_shapes=3
+tensor_parallel_size=8
+tp_rank=0
+replay_mode=standalone-kernel-call
+hook_target=sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul
+weights_in_golden_sample=false
+capture_session_consumed=false

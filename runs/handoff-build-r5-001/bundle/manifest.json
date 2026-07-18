@@ -1,0 +1,79 @@
+{
+  "files": [
+    {
+      "path": "migration-spec.md",
+      "sha256": "ac13e17050a90583b53177b8792f53f12728ff9f7ac89abcd209277ba34b7186",
+      "size": 25709
+    },
+    {
+      "path": "runs/cuda-golden-r5-001/capture-config.json",
+      "sha256": "4113812f002f73328a2c74935934ec17fe663e0552f3489ec88ac0b822dc0b79",
+      "size": 2423
+    },
+    {
+      "path": "runs/cuda-golden-r5-001/capture-state.json",
+      "sha256": "779c353cb8c9ca4b81da4186e619f3c088c6d09d95f00c0955101f7ce12b9689",
+      "size": 3769
+    },
+    {
+      "path": "runs/cuda-golden-r5-001/capture.log",
+      "sha256": "9ab94fbd0399386b29dad6ca2223e25ffe8b014bbda4108ebc2a065858a5cb58",
+      "size": 397
+    },
+    {
+      "path": "runs/cuda-golden-r5-001/result.json",
+      "sha256": "7b7b1cc76f623558d2c4f647eb277dc227751bd05767029a31f91da7c31305e8",
+      "size": 768
+    },
+    {
+      "path": "runs/cuda-golden-r5-001/sample-files.json",
+      "sha256": "38e332423445ad4b4f1b0be934501a0f02ab4751d3f9948ce7916334e779d8ff",
+      "size": 1237
+    },
+    {
+      "path": "runs/cuda-golden-r5-001/samples/0848f7a6fecb9eca717b50e179a283753eaa57095b30e01dd95f604e4b2c4cde.pt",
+      "sha256": "02dbb974a2448cc519a3770d712f9ed69e4831b76b0aad71660c7c56c2b53bdc",
+      "size": 57413
+    },
+    {
+      "path": "runs/cuda-golden-r5-001/samples/36d6b394385e539174b2c81dc84e34d2ad4df470b290c06143fea3ed49f41276.pt",
+      "sha256": "f585d8d915f56b52205ad01d879b7e1df43d4b137dce19b661878b442f83f0fc",
+      "size": 11333
+    },
+    {
+      "path": "runs/cuda-golden-r5-001/samples/c470e627c339ba879391e5a73d580b8c01cbd3d9f73e21e22270dfdf7f5f3b90.pt",
+      "sha256": "19f7d2932202ccb11f0a44a46687b8c26da1d5239bcea8eda712615630b5eb89",
+      "size": 1447493
+    },
+    {
+      "path": "runs/cuda-golden-r5-001/self-replay/replay-config.json",
+      "sha256": "c7863a8659bfb671b33613a2ba9b942df7e15be7a67f18c8b0cebe8ad59949cc",
+      "size": 1036
+    },
+    {
+      "path": "runs/cuda-golden-r5-001/self-replay/replay.log",
+      "sha256": "31cfa775ff4719612f48bc0177d383903bd95787f288b834946d3f234628b4b3",
+      "size": 161
+    },
+    {
+      "path": "runs/cuda-golden-r5-001/self-replay/result.json",
+      "sha256": "9505448fbc1d46cccc57624a9aaae90cba8cfda3f94c2752d07be5ce7f59378f",
+      "size": 1143
+    },
+    {
+      "path": "runs/cuda-golden-r5-001/self-replay/worker-result.json",
+      "sha256": "d310dda1997b5449e1a3deea4b0de3f2db283e7527218fb8c60bdf38d08c1670",
+      "size": 1349
+    }
+  ],
+  "golden_run": "runs/cuda-golden-r5-001",
+  "operator_id": "sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul",
+  "sample_files_sha256": "38e332423445ad4b4f1b0be934501a0f02ab4751d3f9948ce7916334e779d8ff",
+  "sample_record_result_sha256": "7b17dffca5a19449baffe122a8895c06a702fa2485ca23d1960ed8ec6e9357b8",
+  "schema": "handoff-manifest/v1",
+  "spec_binding": {
+    "contract_data_sha256": "f683ea62427279da3c899a3ef0afcfa1d16298b7424154664c7e3fac9b13d938",
+    "contract_revision": 5,
+    "spec_id": "step3p7-flash-p800-demo"
+  }
+}

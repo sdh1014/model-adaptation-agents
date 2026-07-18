@@ -1,0 +1,6 @@
+execution_site=cuda
+invocation_target=sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul
+returncode=0
+--- stdout ---
+
+--- stderr ---
