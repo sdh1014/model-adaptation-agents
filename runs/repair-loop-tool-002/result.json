@@ -1,0 +1,102 @@
+{
+  "action": "prepare_agent_driven_repair_handoff",
+  "active_operator": "sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul",
+  "actual_tensors_saved": false,
+  "behavior": {
+    "agent_selects_allowed_paths_per_attempt": true,
+    "agent_selects_hypothesis": true,
+    "baseline_adapter_proves_candidate_path": false,
+    "baseline_paths_lock_attempts": false,
+    "human_supplied_patch_required": false,
+    "fixed_candidate_function_signature": false,
+    "new_sglang_replay_helper_allowed": false,
+    "preauthored_attempt_patch": false,
+    "same_agent_continues_while_active": true,
+    "unknown_changes_rejected": true
+  },
+  "consumes_capture_session": false,
+  "delegated_to_p800_agent": {
+    "repair_implementation": true,
+    "repair_replay_adapter": true,
+    "single_hypothesis_per_attempt": true
+  },
+  "evidence": [
+    "repair-loop.log"
+  ],
+  "passed": true,
+  "scope": "ATTEMPT_CONTROL_AND_CLAUDE_HANDOFF",
+  "baseline_adapter_run": "runs/adapter-003/result.json",
+  "run_id": "repair-loop-tool-002",
+  "runtime_validation": {
+    "attempts_used": 0,
+    "p800_operator_repair": "NOT_RUN",
+    "repair_replay_method": "AGENT_TO_SELECT_ON_P800",
+    "synthetic_replay_scope": "TEST_SPEC_ONLY",
+    "test_repository_only": true,
+    "torch_available": false
+  },
+  "source_files": [
+    {
+      "path": "model-adaptation/scripts/workspace_guard.py",
+      "sha256": "a4c207ee6117d0a299c17df6570a8bdc2b9d77446cb5076fcf1523f5919af519"
+    },
+    {
+      "path": "model-adaptation/scripts/replay_compare.py",
+      "sha256": "ef5db891a5943d775f9056530f52a5b8962af11fa04d47cc604bc28ab75f03f8"
+    },
+    {
+      "path": "model-adaptation/SKILL.md",
+      "sha256": "54dfc4e44949ae78c60c44c03a6301193748cae81ace33064868067e23c45d36"
+    },
+    {
+      "path": ".claude/skills/model-adaptation/SKILL.md",
+      "sha256": "0e739877e9956556c89304be22b62d1eefd512758cbe48b7d97617a8d743f90d"
+    },
+    {
+      "path": "model-adaptation/references/claude-p800-repair.md",
+      "sha256": "212f8a5dbf72da5418b6d1a5b0f94e2a0d0257aa3b3f371b4f7439c2ae9bd6fa"
+    },
+    {
+      "path": "tests/test_ticket14_repair_loop.py",
+      "sha256": "3cee8bb4734a36186fdbf3341acf53cca42be468f79e16d0a7eff99dc58825b5"
+    },
+    {
+      "path": "tests/test_ticket16_p800_baseline_runbook.py",
+      "sha256": "8e327ae4450cb2234c48559d85adaaa91f6198a22bbbe35199901ab3d31fba89"
+    },
+    {
+      "path": "tests/test_ticket23_swiglu_clamp_adapter.py",
+      "sha256": "eb9a1a5d63f7df318811d6caa65bfb328a46c6a835a433e9f7bc435c81078e78"
+    }
+  ],
+  "spec_binding": {
+    "contract_data_sha256": "f683ea62427279da3c899a3ef0afcfa1d16298b7424154664c7e3fac9b13d938",
+    "contract_revision": 5,
+    "spec_id": "step3p7-flash-p800-demo"
+  },
+  "summary": "Attempt control and the Claude Code handoff are ready: the controller preserves the fixed baseline and lets the P800 Migration Agent choose each hypothesis and minimal file set. No attempt 1 or common Kunlun function signature is prescribed. The current standalone adapter proves only the baseline gap; Claude must implement and seal an original-boundary repair replay adapter before claiming attempt 1.",
+  "supersedes": "runs/repair-loop-tool-001/result.json",
+  "tests": {
+    "focused": {
+      "command": "python3 -m unittest tests.test_ticket14_repair_loop -v",
+      "passed": 14
+    },
+    "torch_free_regression": {
+      "passed": 115
+    }
+  },
+  "tool": "migration-agent",
+  "validation": {
+    "attempt_history_bound_to_each_claim": true,
+    "baseline_assessment_paths_may_differ_from_attempt_paths": true,
+    "current_attempt_paths_are_explicit_and_safe": true,
+    "repair_replay_adapter": "PENDING_ON_P800_BEFORE_ATTEMPT_1",
+    "fixed_candidate_function_contract_removed": true,
+    "no_branch_commit_or_push": true,
+    "review": {
+      "spec": "PASS",
+      "standards": "PASS"
+    },
+    "working_state_parsed_by_tool": false
+  }
+}

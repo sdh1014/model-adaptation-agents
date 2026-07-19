@@ -47,6 +47,26 @@ patch/replay 绑定、正式 Spec 拒绝 synthetic 和伪造 kernel replay 元�
 临时 Git 仓库和 synthetic replay，没有运行 P800、没有保存 actual Tensor，也没有
 创建分支、commit 或 push。实现证据见 `runs/repair-loop-tool-001/result.json`。
 
+2026-07-19 根据真实 P800 baseline 交接方式补充 Agent 自主修复边界：
+
+- baseline 的检查文件只说明当时工作区干净，不得把该列表当作后续 attempt 的固定
+  实现位置；
+- 每轮由 Migration Agent 根据上一轮证据和目标源码选择一个假设，并声明该轮所需
+  的最小文件；不同轮次允许选择不同文件；
+- `workspace_guard.py` 仍逐轮校验路径安全、未知修改、连续 claim、完整 patch 与
+  replay 绑定，但不替 Agent 选择代码方案；
+- 新端到端测试覆盖 baseline、attempt 1 和 attempt 2 使用不同允许文件集合。更新
+  证据见 `runs/repair-loop-tool-002/result.json`。
+
+后续源码审查确认不能把 attempt replay 固定成
+`<module>:<function>(x, limit)`：真实 Kunlun 入口接收模型层和 dispatch 数据，
+SwiGLU 只是内部调用。该预设已取消。Migration Agent 根据每轮源码决定修复位置和
+原始 Kernel Call 重放方式；baseline adapter 不能自动证明候选补丁生效。
+`workspace_guard.py` 仍负责本轮允许文件、完整 `candidate.patch`、replay 顺序、
+结果封存和失败恢复，不替 Agent 决定代码方案。当前正式验证器仍只绑定 baseline
+adapter，因此 P800 Agent 在领取 attempt 前先补齐并封存原始边界的 repair replay
+adapter；这一步不修改 SGLang-Kunlun、不计 repair attempt。
+
 ## Answer
 
 可恢复五轮修复闭环已经实现。Agent 仍负责假设和 Working State；脚本只保护基线、

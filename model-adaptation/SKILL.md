@@ -250,44 +250,79 @@ kernel 的 baseline replay。
 
 ### `P800_REPAIR`
 
+具体修复方案由 Migration Agent 根据当前 baseline、失败样本元数据和目标源码自主
+提出。人只提供 P800 环境、仓库和必要权限，不需要提供 attempt 假设、补丁或逐条
+修复命令；确定性脚本也不能选择代码改法。
+
+P800 目标仓库由环境变量 `SGLANG_KUNLUN_WORKTREE` 指向。Agent 必须确认它是
+Contract 固定 revision 的 Git 根目录。变量缺失或路径无法确认时，才进入
+`NEEDS_HUMAN` 询问一个环境问题；不能猜路径。
+
 先用 `workspace_guard.py` 检查固定 revision 和干净工作区。无法解释的已有修改
 进入 `NEEDS_HUMAN`，不得替用户清理。
 
 baseline 直接用 Golden Sample 的输入、直接参数和非 Tensor 参数调用活动 kernel
 边界：
 
-- 全部样本通过：记录它不是实机 correctness gap，并进入 `BLOCKED`；不得伪造失败
+- 全部样本通过：记录它不是由 P800 baseline 证实的 `Operator Gap`，并进入
+  `BLOCKED`；不得伪造失败
   或再次访问 CUDA。
 - 任一样本执行或精度失败：记录 baseline，`attempts_used` 保持 0，开始有限修复。
 
 baseline 前先调用 `workspace_guard.py --mode check-baseline`；replay 完成后调用
 `--mode assess-baseline --replay-result <baseline-replay/result.json>`。两次都要
-显式给出本轮 Repair Boundary 允许修改的文件，工具从 Contract 读取固定 Kunlun
-revision 和五轮上限，不允许命令行覆盖。正式 Spec 只接受
+显式给出检查所覆盖的文件，但 baseline 的文件列表不预先锁定后续 attempt 的实现
+位置。工具从 Contract 读取固定 Kunlun revision 和五轮上限，不允许命令行覆盖。
+正式 Spec 只接受
 `replay_compare.py --mode kernel-replay --execution-site p800` 的结果；测试用
 synthetic 结果不能推进正式流程。
 
 每轮修复：
 
-1. 从同一基线开始，只写一个假设；调用
+1. Agent 先重读上一结果、失败样本元数据和相关源码，自主选择一个可证伪假设及
+   该假设需要的最小文件集合。不同 attempt 可以选择不同文件；工具只保护本轮声明
+   的文件并拒绝其他改动。不得要求人替 Agent 指定改法。
+2. Agent 根据源码追踪 P800 的原始 Kernel Call 边界，再决定修复位置和重放方式。
+   流程不预设某个 Python 函数名、函数签名或 attempt 1 改法。当前仓库只有
+   `kunlun_ops.swiglu` baseline adapter，它只证明缺口，不能封存任意候选补丁的
+   PASS。领取 attempt 前，Agent 必须先在 model-adaptation 流程代码中补齐并测试
+   该边界的 repair replay adapter，使 `replay_compare.py` 和
+   `workspace_guard.py` 能生成并接受经过真实修复路径的结果，再把源码位置、命令
+   和日志封存在新的 adapter Run。这个准备动作不修改 SGLang-Kunlun、不计
+   repair attempt。重放代码可以做参数装配，但不得在 SGLang-Kunlun 中新增只供
+   重放使用的 helper、自定义算子或另一份修复逻辑。
+3. 从同一基线开始，只写一个假设；调用
    `workspace_guard.py --mode start-attempt --attempt N --hypothesis <一句话>
    --previous-result <上一结果>` 创建 Run 后，Agent 才能修改源码。attempt 1 的
    上一结果是失败的 baseline assessment；后续轮必须指向紧邻的上一轮失败结果。
    每个编号只能使用一次，不能重新从 attempt 1 开始绕过五轮上限。
-2. 修改前把 Working State 的 `attempts_used` 加一；通过轮也计数。
-3. 修改只限活动 kernel 调用的 Python、P800 可执行 Torch、已有
+4. 修改前把 Working State 的 `attempts_used` 加一；通过轮也计数。
+5. 修改只限活动 kernel 调用的 Python、P800 可执行 Torch、已有
    xspeedgate/kunlun_ops 能力和聚焦测试。
-4. 修改完成后，先调用 `workspace_guard.py --mode record-candidate` 保存相对固定
-   基线的完整 patch；然后才把 `replay_compare.py` 的 Run 放在
-   `<attempt-run>/replay`，重放全部 Golden Samples。
-5. 调用 `workspace_guard.py --mode finish-attempt
+6. 修改完成后，先调用 `workspace_guard.py --mode record-candidate` 保存相对固定
+   基线的完整 `candidate.patch`；然后把本轮原始 Kernel Call 边界的重放 Run 放在
+   `<attempt-run>/replay`，对全部 Golden Samples 使用固定
+   `torch.testing.assert_close` 门槛。不能因为 standalone baseline adapter
+   容易调用，就把它当作候选补丁已生效的证据。
+7. 调用 `workspace_guard.py --mode finish-attempt
    --replay-result <attempt-run>/replay/result.json`。
    `finish-attempt` 要求工作区仍与已记录 patch 完全一致，并先把 patch 摘要和 replay
-   结果摘要共同写入 `outcome.json`。失败时才恢复已声明的候选文件；通过时保留
-   patch，并确认它是唯一工作区修改。未知或 staged 修改一律停止且不清理。
+   结果摘要共同写入 `outcome.json`。Agent 只有在源码与运行日志都能说明重放经过
+   本轮修复边界后，才能接受该结果；否则先修正重放方式，不能伪造 PASS。失败时
+   才恢复已声明的候选文件；通过时保留 patch，并确认它是唯一工作区修改。未知或
+   staged 修改一律停止且不清理。
 
 需要新增 C++/自定义 kernel/底层注册、改完整模型、放宽精度门槛，或第五轮仍失败，
 都进入 `BLOCKED`，不能扩大范围。
+
+同一 P800 Agent 会话中，只要状态仍为 `ACTIVE`，就按上述规则继续下一轮，不在每轮
+之间等待人选择补丁。只有达到 `PASS`、`BLOCKED`、`NEEDS_HUMAN`，或确实需要计划内
+跨机器动作时才停止。
+
+当前 baseline 已失败、`attempts_used: 0` 且 `active_hypothesis: null` 是人工确认
+的交接状态，不是 Spec 冲突。Agent 在领取 attempt 的同一动作里先选择单一假设，
+再把 `attempts_used` 和 `active_hypothesis` 写入 Working State；不能在 baseline
+验收时由其他人预填假设。
 
 ## 4. 接受工具结果
 

@@ -7,7 +7,8 @@
 > 当前选择：`sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul`
 >
 > 证据边界：唯一实际采集 Session 和 Handoff Bundle 已封存，manifest 已在
-> CUDA/P800 两端通过；Working State 为 `ACTIVE / P800_REPAIR`，尚未执行 baseline
+> CUDA/P800 两端通过；P800 baseline 的三个 shape 中两个精度失败，Working State
+> 为 `ACTIVE / P800_REPAIR`，尚未领取 attempt 1
 
 ## 1. 目标
 
@@ -336,9 +337,9 @@ P800 actual output 只在内存中参与比较，不落盘。
 |---|---|---|
 | `capture_golden.py` | 校验 Scan/Contract、生成采集配置、控制三 shape/rank 0 | 选择算子、修改 Contract |
 | 采集插件 | Hook 现有调用、保存允许的输入/参数/输出 | 新增 helper 或自定义算子 |
-| `replay_compare.py` | self-replay、P800 replay、结构与精度比较 | 放宽容差、决定修复 |
+| `replay_compare.py` | self-replay、当前活动边界的 P800 replay、结构与精度比较 | 放宽容差、决定修复位置或假设函数签名 |
 | `handoff_bundle.py` | self-replay 前记录样本文件摘要，生成与校验 manifest | 自动跨机器复制 |
-| `workspace_guard.py` | 固定基线、保存 patch、检查唯一修改 | 自动 commit/push |
+| `workspace_guard.py` | 固定基线、按每轮 Agent 声明的文件保护修改、保存 patch | 选择修复假设、生成代码、自动 commit/push |
 
 当前代码中的 MLP adapter 是 revision 4 历史实现。revision 5 的
 `_swiglu_silu_clamp_mul` adapter 已实现：采集插件 Hook 原调用，rank 0 collector
@@ -347,6 +348,22 @@ P800 actual output 只在内存中参与比较，不落盘。
 `runs/cuda-preflight-r5-001`；它未加载 checkpoint，也未消耗正式 Capture Session。
 三个样本也已由 P800 修改版 Torch 读回，固定比较器正常通过并能拒绝有意数值偏差；
 证据在 `runs/p800-portability-r5-001`，且没有保存 P800 actual Tensor。
+
+修复阶段不在工具里预置某个 attempt 的代码方案。Migration Agent 读取 baseline
+失败证据和目标源码后，每轮自主提出一个可证伪假设，并声明该轮最小修改文件。
+`workspace_guard.py` 只校验文件边界、连续轮次、patch 与 replay 的绑定；不同轮次
+可以选择不同文件，baseline 检查过的文件不锁定后续实现位置。
+
+attempt replay 不能因为 standalone baseline adapter 容易调用，就默认候选补丁已经
+生效。固定 Kunlun 源码的真实入口接收模型层和 dispatch 数据，SwiGLU 是其内部
+调用，因此流程不假设存在统一的 `<module>:<function>(x, limit)` 接口。Agent 每轮
+根据源码决定修复位置与原始 Kernel Call 重放方式。当前控制器只接受 baseline
+adapter；P800 Agent 在领取 attempt 前先补齐并测试 repair replay adapter，让
+`replay_compare.py` 和 `workspace_guard.py` 能封存该原始边界的结果，并把源码
+位置、命令和日志写入新的 adapter Run。这个准备动作不修改 SGLang-Kunlun、不计
+repair attempt。重放代码只负责参数装配，不能在 SGLang-Kunlun 中新增 helper、
+自定义算子或另一份修复逻辑。`workspace_guard.py` 随后继续负责本轮声明的文件、
+完整 `candidate.patch`、replay 顺序与失败恢复。
 
 `scan-006` 是不可变证据，所以其中的 `adapter_status=NOT_IMPLEMENTED` 不会被原地
 更新。初始实现证据保存在 `runs/adapter-001`；交接包 code review 后的当前源码
@@ -406,8 +423,9 @@ worker result、Golden state 和 wrapper result 还必须绑定同一 sidecar SH
 样本摘要绑定和 CUDA 新进程 self-replay，且未消耗正式 Session。Ticket 14 也已实现
 `workspace_guard.py` 的基线检查、baseline 零计数判定、连续且不可复用的 attempt
 编号、replay 前完整 patch 固化、patch/replay 联合摘要、失败恢复、通过保留和五轮
-上限；证据为
-`runs/repair-loop-tool-001`，只来自临时 Git 仓库和 synthetic replay。
+上限。`runs/repair-loop-tool-002` 进一步确认：每轮允许文件由 Agent 随当前假设
+选择，不由 baseline 或工具预先决定。工具证据只来自临时 Git 仓库和 synthetic
+replay，不冒充 P800 数值修复结果。
 
 Ticket 15 已回传正式 evidence。首次服务 PID `98141` 因模型加载路径错误，在模型
 加载、采集 Hook 和样本产生之前退出；人明确该启动不计入 Capture Session。服务
@@ -424,13 +442,22 @@ SHA-256 为
 核验提交边界时没有读取 Tensor，结果封存在
 `runs/p800-handoff-review-r5-001`。
 
-P800 baseline 审查又发现旧 worker 会把依赖、设备或比较器异常与算子执行失败一起
+P800 baseline 审查先发现旧 worker 会把依赖、设备或比较器异常与算子执行失败一起
 写成 `passed: false`。`runs/adapter-003` 已把可信 FAIL 收紧为现有 Kunlun 调用
-本身的执行失败或明确输出/精度失败；这项修改不改变已封存 Golden 或比较门槛。
+本身的执行失败或明确输出/精度失败。随后固定 revision、干净工作区上的正式
+baseline 检查三个 Golden shape：一个通过，两个仅出现
+`torch.testing.assert_close` 数值失败。审查结果封存在
+`runs/p800-baseline-review-r5-001`，没有反序列化 Tensor，且 baseline 不计修复
+轮数。
 
-当前 Working State 为 revision 28 `ACTIVE / P800_REPAIR`。下一步按
-`model-adaptation/references/p800-baseline-replay.md` 依次封存干净工作区检查、
-三个 bundle Golden Sample 的 `kunlun_ops.swiglu` replay 和 baseline assessment。
-baseline 不计修复轮数；结果回传前不修改 SGLang-Kunlun，也不开始 attempt 1。
+当前 Working State 为 revision 32 `ACTIVE / P800_REPAIR`，`attempts_used: 0`、
+`active_hypothesis: null`。下一步不是由 Codex 或人工指定 attempt1，而是在 P800
+的 Claude Code 中调用项目 `model-adaptation` Skill。Migration Agent 自主读取
+失败证据与 Kunlun 源码，选择每轮假设、最小文件、修复实现和原始 Kernel Call
+重放方式，先补齐并封存 repair replay adapter，再生成修改、封存 patch 并比较
+全部三个 shape，直到 `PASS`、`BLOCKED` 或 `NEEDS_HUMAN`。baseline 的
+`kunlun_ops.swiglu` 直接调用只证明当前缺口，不能单独证明任意候选补丁已经生效。
+启动步骤见
+`model-adaptation/references/claude-p800-repair.md`。
 
 完整机器可读扫描证据见 `runs/scan-006/result.json`；原始 `scan-005` 保留为历史。

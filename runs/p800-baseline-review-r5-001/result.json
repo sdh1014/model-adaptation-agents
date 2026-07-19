@@ -1,0 +1,47 @@
+{
+  "action": "accept_p800_baseline_gap",
+  "attempts_used": 0,
+  "evidence": [
+    "review.log"
+  ],
+  "evidence_branch": "evidence/p800-baseline-r5-001",
+  "evidence_commit": "4a3a4ac0152930cc15fe046ce1fd0f4f28c8e7aa",
+  "gap_observed": true,
+  "passed": true,
+  "replay": {
+    "actual_tensors_saved": false,
+    "checked_shape_count": 3,
+    "error_types": [
+      "AssertionError",
+      "AssertionError"
+    ],
+    "failed_shape_count": 2,
+    "invocation_target": "kunlun_ops.swiglu",
+    "replay_evidence_sha256": "c7924d65b87202a7b1cb954d4cddca8de14a4f244b56b9f25a8ba54485b6346d",
+    "result_sha256": "9a270cb97b42ec4cb62c98098e4e18a0cbb0879de034c64285ad1c5f3855b3fe",
+    "worker_result_sha256": "5f4be496db5817b0cab3624e3fb9d75b7d47e6d6072a825b6505fb1025cff56b"
+  },
+  "reviewed_runs": [
+    "runs/p800-baseline-check-r5-001",
+    "runs/p800-baseline-replay-r5-001",
+    "runs/p800-baseline-assessment-r5-001"
+  ],
+  "source_commit": "537c49bce5ea595e882cdf6070599e5cf7d6b7f3",
+  "spec_binding": {
+    "contract_data_sha256": "f683ea62427279da3c899a3ef0afcfa1d16298b7424154664c7e3fac9b13d938",
+    "contract_revision": 5,
+    "spec_id": "step3p7-flash-p800-demo"
+  },
+  "summary": "The clean fixed-revision P800 baseline checked all three Golden shapes. Two failed only through torch.testing.assert_close, so the selected Kernel Call is a P800-confirmed Operator Gap and repair may begin at attempt 1.",
+  "tensor_payloads_deserialized": false,
+  "tool": "migration-agent",
+  "workspace_check": {
+    "allowed_paths": [
+      "sglang-kunlun/sglang_kunlun/hooks/layers/quantization/unquant.py"
+    ],
+    "baseline_revision": "546ad8c682392922792bbbfe53a8bf575545f118",
+    "passed": true,
+    "result_sha256": "58e61ad1bd5ec55554212016c8f64dc6bdc54fc2626eab91a51a36d0f40a7f8b",
+    "workspace_clean": true
+  }
+}

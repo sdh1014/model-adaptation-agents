@@ -51,3 +51,20 @@ Gap。源码缺少绑定或预期性能较慢都不能代替 baseline。
 - `runs/adapter-003` 收紧失败分类：只有现有 Kunlun 调用本身的执行失败或明确的
   输出/精度失败形成 baseline FAIL；依赖、设备搬运或比较器异常属于工具错误，
   不能写成 Operator Gap。
+
+2026-07-19 已接纳 P800 baseline：
+
+- 固定 Kunlun revision 和干净工作区检查通过；
+- 三个 Golden shape 全部执行，shape `[8, 320]` 通过，shape `[1504, 320]` 与
+  `[56, 320]` 只因 `torch.testing.assert_close` 失败；
+- 没有依赖、设备搬运或比较器异常，因此接受为由 P800 baseline 证实的
+  `Operator Gap`；
+- baseline 不计修复轮数，当前仍为 `attempts_used: 0`、
+  `active_hypothesis: null`；
+- Working State 已进入 revision 32。下一步不预写 attempt1 补丁，而是在 P800
+  Claude Code 中调用项目 `model-adaptation` Skill，由 Migration Agent 自主分析
+  源码、选择单一假设、最小文件、修复实现和原始 Kernel Call 重放方式，并连续
+  修复与重放直到停止条件；baseline adapter 只证明缺口，不能替代候选路径证据，
+  因此 Agent 在领取 attempt 前先补齐并封存 repair replay adapter；
+- 仅启动与恢复步骤见
+  `model-adaptation/references/claude-p800-repair.md`，其中不包含具体修复方案。

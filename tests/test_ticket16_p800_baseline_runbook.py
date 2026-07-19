@@ -17,11 +17,23 @@ REVIEW_RESULT = (
     / "p800-handoff-review-r5-001"
     / "result.json"
 )
+BASELINE_REVIEW_RESULT = (
+    ROOT
+    / "runs"
+    / "p800-baseline-review-r5-001"
+    / "result.json"
+)
 RUNBOOK = (
     ROOT
     / "model-adaptation"
     / "references"
     / "p800-baseline-replay.md"
+)
+CLAUDE_RUNBOOK = (
+    ROOT
+    / "model-adaptation"
+    / "references"
+    / "claude-p800-repair.md"
 )
 
 
@@ -52,15 +64,32 @@ class Ticket16P800BaselineRunbookTest(unittest.TestCase):
             verification["spec_binding"],
         )
 
-    def test_current_state_enters_p800_repair_before_baseline(self) -> None:
+    def test_p800_baseline_is_accepted_as_an_operator_gap(self) -> None:
+        review = json.loads(
+            BASELINE_REVIEW_RESULT.read_text(encoding="utf-8")
+        )
+
+        self.assertTrue(review["passed"])
+        self.assertTrue(review["gap_observed"])
+        self.assertEqual(review["attempts_used"], 0)
+        self.assertEqual(review["replay"]["checked_shape_count"], 3)
+        self.assertEqual(review["replay"]["failed_shape_count"], 2)
+        self.assertEqual(
+            review["replay"]["error_types"],
+            ["AssertionError", "AssertionError"],
+        )
+        self.assertFalse(review["replay"]["actual_tensors_saved"])
+        self.assertFalse(review["tensor_payloads_deserialized"])
+
+    def test_current_state_hands_repair_to_the_p800_agent(self) -> None:
         spec = SPEC.read_text(encoding="utf-8")
 
-        self.assertIn("- `state_revision`: `28`", spec)
+        self.assertIn("- `state_revision`: `32`", spec)
         self.assertIn("- `status`: `ACTIVE`", spec)
         self.assertIn("- `phase`: `P800_REPAIR`", spec)
         self.assertIn("- `execution_site`: `SOURCE`", spec)
         self.assertIn(
-            "- `last_run`: `runs/adapter-003`",
+            "- `last_run`: `runs/repair-loop-tool-002`",
             spec,
         )
         self.assertIn(
@@ -72,9 +101,27 @@ class Ticket16P800BaselineRunbookTest(unittest.TestCase):
             "- `bundle_status`: `VERIFIED_ON_P800`",
             spec,
         )
-        self.assertIn("- `baseline_run`: `null`", spec)
+        self.assertIn(
+            "- `baseline_run`: "
+            "`runs/p800-baseline-assessment-r5-001`",
+            spec,
+        )
         self.assertIn("- `attempts_used`: `0`", spec)
-        self.assertIn("P800 baseline replay", spec)
+        self.assertIn("- `active_hypothesis`: `null`", spec)
+        self.assertIn("Claude Code", spec)
+        self.assertIn("再选择 attempt 1", spec)
+        self.assertIn("原始 Kernel Call 重放方式", spec)
+
+    def test_claude_runbook_only_launches_the_migration_agent(self) -> None:
+        runbook = CLAUDE_RUNBOOK.read_text(encoding="utf-8")
+
+        self.assertIn("SGLANG_KUNLUN_WORKTREE", runbook)
+        self.assertIn("/model-adaptation Step-3.7-Flash", runbook)
+        self.assertIn("migration-spec.md` revision 32", runbook)
+        self.assertIn("不提供 attempt 1 假设或补丁", runbook)
+        self.assertNotIn("git apply", runbook)
+        self.assertNotIn("torch.clamp", runbook)
+        self.assertNotIn("gemm1_limit =", runbook)
 
     def test_runbook_seals_one_zero_attempt_baseline(self) -> None:
         runbook = RUNBOOK.read_text(encoding="utf-8")

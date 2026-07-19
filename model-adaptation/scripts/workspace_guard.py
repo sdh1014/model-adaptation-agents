@@ -629,7 +629,6 @@ def validate_previous_result(
     binding: Dict[str, Any],
     baseline: str,
     worktree: Path,
-    allowed_paths: list[str],
 ) -> tuple[Path, str, Path]:
     if result_path.is_symlink():
         raise ToolError("previous repair result must not be a symlink")
@@ -640,11 +639,18 @@ def validate_previous_result(
         "spec_binding": binding,
         "baseline_revision": baseline,
         "worktree": str(worktree),
-        "allowed_paths": allowed_paths,
     }
     for field, expected in checks.items():
         if previous.get(field) != expected:
             raise ToolError(f"previous repair result {field} has drifted")
+    previous_allowed_paths = validate_allowed_paths(
+        worktree,
+        previous.get("allowed_paths", []),
+    )
+    if previous.get("allowed_paths") != previous_allowed_paths:
+        raise ToolError(
+            "previous repair result allowed_paths has drifted"
+        )
 
     previous_digest = file_sha256(result_path)
     if attempt == 1:
@@ -709,6 +715,7 @@ def validate_previous_result(
             "repair attempt history is not one complete consecutive chain"
         )
 
+    claims = {}
     for number, name in enumerate(expected_names, start=1):
         claim = read_json_object(
             history_dir / name,
@@ -719,21 +726,30 @@ def validate_previous_result(
             "spec_binding": binding,
             "baseline_revision": baseline,
             "worktree": str(worktree),
-            "allowed_paths": allowed_paths,
             "attempt": number,
         }
         for field, expected in claim_checks.items():
             if claim.get(field) != expected:
                 raise ToolError(f"attempt {number} claim has drifted")
-    if attempt > 1:
-        previous_claim = read_json_object(
-            history_dir / expected_names[-1],
-            "previous attempt claim",
+        claim_allowed_paths = validate_allowed_paths(
+            worktree,
+            claim.get("allowed_paths", []),
         )
+        if claim.get("allowed_paths") != claim_allowed_paths:
+            raise ToolError(
+                f"attempt {number} claim allowed_paths has drifted"
+            )
+        claims[number] = claim
+    if attempt > 1:
+        previous_claim = claims[attempt - 1]
         if previous_claim.get("result_path") != str(result_path):
             raise ToolError(
                 "previous result does not match the consecutive "
                 "attempt claim"
+            )
+        if previous.get("allowed_paths") != previous_claim["allowed_paths"]:
+            raise ToolError(
+                "previous result allowed_paths do not match its attempt claim"
             )
     return result_path, previous_digest, history_dir
 
@@ -777,7 +793,6 @@ def run_start_attempt(
         binding=binding,
         baseline=baseline,
         worktree=worktree,
-        allowed_paths=allowed_paths,
     )
     create_run_dir(run_dir)
     try:

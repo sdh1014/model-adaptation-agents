@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -8,15 +9,21 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parents[1]
+SCRIPTS = ROOT / "model-adaptation" / "scripts"
+
+
 WORKSPACE_GUARD = (
-    ROOT / "model-adaptation" / "scripts" / "workspace_guard.py"
+    SCRIPTS / "workspace_guard.py"
 )
 REPLAY_COMPARE = (
-    ROOT / "model-adaptation" / "scripts" / "replay_compare.py"
+    SCRIPTS / "replay_compare.py"
 )
+MODEL_ADAPTATION_SKILL = ROOT / "model-adaptation" / "SKILL.md"
+CLAUDE_SKILL = ROOT / ".claude" / "skills" / "model-adaptation" / "SKILL.md"
 MIGRATION_SPEC = ROOT / "migration-spec.md"
+REPAIR_LOOP_RUN = ROOT / "runs" / "repair-loop-tool-002" / "result.json"
 ALLOWED_PATHS = (
-    "sglang_kunlun/ops/swiglu.py",
+    "sglang-kunlun/sglang_kunlun/ops/swiglu.py",
     "tests/test_swiglu.py",
 )
 
@@ -225,6 +232,118 @@ def finish_candidate(
 
 
 class Ticket14RepairLoopTest(unittest.TestCase):
+    def test_agent_driven_repair_flow_evidence_matches_current_sources(
+        self,
+    ) -> None:
+        result = json.loads(REPAIR_LOOP_RUN.read_text(encoding="utf-8"))
+
+        self.assertTrue(result["passed"])
+        self.assertEqual(
+            result["supersedes"],
+            "runs/repair-loop-tool-001/result.json",
+        )
+        self.assertTrue(result["behavior"]["agent_selects_hypothesis"])
+        self.assertTrue(
+            result["behavior"]["agent_selects_allowed_paths_per_attempt"]
+        )
+        self.assertFalse(
+            result["behavior"]["baseline_paths_lock_attempts"]
+        )
+        self.assertFalse(result["behavior"]["preauthored_attempt_patch"])
+        self.assertEqual(result["runtime_validation"]["attempts_used"], 0)
+        self.assertEqual(
+            result["runtime_validation"]["p800_operator_repair"],
+            "NOT_RUN",
+        )
+        for source in result["source_files"]:
+            self.assertEqual(
+                hashlib.sha256(
+                    (ROOT / source["path"]).read_bytes()
+                ).hexdigest(),
+                source["sha256"],
+                source["path"],
+            )
+
+    def test_skill_leaves_repair_decisions_to_the_migration_agent(
+        self,
+    ) -> None:
+        skill = MODEL_ADAPTATION_SKILL.read_text(encoding="utf-8")
+        claude_skill = CLAUDE_SKILL.read_text(encoding="utf-8")
+
+        self.assertIn("SGLANG_KUNLUN_WORKTREE", skill)
+        self.assertIn("具体修复方案由 Migration Agent", skill)
+        self.assertIn("不得要求人替 Agent 指定改法", skill)
+        self.assertIn("不同 attempt 可以选择不同文件", skill)
+        self.assertIn("原始 Kernel Call 边界", skill)
+        self.assertNotIn("--p800-call-target", skill)
+        self.assertIn("candidate.patch", skill)
+        self.assertIn(
+            "`active_hypothesis: null` 是人工确认",
+            skill,
+        )
+        self.assertIn("等待人选择补丁", skill)
+        self.assertNotIn("p800-repair-attempt-r5-001.patch", skill)
+        self.assertIn("主 Skill", claude_skill)
+        self.assertIn("唯一 `next_action`", claude_skill)
+
+    def test_start_attempt_accepts_agent_selected_paths_by_round(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            worktree, baseline = create_test_repository(workspace)
+            spec = workspace / "migration-spec.md"
+            write_spec(spec, baseline)
+            previous_result = assess_baseline(
+                workspace,
+                spec,
+                worktree,
+                passed=False,
+                allowed_paths=(ALLOWED_PATHS[0],),
+            )
+
+            attempt_one = workspace / "runs" / "repair-001"
+            started = guard_command(
+                "start-attempt",
+                spec,
+                attempt_one,
+                worktree,
+                "--attempt",
+                "1",
+                "--hypothesis",
+                "change the focused implementation and regression test",
+                "--previous-result",
+                str(previous_result),
+                allowed_paths=ALLOWED_PATHS,
+            )
+            self.assertEqual(started.returncode, 0, started.stderr)
+            (worktree / ALLOWED_PATHS[0]).write_text(
+                "def swiglu(x):\n"
+                "    return x + 1\n",
+                encoding="utf-8",
+            )
+            recorded = record_candidate(spec, attempt_one, worktree)
+            self.assertEqual(recorded.returncode, 0, recorded.stderr)
+            replay(spec, attempt_one / "replay", passed=False)
+            finished = finish_candidate(spec, attempt_one, worktree)
+            self.assertEqual(finished.returncode, 0, finished.stderr)
+
+            attempt_two = workspace / "runs" / "repair-002"
+            started = guard_command(
+                "start-attempt",
+                spec,
+                attempt_two,
+                worktree,
+                "--attempt",
+                "2",
+                "--hypothesis",
+                "revise only the focused implementation",
+                "--previous-result",
+                str(attempt_one / "result.json"),
+                allowed_paths=(ALLOWED_PATHS[0],),
+            )
+            self.assertEqual(started.returncode, 0, started.stderr)
+
     def test_baseline_pass_is_not_a_gap_and_uses_zero_attempts(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = Path(temp_dir)
@@ -802,6 +921,7 @@ class Ticket14RepairLoopTest(unittest.TestCase):
                         "spec_binding": binding,
                         "passed": True,
                         "execution_site": "p800",
+                        "invocation_target": "kunlun_ops.swiglu",
                         "actual_tensors_saved": False,
                         "evidence": [
                             "replay-config.json",

@@ -775,12 +775,12 @@ def run_kernel_replay(
             raise ToolError(
                 "Golden self-replay did not check every current sample"
             )
-    create_run_dir(run_dir)
     invocation_target = (
         SWIGLU_CLAMP_OPERATOR_ID
         if execution_site == "cuda"
         else KUNLUN_SWIGLU_TARGET
     )
+    create_run_dir(run_dir)
     config = {
         "schema": KERNEL_REPLAY_CONFIG_SCHEMA,
         "spec_binding": binding.as_result_dict(),
