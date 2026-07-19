@@ -1,0 +1,8 @@
+execution_site=p800
+invocation_target=kunlun_ops.swiglu
+returncode=1
+--- stdout ---
+
+--- stderr ---
+XCCL /root/miniconda/envs/python310_torch29_cuda/lib/python3.10/site-packages/torch_xmlir/libbkcl.so loaded
+[35mSYMBOL_REWRITE [0m[32mtorch success[0m

@@ -1,0 +1,24 @@
+{
+  "action": "assess-baseline",
+  "allowed_paths": [
+    "sglang-kunlun/sglang_kunlun/hooks/layers/quantization/unquant.py"
+  ],
+  "attempts_used": 0,
+  "baseline_revision": "546ad8c682392922792bbbfe53a8bf575545f118",
+  "evidence": [
+    "workspace.log"
+  ],
+  "gap_observed": true,
+  "passed": false,
+  "replay_evidence_sha256": "c7924d65b87202a7b1cb954d4cddca8de14a4f244b56b9f25a8ba54485b6346d",
+  "replay_result": "/workspace/model-adaptation-agents/runs/p800-baseline-replay-r5-001/result.json",
+  "replay_result_sha256": "9a270cb97b42ec4cb62c98098e4e18a0cbb0879de034c64285ad1c5f3855b3fe",
+  "spec_binding": {
+    "contract_data_sha256": "f683ea62427279da3c899a3ef0afcfa1d16298b7424154664c7e3fac9b13d938",
+    "contract_revision": 5,
+    "spec_id": "step3p7-flash-p800-demo"
+  },
+  "tool": "workspace_guard.py",
+  "workspace_clean": true,
+  "worktree": "/workspace/baidu/aicapx/sglang"
+}

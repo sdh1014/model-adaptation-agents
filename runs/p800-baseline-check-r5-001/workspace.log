@@ -1,0 +1,3 @@
+action=check-baseline
+passed=true
+workspace_clean=true

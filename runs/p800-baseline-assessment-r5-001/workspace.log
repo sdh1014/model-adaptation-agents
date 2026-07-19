@@ -1,0 +1,5 @@
+action=assess-baseline
+replay_passed=false
+gap_observed=true
+attempts_used=0
+workspace_clean=true
