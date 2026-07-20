@@ -7,12 +7,21 @@ from pathlib import Path
 from typing import Any, Optional
 
 from .contracts import (
+    ATTENTION_CAPTURE_SEAM,
+    ATTENTION_OPERATOR_ID,
     CAPTURE_CONFIG_ENV,
     FORWARD_HOOK_TARGET,
+    GEMMA_FUSED_ADD_RMSNORM_CAPTURE_SEAM,
+    GEMMA_FUSED_ADD_RMSNORM_OPERATOR_ID,
+    GEMMA_RMSNORM_CAPTURE_SEAM,
+    GEMMA_RMSNORM_OPERATOR_ID,
     MLP_HOOK_TARGET,
     REPLAY_CONFIG_ENV,
+    SESSION_CONFIG_SCHEMA,
     SWIGLU_CLAMP_HOOK_TARGET,
     SWIGLU_CLAMP_OPERATOR_ID,
+    TOPK_SIGMOID_CAPTURE_SEAM,
+    TOPK_SIGMOID_OPERATOR_ID,
 )
 
 
@@ -21,6 +30,7 @@ _execution_phase: contextvars.ContextVar[str] = contextvars.ContextVar(
     default="unknown",
 )
 _collector: Optional[Any] = None
+_collectors: dict[str, Any] = {}
 _replay: Optional[Any] = None
 _config_path: Optional[Path] = None
 _mode: Optional[str] = None
@@ -67,13 +77,47 @@ def _tp_context(config_path: Path) -> tuple[int, int]:
         )
 
 
-def _get_collector() -> Any:
-    global _collector
+def _get_collector(operator_id: Optional[str] = None) -> Any:
+    global _collector, _collectors
     if _config_path is None:
         raise RuntimeError(f"{CAPTURE_CONFIG_ENV} was not set during plugin registration")
+    config = json.loads(_config_path.read_text(encoding="utf-8"))
+    if config.get("schema") == SESSION_CONFIG_SCHEMA:
+        if not isinstance(operator_id, str) or not operator_id:
+            raise RuntimeError("session capture requires an operator id")
+        if operator_id in _collectors:
+            return _collectors[operator_id]
+        matches = [
+            item
+            for item in config.get("operators", [])
+            if isinstance(item, dict) and item.get("operator_id") == operator_id
+        ]
+        if len(matches) != 1:
+            raise RuntimeError(
+                f"session config must contain exactly one operator {operator_id!r}"
+            )
+        from .kernel_call import PlannedKernelCallCollector
+
+        tp_rank, tp_size = _tp_context(_config_path)
+        loaded_checkpoint = (
+            None
+            if "preflight_tp_context" in config
+            else _loaded_checkpoint_identity()
+        )
+        _collectors[operator_id] = PlannedKernelCallCollector(
+            matches[0],
+            tp_rank=tp_rank,
+            tp_size=tp_size,
+            loaded_checkpoint=loaded_checkpoint,
+        )
+        return _collectors[operator_id]
+
+    if operator_id is not None and config.get("operator_id") != operator_id:
+        raise RuntimeError(
+            f"capture config does not contain requested operator {operator_id!r}"
+        )
     if _collector is None:
         tp_rank, tp_size = _tp_context(_config_path)
-        config = json.loads(_config_path.read_text(encoding="utf-8"))
         if config.get("operator_id") == SWIGLU_CLAMP_OPERATOR_ID:
             from .kernel_call import KernelCallCollector
 
@@ -168,12 +212,116 @@ def around_step3p5_mlp(original, module, x):
 
 def around_swiglu_clamp(original, x, gemm1_limit):
     output = original(x, gemm1_limit)
-    _get_collector().record(
-        x,
-        output,
-        gemm1_limit=gemm1_limit,
+    collector = _get_collector(SWIGLU_CLAMP_OPERATOR_ID)
+    if hasattr(collector, "record_call"):
+        collector.record_call(
+            inputs={"x": x},
+            parameters={},
+            non_tensor_args={"gemm1_limit": gemm1_limit},
+            outputs={"output": output},
+        )
+    else:
+        collector.record(
+            x,
+            output,
+            gemm1_limit=gemm1_limit,
+        )
+    return output
+
+
+def around_gemma_rmsnorm(original, x, weight, eps):
+    output = original(x, weight, eps)
+    _get_collector(GEMMA_RMSNORM_OPERATOR_ID).record_call(
+        inputs={"x": x},
+        parameters={"weight": weight},
+        non_tensor_args={"eps": eps},
+        outputs={"output": output},
     )
     return output
+
+
+def around_gemma_fused_add_rmsnorm(original, x, residual, weight, eps):
+    collector = _get_collector(GEMMA_FUSED_ADD_RMSNORM_OPERATOR_ID)
+    if collector.is_capture_rank:
+        capture_x = x.detach().clone()
+        capture_residual = residual.detach().clone()
+    else:
+        capture_x = x
+        capture_residual = residual
+    result = original(x, residual, weight, eps)
+    collector.record_call(
+        inputs={"x": capture_x, "residual": capture_residual},
+        parameters={"weight": weight},
+        non_tensor_args={"eps": eps},
+        outputs={"mutated_x": x, "mutated_residual": residual},
+    )
+    return result
+
+
+def around_topk_sigmoid(
+    original,
+    topk_weights,
+    topk_ids,
+    gating_output,
+    renormalize,
+    correction_bias,
+):
+    result = original(
+        topk_weights,
+        topk_ids,
+        gating_output,
+        renormalize,
+        correction_bias,
+    )
+    _get_collector(TOPK_SIGMOID_OPERATOR_ID).record_call(
+        inputs={"gating_output": gating_output},
+        parameters={"correction_bias": correction_bias},
+        non_tensor_args={"renormalize": renormalize},
+        outputs={"topk_weights": topk_weights, "topk_ids": topk_ids},
+    )
+    return result
+
+
+def around_vision_prefill_attention(
+    original,
+    q,
+    k,
+    v,
+    o,
+    b_start_loc,
+    b_seq_len,
+    max_input_len,
+    is_causal=True,
+    sm_scale=None,
+):
+    result = original(
+        q,
+        k,
+        v,
+        o,
+        b_start_loc,
+        b_seq_len,
+        max_input_len,
+        is_causal=is_causal,
+        sm_scale=sm_scale,
+    )
+    _get_collector(ATTENTION_OPERATOR_ID).record_call(
+        inputs={
+            "q": q,
+            "k": k,
+            "v": v,
+            "b_start_loc": b_start_loc,
+            "b_seq_len": b_seq_len,
+        },
+        parameters={},
+        non_tensor_args={
+            "max_input_len": max_input_len,
+            "is_causal": is_causal,
+            "sm_scale": sm_scale,
+        },
+        outputs={"output": o},
+    )
+    return result
 
 
 def register() -> None:
@@ -193,6 +341,44 @@ def register() -> None:
     config = json.loads(_config_path.read_text(encoding="utf-8"))
 
     from sglang.srt.plugins.hook_registry import HookRegistry, HookType
+
+    if config.get("schema") == SESSION_CONFIG_SCHEMA:
+        hooks = {
+            SWIGLU_CLAMP_OPERATOR_ID: (
+                SWIGLU_CLAMP_HOOK_TARGET,
+                around_swiglu_clamp,
+            ),
+            GEMMA_RMSNORM_OPERATOR_ID: (
+                GEMMA_RMSNORM_CAPTURE_SEAM,
+                around_gemma_rmsnorm,
+            ),
+            GEMMA_FUSED_ADD_RMSNORM_OPERATOR_ID: (
+                GEMMA_FUSED_ADD_RMSNORM_CAPTURE_SEAM,
+                around_gemma_fused_add_rmsnorm,
+            ),
+            TOPK_SIGMOID_OPERATOR_ID: (
+                TOPK_SIGMOID_CAPTURE_SEAM,
+                around_topk_sigmoid,
+            ),
+            ATTENTION_OPERATOR_ID: (
+                ATTENTION_CAPTURE_SEAM,
+                around_vision_prefill_attention,
+            ),
+        }
+        operator_entries = config.get("operators")
+        if not isinstance(operator_entries, list) or not operator_entries:
+            raise RuntimeError("session capture config requires operators")
+        seen = set()
+        for item in operator_entries:
+            operator_id = item.get("operator_id") if isinstance(item, dict) else None
+            if operator_id not in hooks or operator_id in seen:
+                raise RuntimeError(
+                    f"unsupported or duplicate session operator {operator_id!r}"
+                )
+            target, hook = hooks[operator_id]
+            HookRegistry.register(target, hook, HookType.AROUND)
+            seen.add(operator_id)
+        return
 
     if config.get("operator_id") == SWIGLU_CLAMP_OPERATOR_ID:
         if _mode != "capture":
@@ -219,8 +405,9 @@ def register() -> None:
 
 
 def _reset_for_tests() -> None:
-    global _collector, _config_path, _mode, _replay
+    global _collector, _collectors, _config_path, _mode, _replay
     _collector = None
+    _collectors = {}
     _replay = None
     _config_path = None
     _mode = None

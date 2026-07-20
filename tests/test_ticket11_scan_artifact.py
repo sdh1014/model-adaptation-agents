@@ -182,13 +182,20 @@ class Ticket11ScanArtifactTest(unittest.TestCase):
         current_scan = json.loads(
             (ROOT / "runs" / "scan-006" / "result.json").read_text()
         )
-        self.assertIn("- `scan_run`: `null`", spec)
-        self.assertIn("`scan-006` 和 revision 5", spec)
+        revision_six_scan = json.loads(
+            (ROOT / "runs" / "scan-007" / "result.json").read_text()
+        )
+        self.assertIn("- `scan_run`: `runs/scan-007`", spec)
+        self.assertIn(
+            "`scan-006` 和 revision 5 的 gap queue 只作 `scan-007`",
+            spec,
+        )
         self.assertEqual(self.result["supersedes"], "runs/scan-001")
         self.assertEqual(target_only_scan["supersedes"], "runs/scan-002")
         self.assertEqual(mlp_scan["supersedes"], "runs/scan-003")
         self.assertEqual(initial_kernel_scan["supersedes"], "runs/scan-004")
         self.assertEqual(current_scan["supersedes"], "runs/scan-005")
+        self.assertEqual(revision_six_scan["supersedes"], "runs/scan-006")
 
     def test_eagle_defaults_cover_all_three_draft_weight_layers(self):
         eagle = self.result["eagle_draft_resolution"]

@@ -1,0 +1,40 @@
+scan_id=scan-007
+contract_revision=6
+contract_data_sha256=74723d4cca3008710b04ac56c6ea06a652babd81e101bddaf5ae9b70eb2fbab3
+scope=target-only,kernel-call,text-only+single-image,TP8,BF16,eager
+cuda_revision=49e384ce9d304648e9959666ecb8ce8cd98d0deb
+kunlun_revision=546ad8c682392922792bbbfe53a8bf575545f118
+checkpoint=stepfun-ai/Step-3.7-Flash@5f6244077ac62e04eec3f320501ff8c2b293373a
+supersedes=runs/scan-006
+
+method=fixed source call-chain and existing-call audit
+cuda_worktree=/tmp/sglang-step3p7-cuda-original
+kunlun_worktree=/tmp/sglang-step3p7-kunlun-original
+rule=every CAPTURE_REQUIRED item appears once in gap_queue and capture_plan
+rule=one revision-6 CUDA model process loads all collectors
+rule=text-only and fixed single-image requests execute in the same process
+rule=do not add a model helper, custom operator, or layer wrapper for capture
+rule=do not guess P800 replay targets; resolve each original Kunlun call site when its queue row becomes active
+
+fixed_image=examples/assets/example_image.png
+fixed_image_sha256=e06917184a00b14abd70cd8ea0ff5dca9abfbbad29f7b25c02f97133d4cd060e
+fixed_image_token=<im_patch>
+fixed_image_request=max_new_tokens:1,temperature:0
+
+candidate=_swiglu_silu_clamp_mul verdict=CAPTURE_REQUIRED queue=1
+candidate=gemma_rmsnorm verdict=CAPTURE_REQUIRED queue=2
+candidate=gemma_fused_add_rmsnorm verdict=CAPTURE_REQUIRED queue=3
+candidate=topk_sigmoid verdict=CAPTURE_REQUIRED queue=4
+candidate=prefill_attention._fwd_kernel verdict=CAPTURE_REQUIRED queue=5 input=single-image
+
+attention_capture_seam=context_attention_fwd
+attention_return=None
+attention_expected_output=mutated_o_after_call
+attention_runtime_backend=confirm_triton_attn_from_formal_cuda_launch
+
+operator_count=11
+ready=6
+capture_required=5
+needs_human=0
+capture_plan_count=5
+scan_complete=true

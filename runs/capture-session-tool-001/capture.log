@@ -1,0 +1,6 @@
+action=prepare-session
+sglang_revision=49e384ce9d304648e9959666ecb8ce8cd98d0deb
+operator_count=5
+request_modes=text-only,single-image
+one_model_process=true
+capture_session_consumed=false

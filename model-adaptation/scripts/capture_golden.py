@@ -17,15 +17,27 @@ from _lib.spec_contract import (
 )
 from model_adaptation_capture.contracts import (
     ACTIVATION_GUARD,
+    ATTENTION_CAPTURE_SEAM,
+    ATTENTION_OPERATOR_ID,
+    ATTENTION_SOURCE_RELATIVE_PATH,
     CANDIDATE_SERIALIZATION,
     CAPTURE_CONFIG_ENV,
     CONFIG_SCHEMA,
+    GEMMA_FUSED_ADD_RMSNORM_CAPTURE_SEAM,
+    GEMMA_FUSED_ADD_RMSNORM_OPERATOR_ID,
+    GEMMA_RMSNORM_CAPTURE_SEAM,
+    GEMMA_RMSNORM_OPERATOR_ID,
     KERNEL_CALL_SERIALIZATION,
     KUNLUN_SWIGLU_TARGET,
+    LAYERNORM_SOURCE_RELATIVE_PATH,
     MLP_HOOK_TARGET,
     MODEL_RELATIVE_PATH as MODEL_PATH_TEXT,
+    SESSION_CONFIG_SCHEMA,
     SWIGLU_CLAMP_OPERATOR_ID,
     SWIGLU_CLAMP_SOURCE_RELATIVE_PATH,
+    TOPK_SIGMOID_CAPTURE_SEAM,
+    TOPK_SIGMOID_OPERATOR_ID,
+    TOPK_SOURCE_RELATIVE_PATH,
     checkpoint_metadata,
 )
 from model_adaptation_capture.preflight import (
@@ -35,6 +47,30 @@ from model_adaptation_capture.preflight import (
 
 
 MODEL_RELATIVE_PATH = Path(MODEL_PATH_TEXT)
+FIXED_IMAGE_RELATIVE_PATH = Path("examples/assets/example_image.png")
+SUPPORTED_SOURCE_PATHS = {
+    SWIGLU_CLAMP_OPERATOR_ID: Path(SWIGLU_CLAMP_SOURCE_RELATIVE_PATH),
+    GEMMA_RMSNORM_OPERATOR_ID: Path(LAYERNORM_SOURCE_RELATIVE_PATH),
+    GEMMA_FUSED_ADD_RMSNORM_OPERATOR_ID: Path(LAYERNORM_SOURCE_RELATIVE_PATH),
+    TOPK_SIGMOID_OPERATOR_ID: Path(TOPK_SOURCE_RELATIVE_PATH),
+    ATTENTION_OPERATOR_ID: Path(ATTENTION_SOURCE_RELATIVE_PATH),
+}
+SUPPORTED_HOOK_TARGETS = {
+    SWIGLU_CLAMP_OPERATOR_ID: SWIGLU_CLAMP_OPERATOR_ID,
+    GEMMA_RMSNORM_OPERATOR_ID: GEMMA_RMSNORM_CAPTURE_SEAM,
+    GEMMA_FUSED_ADD_RMSNORM_OPERATOR_ID: (
+        GEMMA_FUSED_ADD_RMSNORM_CAPTURE_SEAM
+    ),
+    TOPK_SIGMOID_OPERATOR_ID: TOPK_SIGMOID_CAPTURE_SEAM,
+    ATTENTION_OPERATOR_ID: ATTENTION_CAPTURE_SEAM,
+}
+ADAPTER_NAMES = {
+    SWIGLU_CLAMP_OPERATOR_ID: "swiglu-clamp",
+    GEMMA_RMSNORM_OPERATOR_ID: "gemma-rmsnorm",
+    GEMMA_FUSED_ADD_RMSNORM_OPERATOR_ID: "gemma-fused-add-rmsnorm",
+    TOPK_SIGMOID_OPERATOR_ID: "topk-sigmoid",
+    ATTENTION_OPERATOR_ID: "vision-prefill-attention",
+}
 
 
 class ToolError(RuntimeError):
@@ -256,6 +292,278 @@ def validate_scan_candidate(
     return operator
 
 
+def validate_capture_session_plan(
+    contract: Dict[str, Any],
+    scan_result: Dict[str, Any],
+    expected_binding: Dict[str, Any],
+) -> list[Dict[str, Any]]:
+    """Validate the complete revision-6 queue before one CUDA model launch."""
+    if contract.get("contract_revision", 0) < 6:
+        raise ToolError("multi-operator capture requires Contract revision 6 or later")
+    operators = scan_result.get("operators")
+    capture_plan = scan_result.get("capture_plan")
+    gap_queue = scan_result.get("gap_queue")
+    if not isinstance(operators, list):
+        raise ToolError("Scan Run operators must be a list")
+    if not isinstance(capture_plan, list) or not capture_plan:
+        raise ToolError("Scan Run capture_plan must be a non-empty list")
+    if not isinstance(gap_queue, list):
+        raise ToolError("Scan Run gap_queue must be a list")
+
+    required_ids = [
+        item.get("operator_id")
+        for item in operators
+        if isinstance(item, dict) and item.get("verdict") == "CAPTURE_REQUIRED"
+    ]
+    queue_ids = [
+        item.get("operator_id")
+        for item in gap_queue
+        if isinstance(item, dict)
+    ]
+    planned_ids = [
+        item.get("operator_id")
+        for item in capture_plan
+        if isinstance(item, dict)
+    ]
+    if (
+        not all(isinstance(item, str) and item for item in required_ids)
+        or len(required_ids) != len(set(required_ids))
+        or queue_ids != planned_ids
+        or set(planned_ids) != set(required_ids)
+    ):
+        raise ToolError(
+            "revision-6 capture_plan must contain every CAPTURE_REQUIRED operator "
+            "once and in gap_queue order"
+        )
+    if ATTENTION_OPERATOR_ID not in planned_ids:
+        raise ToolError(
+            "revision-6 capture_plan must include the Step-3.7 single-image "
+            "vision attention gap"
+        )
+
+    validated = []
+    for operator_id in planned_ids:
+        if operator_id not in SUPPORTED_HOOK_TARGETS:
+            raise ToolError(
+                f"capture/replay adapter is not implemented for {operator_id!r}"
+            )
+        operator = validate_scan_candidate(
+            contract,
+            scan_result,
+            operator_id,
+            expected_binding,
+        )
+        plan = find_capture_plan(scan_result, operator_id)
+        expected_hook = SUPPORTED_HOOK_TARGETS[operator_id]
+        if plan.get("hook_target") != expected_hook:
+            raise ToolError(
+                f"capture plan hook target for {operator_id!r} must remain "
+                f"the existing call {expected_hook!r}"
+            )
+        validated.append(operator)
+
+    requests = scan_result.get("request_set")
+    if not isinstance(requests, list):
+        raise ToolError("Scan Run request_set must be a list")
+    request_modes = [
+        item.get("input_mode") for item in requests if isinstance(item, dict)
+    ]
+    expected_modes = contract["scan_scope"]["input_modes"]
+    if request_modes != expected_modes:
+        raise ToolError(
+            "Scan Run request_set must cover Contract input modes in order"
+        )
+    for item in requests:
+        request = item.get("request")
+        if not isinstance(request, dict):
+            raise ToolError("each capture request must be one object")
+        sampling = request.get("sampling_params")
+        if (
+            not isinstance(request.get("text"), str)
+            or not request["text"]
+            or not isinstance(sampling, dict)
+            or sampling.get("temperature") != 0
+            or sampling.get("max_new_tokens") != 1
+        ):
+            raise ToolError(
+                "capture requests must use fixed text and deterministic one-token generation"
+            )
+        if item["input_mode"] == "single-image":
+            if request.get("image_data") != FIXED_IMAGE_RELATIVE_PATH.as_posix():
+                raise ToolError(
+                    "single-image request must use the fixed SGLang example image"
+                )
+            digest = item.get("image_sha256")
+            if (
+                not isinstance(digest, str)
+                or len(digest) != 64
+                or any(character not in "0123456789abcdef" for character in digest)
+            ):
+                raise ToolError("single-image request must bind the image SHA-256")
+            if "<im_patch>" not in request["text"]:
+                raise ToolError(
+                    "single-image request text must contain the Step-3.7 image token"
+                )
+        elif "image_data" in request or "image_sha256" in item:
+            raise ToolError("text-only request must not contain image data")
+    return validated
+
+
+def prepare_capture_session_config(
+    spec_path: Path,
+    run_dir: Path,
+    scan_result_path: Path,
+    sglang_worktree: Path,
+    *,
+    preflight: bool = False,
+) -> tuple[Any, Dict[str, Any]]:
+    """Prepare one plugin config containing the complete operator queue."""
+    binding = load_spec_binding(spec_path)
+    contract = load_contract_data(spec_path)
+    scan_result = read_json_object(scan_result_path, "Scan Run result")
+    operators = validate_capture_session_plan(
+        contract,
+        scan_result,
+        binding.as_result_dict(),
+    )
+
+    actual_revision = resolve_git_revision(sglang_worktree)
+    expected_revision = contract["source"]["sglang_revision"]
+    if actual_revision != expected_revision:
+        raise ToolError(
+            "SGLang worktree revision does not match Contract Data: "
+            f"expected {expected_revision}, got {actual_revision}"
+        )
+    for operator in operators:
+        relative_path = SUPPORTED_SOURCE_PATHS[operator["operator_id"]]
+        if not (sglang_worktree / relative_path).is_file():
+            raise ToolError(
+                "SGLang worktree is missing capture source file "
+                f"{relative_path.as_posix()}"
+            )
+
+    image_request = next(
+        item
+        for item in scan_result["request_set"]
+        if item["input_mode"] == "single-image"
+    )
+    image_path = (sglang_worktree / FIXED_IMAGE_RELATIVE_PATH).resolve()
+    if (
+        not image_path.is_relative_to(sglang_worktree.resolve())
+        or image_path.is_symlink()
+        or not image_path.is_file()
+    ):
+        raise ToolError("fixed single-image input is missing or escapes the worktree")
+    if file_sha256(image_path) != image_request["image_sha256"]:
+        raise ToolError("fixed single-image input bytes do not match the Scan Run")
+
+    try:
+        checkpoint = checkpoint_metadata(
+            contract["checkpoint"]["id"],
+            contract["checkpoint"]["config_digest"],
+        )
+    except ValueError as error:
+        raise ToolError(str(error)) from error
+
+    try:
+        run_dir.mkdir(parents=True, exist_ok=False)
+        operators_dir = run_dir / "operators"
+        operators_dir.mkdir()
+    except OSError as error:
+        raise ToolError(f"run directory must be fresh and creatable: {error}") from error
+
+    config_path = run_dir / "capture-config.json"
+    session_config_path = str(config_path.resolve())
+    operator_configs = []
+    for index, operator in enumerate(operators, start=1):
+        operator_id = operator["operator_id"]
+        plan = find_capture_plan(scan_result, operator_id)
+        operator_run_dir = operators_dir / f"{index:02d}"
+        operator_run_dir.mkdir()
+        (operator_run_dir / "samples").mkdir()
+        source_path = (
+            sglang_worktree / SUPPORTED_SOURCE_PATHS[operator_id]
+        ).resolve()
+        p800_target = (
+            KUNLUN_SWIGLU_TARGET
+            if operator_id == SWIGLU_CLAMP_OPERATOR_ID
+            else None
+        )
+        operator_configs.append(
+            {
+                "schema": CONFIG_SCHEMA,
+                "session_config": session_config_path,
+                "adapter": ADAPTER_NAMES[operator_id],
+                "spec_binding": binding.as_result_dict(),
+                "operator_id": operator_id,
+                "activation_guard": operator["activation_guard"],
+                "model_path": "target",
+                "max_shapes": contract["limits"]["max_shapes_per_operator"],
+                "tensor_parallel_size": contract["runtime"][
+                    "tensor_parallel_size"
+                ],
+                "tp_rank": contract["sample_policy"]["capture_tp_rank"],
+                "serialization": KERNEL_CALL_SERIALIZATION,
+                "capture_device_type": "cuda",
+                "dtype": contract["runtime"]["dtype"],
+                "checkpoint": checkpoint,
+                "precision_gate": contract["precision_gate"],
+                "run_dir": str(operator_run_dir.resolve()),
+                "hook_target": plan["hook_target"],
+                "boundary": operator["boundary"],
+                "sample_fields": {
+                    "inputs": plan["saved_inputs"],
+                    "parameters": plan["saved_parameters"],
+                    "non_tensor_args": plan["saved_non_tensor_args"],
+                    "outputs": plan["saved_outputs"],
+                },
+                "replay": {
+                    "mode": "standalone-kernel-call",
+                    "cuda_target": plan["hook_target"],
+                    "p800_target": p800_target,
+                    "weights_in_golden_sample": False,
+                },
+                "source": {
+                    "capture_module_path": str(source_path),
+                    "capture_module_sha256": file_sha256(source_path),
+                },
+            }
+        )
+
+    requests = json.loads(json.dumps(scan_result["request_set"]))
+    for item in requests:
+        if item["input_mode"] == "single-image":
+            item["request"]["image_data"] = str(image_path)
+    config = {
+        "schema": SESSION_CONFIG_SCHEMA,
+        "spec_binding": binding.as_result_dict(),
+        "run_dir": str(run_dir.resolve()),
+        "scan_result": {
+            "path": str(scan_result_path.resolve()),
+            "sha256": file_sha256(scan_result_path),
+        },
+        "source": {
+            "sglang_revision": actual_revision,
+            "sglang_worktree": str(sglang_worktree.resolve()),
+        },
+        "checkpoint": checkpoint,
+        "tensor_parallel_size": contract["runtime"]["tensor_parallel_size"],
+        "tp_rank": contract["sample_policy"]["capture_tp_rank"],
+        "requests": requests,
+        "operators": operator_configs,
+    }
+    if preflight:
+        preflight_context = {
+            "rank": config["tp_rank"],
+            "size": config["tensor_parallel_size"],
+        }
+        config["preflight_tp_context"] = preflight_context
+        for item in config["operators"]:
+            item["preflight_tp_context"] = preflight_context
+    write_json(config_path, config)
+    return binding, config
+
+
 def prepare_capture_config(
     spec_path: Path,
     run_dir: Path,
@@ -447,6 +755,104 @@ def run_prepare(
     )
 
 
+def run_prepare_session(
+    spec_path: Path,
+    run_dir: Path,
+    scan_result_path: Path,
+    sglang_worktree: Path,
+) -> None:
+    binding, config = prepare_capture_session_config(
+        spec_path,
+        run_dir,
+        scan_result_path,
+        sglang_worktree,
+    )
+    config_path = run_dir / "capture-config.json"
+    result = {
+        "tool": "capture_golden.py",
+        "action": "prepare-session",
+        "spec_binding": binding.as_result_dict(),
+        "passed": True,
+        "capture_status": "PREPARED",
+        "consumes_capture_session": False,
+        "operator_ids": [
+            item["operator_id"] for item in config["operators"]
+        ],
+        "request_modes": [
+            item["input_mode"] for item in config["requests"]
+        ],
+        "launch_environment": {
+            CAPTURE_CONFIG_ENV: str(config_path.resolve()),
+        },
+        "evidence": ["capture-config.json", "capture.log"],
+        "summary": (
+            "One TP8 model process is prepared to capture the complete gap queue "
+            "from the fixed text-only and single-image requests."
+        ),
+    }
+    write_json(run_dir / "result.json", result)
+    (run_dir / "capture.log").write_text(
+        "\n".join(
+            [
+                "action=prepare-session",
+                f"sglang_revision={config['source']['sglang_revision']}",
+                f"operator_count={len(config['operators'])}",
+                "request_modes="
+                + ",".join(item["input_mode"] for item in config["requests"]),
+                "one_model_process=true",
+                "capture_session_consumed=false",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+
+def run_preflight_session(
+    spec_path: Path,
+    run_dir: Path,
+    scan_result_path: Path,
+    sglang_worktree: Path,
+) -> None:
+    binding, config = prepare_capture_session_config(
+        spec_path,
+        run_dir,
+        scan_result_path,
+        sglang_worktree,
+        preflight=True,
+    )
+    passed, evidence = run_capture_preflight(
+        run_dir / "capture-config.json",
+        sglang_worktree,
+    )
+    result = {
+        "tool": "capture_golden.py",
+        "action": "preflight-session",
+        "spec_binding": binding.as_result_dict(),
+        "passed": passed,
+        "capture_status": (
+            "PREFLIGHT_PASSED" if passed else "PREFLIGHT_FAILED"
+        ),
+        "consumes_capture_session": False,
+        "operator_ids": [
+            item["operator_id"] for item in config["operators"]
+        ],
+        "request_modes": [
+            item["input_mode"] for item in config["requests"]
+        ],
+        "evidence": evidence,
+        "summary": (
+            "All planned existing calls captured three rank-0 shapes and "
+            "self-replayed in one multi-collector preflight."
+            if passed
+            else
+            "The multi-collector preflight did not prove every planned call; "
+            "inspect its per-operator logs."
+        ),
+    }
+    write_json(run_dir / "result.json", result)
+
+
 def run_preflight(
     spec_path: Path,
     run_dir: Path,
@@ -497,9 +903,18 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--spec", required=True, type=Path)
     parser.add_argument("--run-dir", required=True, type=Path)
-    parser.add_argument("--mode", required=True, choices=("prepare", "preflight"))
+    parser.add_argument(
+        "--mode",
+        required=True,
+        choices=(
+            "prepare",
+            "prepare-session",
+            "preflight",
+            "preflight-session",
+        ),
+    )
     parser.add_argument("--scan-result", required=True, type=Path)
-    parser.add_argument("--operator-id", required=True)
+    parser.add_argument("--operator-id")
     parser.add_argument("--sglang-worktree", required=True, type=Path)
     return parser.parse_args()
 
@@ -507,14 +922,33 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     try:
-        action = run_prepare if args.mode == "prepare" else run_preflight
-        action(
-            args.spec,
-            args.run_dir,
-            args.scan_result,
-            args.operator_id,
-            args.sglang_worktree,
-        )
+        if args.mode in {"prepare-session", "preflight-session"}:
+            if args.operator_id is not None:
+                raise ToolError(
+                    "--operator-id is not used by session preparation"
+                )
+            action = (
+                run_prepare_session
+                if args.mode == "prepare-session"
+                else run_preflight_session
+            )
+            action(
+                args.spec,
+                args.run_dir,
+                args.scan_result,
+                args.sglang_worktree,
+            )
+        else:
+            if not args.operator_id:
+                raise ToolError("--operator-id is required by prepare and preflight")
+            action = run_prepare if args.mode == "prepare" else run_preflight
+            action(
+                args.spec,
+                args.run_dir,
+                args.scan_result,
+                args.operator_id,
+                args.sglang_worktree,
+            )
     except (SpecContractError, PreflightError, ToolError, OSError) as error:
         print(f"capture_golden.py: {error}", file=sys.stderr)
         return 2

@@ -22,6 +22,9 @@ MODEL_ADAPTATION_SKILL = ROOT / "model-adaptation" / "SKILL.md"
 CLAUDE_SKILL = ROOT / ".claude" / "skills" / "model-adaptation" / "SKILL.md"
 MIGRATION_SPEC = ROOT / "migration-spec.md"
 REPAIR_LOOP_RUN = ROOT / "runs" / "operator-queue-tool-002" / "result.json"
+CURRENT_CAPTURE_RUN = (
+    ROOT / "runs" / "multimodal-capture-tool-001" / "result.json"
+)
 ALLOWED_PATHS = (
     "sglang-kunlun/sglang_kunlun/ops/swiglu.py",
     "tests/test_swiglu.py",
@@ -276,14 +279,22 @@ class Ticket14RepairLoopTest(unittest.TestCase):
         self.assertTrue(
             result["delegated_to_p800_agent"]["repair_replay_adapter"]
         )
+        current_paths = {
+            source["path"]
+            for source in json.loads(
+                CURRENT_CAPTURE_RUN.read_text(encoding="utf-8")
+            )["source_files"]
+        }
         for source in result["source_files"]:
-            self.assertEqual(
-                hashlib.sha256(
-                    (ROOT / source["path"]).read_bytes()
-                ).hexdigest(),
-                source["sha256"],
-                source["path"],
-            )
+            actual = hashlib.sha256(
+                (ROOT / source["path"]).read_bytes()
+            ).hexdigest()
+            if actual != source["sha256"]:
+                self.assertIn(
+                    source["path"],
+                    current_paths,
+                    f"{source['path']} changed without later Run evidence",
+                )
 
     def test_skill_leaves_repair_decisions_to_the_migration_agent(
         self,

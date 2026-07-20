@@ -84,17 +84,22 @@ class Ticket16P800BaselineRunbookTest(unittest.TestCase):
     def test_current_state_reopens_under_revision_6_queue_contract(self) -> None:
         spec = SPEC.read_text(encoding="utf-8")
 
-        self.assertIn("- `state_revision`: `39`", spec)
+        self.assertIn("- `state_revision`: `40`", spec)
         self.assertIn("- `status`: `ACTIVE`", spec)
-        self.assertIn("- `phase`: `SCAN`", spec)
+        self.assertIn("- `phase`: `CUDA_CAPTURE`", spec)
         self.assertIn("- `execution_site`: `SOURCE`", spec)
         self.assertIn(
-            "- `last_run`: `runs/operator-queue-tool-002`",
+            "- `last_run`: `runs/multimodal-capture-tool-001`",
             spec,
         )
-        self.assertIn("- `active_operator`: `null`", spec)
         self.assertIn(
-            "- `scan_run`: `null`",
+            "- `active_operator`: "
+            "`sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe."
+            "_swiglu_silu_clamp_mul`",
+            spec,
+        )
+        self.assertIn(
+            "- `scan_run`: `runs/scan-007`",
             spec,
         )
         self.assertIn(

@@ -217,32 +217,37 @@ Agent 每次动作前完整读取 Contract 与本区；每次动作结束后立�
 ### Current
 
 - `observed_contract_revision`: `6`
-- `state_revision`: `39`
+- `state_revision`: `40`
 - `status`: `ACTIVE`
-- `phase`: `SCAN`
+- `phase`: `CUDA_CAPTURE`
 - `execution_site`: `SOURCE`
-- `active_operator`: `null`
-- `last_completed_action`: `operator_queue_evidence_gates_reviewed`
-- `last_run`: `runs/operator-queue-tool-002`
-- `next_action`: `基于固定源码和 scan-006 历史线索完成 revision 6 target-only eager Kernel Call 扫描，生成新的 Scan Run、完整 gap queue 顺序和全队列 capture plan`
+- `active_operator`: `sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul`
+- `last_completed_action`: `revision_6_multimodal_capture_session_prepared_at_source`
+- `last_run`: `runs/multimodal-capture-tool-001`
+- `next_action`: `在固定 CUDA revision 的 TP8 环境执行 capture_golden.py --mode preflight-session，验证 scan-007 五个现有调用的多 collector、rank 过滤与逐算子 CUDA self-replay；该动作不消耗正式 Capture Session`
 
 规则：`ACTIVE` 时 `next_action` 必须恰好一条；`WAITING` 时必须是一条人工动作；`PASS`、`BLOCKED`、`NEEDS_HUMAN` 时必须为 `none`。
 
 ### Scan
 
-- `scan_run`: `null`
-- `target_coverage`: `PENDING`
+- `scan_run`: `runs/scan-007`
+- `target_coverage`: `PASS`
 - `draft_coverage`: `NOT_APPLICABLE`
-- `operator_counts`: `{ready: 0, capture_required: 0, needs_human: 0}`
+- `operator_counts`: `{ready: 6, capture_required: 5, needs_human: 0}`
 
 #### Gap queue
 
 | operator_id | scan_verdict | golden_run | repair_status | attempts_used | passing_run | evidence |
 |---|---|---|---|---:|---|---|
-| _empty until revision 6 Scan Run_ |  |  |  | 0 |  |  |
+| `sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul` | `CAPTURE_REQUIRED` | `null` | `ACTIVE` | 0 | `null` | `runs/scan-007/result.json` |
+| `sgl_kernel.gemma_rmsnorm` | `CAPTURE_REQUIRED` | `null` | `PENDING` | 0 | `null` | `runs/scan-007/result.json` |
+| `sgl_kernel.gemma_fused_add_rmsnorm` | `CAPTURE_REQUIRED` | `null` | `PENDING` | 0 | `null` | `runs/scan-007/result.json` |
+| `sgl_kernel.topk_sigmoid` | `CAPTURE_REQUIRED` | `null` | `PENDING` | 0 | `null` | `runs/scan-007/result.json` |
+| `sglang.srt.layers.attention.triton_ops.prefill_attention._fwd_kernel` | `CAPTURE_REQUIRED` | `null` | `PENDING` | 0 | `null` | `runs/scan-007/result.json` |
 
-`scan-006` 和 revision 5 的 gap queue 只作新扫描的源码线索。revision 6 必须形成
-新的 Scan Run 和 Contract 绑定，不能直接改写旧 Run。`repair_status` 只用
+`scan-006` 和 revision 5 的 gap queue 只作 `scan-007` 的历史源码线索，没有被
+改写。`scan-007` 同时固定文本和单图请求；五项全部进入同一个 capture plan。
+`repair_status` 只用
 `PENDING | ACTIVE | PASS`；最多一行 `ACTIVE`，且必须等于 `active_operator`。
 
 ### CUDA Capture
@@ -291,9 +296,11 @@ replay。`finish-attempt` 只有收到完整列表且全部通过才保留新 pa
 | Contract approved and tool bindings match | `PASS` | `runs/spec-binding-005/result.json` |
 | revision 5 helper/callable implementation rejected and inline source correction prepared | `PASS` | `runs/code-review-35aa72e-001/result.json`; `runs/inline-repair-correction-r5-001/result.json` |
 | cumulative patch, exact original-call argument binding, inherited regression gate and automatic queue continuation implemented at SOURCE | `PASS` | `runs/operator-queue-tool-002/result.json` |
-| target-only eager scan complete | `PENDING` | `null` |
-| gap queue complete | `PENDING` | `null` |
-| all planned adapters, multi-collector capture/bundle path and preflights pass | `PENDING` | `null` |
+| target-only eager scan complete | `PASS` | `runs/scan-007/result.json` |
+| gap queue complete, including fixed single-image vision attention | `PASS` | `runs/scan-007/result.json` |
+| all planned CUDA capture/self-replay adapters and one-config multi-collector path implemented at SOURCE | `PASS` | `runs/multimodal-capture-tool-001/result.json` |
+| P800 replay adapter resolved from the original Kunlun call site for each active operator | `PENDING` | `null` |
+| revision 6 CUDA preflight and all-Golden bundle path pass | `PENDING` | `null` |
 | one revision 6 CUDA Session and at most three samples per operator | `PENDING` | `null` |
 | every planned operator has a SEALED Golden Run | `PENDING` | `null` |
 | bundle verified on CUDA and P800 | `PENDING` | `null` |
@@ -354,5 +361,6 @@ replay。`finish-attempt` 只有收到完整列表且全部通过才保留新 pa
 | `37` | 正式审查整改与队列续行流程已落地：候选 replay 只绑定 patch 并保持原 `kunlun_ops.swiglu` 调用；后续算子从上一项累计通过 patch 开始，失败只恢复到该起点，Skill 在当前项通过后自动选择下一项。SOURCE 静态测试通过，P800 修复和 revision 6 Scan/Capture 尚未执行 | `runs/operator-queue-tool-001/result.json` |
 | `38` | 复审补齐两条封存门槛：候选 replay 前后逐字节核对真实 worktree，并从原生产调用点确认参数装配；后续 attempt 在领取时固定全部历史 operator，`finish-attempt` 只有活动 replay 和完整回归列表全部通过才保留累计 patch。revision 6 多 adapter、多 collector 和全量 bundle 仍为扫描后的待实现能力，旧 revision 5 runbook 禁止复用 | `runs/operator-queue-tool-001/result.json` |
 | `39` | 后继 SOURCE Run 修正复审发现：SwiGLU 候选必须保持基线 `x/y`、从模型配置读取真实 clamp limit 并保留 `None` 分支；新的 accepted Run 继承完整历史回归列表，第三个及以后算子不能删掉更早项；全 baseline 直接 PASS 时允许以干净固定 revision 和空 `passing_run` 闭环。`operator-queue-tool-001` 保留为被替代的历史证据 | `runs/operator-queue-tool-002/result.json` |
+| `40` | `scan-007` 绑定 revision 6 并把四个文本缺口与单图视觉 attention 全部放入同一 capture plan；固定 SGLang 图像和摘要。SOURCE 已实现一个 session config、五个现有 CUDA 调用 Hook、逐算子 rank-0 collector 与 CUDA self-replay 编排；除已有 SwiGLU 外不预设 P800 replay 入口，由 Agent 推进到各项时依据 Kunlun 原调用点补齐。未运行 Torch/CUDA，也未消耗正式 Session；下一动作只是在 CUDA 机器执行多算子 preflight | `runs/scan-007/result.json`、`runs/multimodal-capture-tool-001/result.json` |
 
 <!-- AGENT-WRITABLE WORKING STATE: END -->

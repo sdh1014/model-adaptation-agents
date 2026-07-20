@@ -13,16 +13,32 @@ from typing import Any, Callable, Dict, Optional
 import torch
 
 from .contracts import (
+    ATTENTION_CAPTURE_SEAM,
+    ATTENTION_OPERATOR_ID,
     FIXED_PRECISION_GATE,
+    GEMMA_FUSED_ADD_RMSNORM_CAPTURE_SEAM,
+    GEMMA_FUSED_ADD_RMSNORM_OPERATOR_ID,
+    GEMMA_RMSNORM_CAPTURE_SEAM,
+    GEMMA_RMSNORM_OPERATOR_ID,
     KERNEL_CALL_SAMPLE_SCHEMA,
     KERNEL_CALL_STATE_SCHEMA,
     KERNEL_REPLAY_CONFIG_SCHEMA,
     KERNEL_REPLAY_RESULT_SCHEMA,
     KUNLUN_SWIGLU_TARGET,
     SWIGLU_CLAMP_OPERATOR_ID,
+    TOPK_SIGMOID_CAPTURE_SEAM,
+    TOPK_SIGMOID_OPERATOR_ID,
     VALIDATION_TP_RANK,
     shape_id_for,
 )
+
+
+PLANNED_TARGETS = {
+    GEMMA_RMSNORM_OPERATOR_ID: GEMMA_RMSNORM_CAPTURE_SEAM,
+    GEMMA_FUSED_ADD_RMSNORM_OPERATOR_ID: GEMMA_FUSED_ADD_RMSNORM_CAPTURE_SEAM,
+    TOPK_SIGMOID_OPERATOR_ID: TOPK_SIGMOID_CAPTURE_SEAM,
+    ATTENTION_OPERATOR_ID: ATTENTION_CAPTURE_SEAM,
+}
 
 
 class KernelReplayError(RuntimeError):
@@ -180,8 +196,9 @@ def _validate_config(config: Dict[str, Any]) -> None:
         )
     if config.get("schema") != KERNEL_REPLAY_CONFIG_SCHEMA:
         raise KernelReplayError("kernel replay config schema has drifted")
-    if config.get("operator_id") != SWIGLU_CLAMP_OPERATOR_ID:
-        raise KernelReplayError("kernel replay operator has drifted")
+    operator_id = config.get("operator_id")
+    if operator_id not in {SWIGLU_CLAMP_OPERATOR_ID, *PLANNED_TARGETS}:
+        raise KernelReplayError("kernel replay operator is unsupported")
     if not isinstance(config.get("spec_binding"), dict):
         raise KernelReplayError("kernel replay config is missing spec_binding")
     if config.get("tensor_parallel_size") != 8:
@@ -195,11 +212,34 @@ def _validate_config(config: Dict[str, Any]) -> None:
     execution_site = config.get("execution_site")
     if execution_site not in {"cuda", "p800"}:
         raise KernelReplayError("execution_site must be cuda or p800")
-    expected_target = (
-        SWIGLU_CLAMP_OPERATOR_ID
-        if execution_site == "cuda"
-        else KUNLUN_SWIGLU_TARGET
-    )
+    if execution_site == "p800" and operator_id != SWIGLU_CLAMP_OPERATOR_ID:
+        raise KernelReplayError(
+            "P800 replay adapter is not implemented for this operator"
+        )
+    if operator_id == SWIGLU_CLAMP_OPERATOR_ID:
+        expected_target = (
+            SWIGLU_CLAMP_OPERATOR_ID
+            if execution_site == "cuda"
+            else KUNLUN_SWIGLU_TARGET
+        )
+    else:
+        expected_target = PLANNED_TARGETS[operator_id]
+        if not isinstance(config.get("adapter"), str) or not config["adapter"]:
+            raise KernelReplayError("planned kernel replay is missing its adapter")
+        sample_fields = config.get("sample_fields")
+        if (
+            not isinstance(sample_fields, dict)
+            or set(sample_fields)
+            != {"inputs", "parameters", "non_tensor_args", "outputs"}
+            or any(
+                not isinstance(names, list)
+                or not all(isinstance(name, str) and name for name in names)
+                for names in sample_fields.values()
+            )
+        ):
+            raise KernelReplayError(
+                "planned kernel replay sample fields have drifted"
+            )
     if config.get("invocation_target") != expected_target:
         raise KernelReplayError("kernel replay invocation target has drifted")
     candidate = config.get("candidate")
@@ -211,6 +251,10 @@ def _validate_config(config: Dict[str, Any]) -> None:
         if config.get("allow_active_capture") is not False:
             raise KernelReplayError(
                 "candidate replay must not allow active capture"
+            )
+        if operator_id != SWIGLU_CLAMP_OPERATOR_ID:
+            raise KernelReplayError(
+                "candidate evidence adapter is not implemented for this operator"
             )
         _validate_candidate(candidate)
     if not isinstance(config.get("allow_active_capture"), bool):
@@ -388,6 +432,206 @@ def _load_sample(
     return payload
 
 
+def _load_planned_sample(
+    config: Dict[str, Any],
+    sample: Dict[str, Any],
+) -> Dict[str, Any]:
+    if not isinstance(sample, dict):
+        raise KernelReplayError("Kernel Call sample entry must be one object")
+    shape_id = sample.get("shape_id")
+    expected_file = f"samples/{shape_id}.pt"
+    if not isinstance(shape_id, str) or not shape_id:
+        raise KernelReplayError("Kernel Call sample shape id is invalid")
+    if sample.get("file") != expected_file:
+        raise KernelReplayError("Kernel Call sample path has drifted")
+    golden_run = Path(config["golden_run"]).resolve()
+    sample_path = (golden_run / expected_file).resolve()
+    if not sample_path.is_relative_to(golden_run):
+        raise KernelReplayError("Kernel Call sample path escapes the Golden Run")
+    try:
+        payload = torch.load(
+            sample_path,
+            map_location="cpu",
+            weights_only=True,
+        )
+    except (OSError, RuntimeError, TypeError, ValueError) as error:
+        raise KernelReplayError(f"cannot load Kernel Call sample: {error}") from error
+    expected_keys = {
+        "schema",
+        "spec_binding",
+        "operator_id",
+        "tp_rank",
+        "tensor_parallel_size",
+        "signature",
+        "inputs",
+        "parameters",
+        "non_tensor_args",
+        "outputs",
+    }
+    if not isinstance(payload, dict) or set(payload) != expected_keys:
+        raise KernelReplayError("Kernel Call sample structure has drifted")
+    checks = {
+        "schema": KERNEL_CALL_SAMPLE_SCHEMA,
+        "spec_binding": config["spec_binding"],
+        "operator_id": config["operator_id"],
+        "tp_rank": config["tp_rank"],
+        "tensor_parallel_size": config["tensor_parallel_size"],
+    }
+    for field, expected in checks.items():
+        if payload.get(field) != expected:
+            raise KernelReplayError(f"Kernel Call sample {field} has drifted")
+    if payload["signature"] != sample.get("signature"):
+        raise KernelReplayError(
+            "Kernel Call sample signature differs from capture state"
+        )
+    for field in ("inputs", "parameters", "non_tensor_args", "outputs"):
+        values = payload[field]
+        if (
+            not isinstance(values, dict)
+            or list(values) != config["sample_fields"][field]
+        ):
+            raise KernelReplayError(
+                f"Kernel Call sample {field} differ from the capture plan"
+            )
+    for field in ("inputs", "parameters", "outputs"):
+        for name, value in payload[field].items():
+            if not isinstance(value, torch.Tensor) or value.device.type != "cpu":
+                raise KernelReplayError(
+                    f"serialized {field} {name} must be a CPU Tensor"
+                )
+            if value.layout != torch.strided:
+                raise KernelReplayError(
+                    f"serialized {field} {name} must be strided"
+                )
+            if not bool(torch.isfinite(value).all().item()):
+                raise KernelReplayError(
+                    f"serialized {field} {name} must be finite"
+                )
+    signature = {
+        "operator_id": config["operator_id"],
+        "model_path": "target",
+        "tensor_parallel_size": config["tensor_parallel_size"],
+        "tp_rank": config["tp_rank"],
+        "inputs": {
+            name: {
+                "kind": "tensor",
+                "shape": list(value.shape),
+                "dtype": str(value.dtype).removeprefix("torch."),
+                "layout": str(value.layout).removeprefix("torch."),
+                "stride": list(value.stride()),
+            }
+            for name, value in payload["inputs"].items()
+        },
+        "parameters": {
+            name: {
+                "kind": "tensor",
+                "shape": list(value.shape),
+                "dtype": str(value.dtype).removeprefix("torch."),
+                "layout": str(value.layout).removeprefix("torch."),
+                "stride": list(value.stride()),
+            }
+            for name, value in payload["parameters"].items()
+        },
+        "non_tensor_args": payload["non_tensor_args"],
+    }
+    if payload["signature"] != signature:
+        raise KernelReplayError("Kernel Call sample signature has drifted")
+    try:
+        actual_shape_id = shape_id_for(
+            {
+                name: list(value.shape)
+                for name, value in payload["inputs"].items()
+            }
+        )
+    except ValueError as error:
+        raise KernelReplayError("Kernel Call shape metadata has drifted") from error
+    if actual_shape_id != shape_id:
+        raise KernelReplayError("Kernel Call shape digest has drifted")
+    return payload
+
+
+def _invoke_planned_call(
+    operator_id: str,
+    payload: Dict[str, Any],
+    device: torch.device,
+) -> Dict[str, torch.Tensor]:
+    inputs = {
+        name: value.to(device) for name, value in payload["inputs"].items()
+    }
+    parameters = {
+        name: value.to(device) for name, value in payload["parameters"].items()
+    }
+    non_tensor_args = payload["non_tensor_args"]
+    expected_outputs = payload["outputs"]
+
+    if operator_id == GEMMA_RMSNORM_OPERATOR_ID:
+        from sglang.srt.layers.layernorm import gemma_rmsnorm
+
+        return {
+            "output": gemma_rmsnorm(
+                inputs["x"],
+                parameters["weight"],
+                non_tensor_args["eps"],
+            )
+        }
+    if operator_id == GEMMA_FUSED_ADD_RMSNORM_OPERATOR_ID:
+        from sglang.srt.layers.layernorm import gemma_fused_add_rmsnorm
+
+        x = inputs["x"]
+        residual = inputs["residual"]
+        gemma_fused_add_rmsnorm(
+            x,
+            residual,
+            parameters["weight"],
+            non_tensor_args["eps"],
+        )
+        return {"mutated_x": x, "mutated_residual": residual}
+    if operator_id == TOPK_SIGMOID_OPERATOR_ID:
+        from sglang.srt.layers.moe.topk import topk_sigmoid
+
+        topk_weights = torch.empty(
+            expected_outputs["topk_weights"].shape,
+            dtype=expected_outputs["topk_weights"].dtype,
+            device=device,
+        )
+        topk_ids = torch.empty(
+            expected_outputs["topk_ids"].shape,
+            dtype=expected_outputs["topk_ids"].dtype,
+            device=device,
+        )
+        topk_sigmoid(
+            topk_weights,
+            topk_ids,
+            inputs["gating_output"],
+            non_tensor_args["renormalize"],
+            parameters["correction_bias"],
+        )
+        return {"topk_weights": topk_weights, "topk_ids": topk_ids}
+    if operator_id == ATTENTION_OPERATOR_ID:
+        from sglang.srt.layers.attention.triton_ops.prefill_attention import (
+            context_attention_fwd,
+        )
+
+        output = torch.empty(
+            expected_outputs["output"].shape,
+            dtype=expected_outputs["output"].dtype,
+            device=device,
+        )
+        context_attention_fwd(
+            inputs["q"],
+            inputs["k"],
+            inputs["v"],
+            output,
+            inputs["b_start_loc"],
+            inputs["b_seq_len"],
+            non_tensor_args["max_input_len"],
+            is_causal=non_tensor_args["is_causal"],
+            sm_scale=non_tensor_args["sm_scale"],
+        )
+        return {"output": output}
+    raise KernelReplayError(f"no planned replay adapter for {operator_id!r}")
+
+
 def run_kernel_replay_worker(
     config: Dict[str, Any],
     *,
@@ -404,27 +648,40 @@ def run_kernel_replay_worker(
         "cuda",
         torch.cuda.current_device(),
     )
-    if config["execution_site"] == "cuda":
-        invoke = cuda_call or _default_cuda_call
-    else:
-        candidate = config.get("candidate")
-        invoke = p800_call or partial(
-            _default_p800_call,
-            pass_limit=isinstance(candidate, dict),
-        )
+    is_swiglu = config["operator_id"] == SWIGLU_CLAMP_OPERATOR_ID
+    if is_swiglu:
+        if config["execution_site"] == "cuda":
+            invoke = cuda_call or _default_cuda_call
+        else:
+            candidate = config.get("candidate")
+            invoke = p800_call or partial(
+                _default_p800_call,
+                pass_limit=isinstance(candidate, dict),
+            )
     precision = config["precision_gate"]
     checked_shapes = []
     errors = []
 
     for sample in state["samples"]:
-        payload = _load_sample(config, sample)
+        payload = (
+            _load_sample(config, sample)
+            if is_swiglu
+            else _load_planned_sample(config, sample)
+        )
         shape_id = sample["shape_id"]
-        x = payload["inputs"]["x"].to(selected_device)
         try:
-            actual = invoke(
-                x,
-                float(payload["non_tensor_args"]["gemm1_limit"]),
-            )
+            if is_swiglu:
+                actual = invoke(
+                    payload["inputs"]["x"].to(selected_device),
+                    float(payload["non_tensor_args"]["gemm1_limit"]),
+                )
+                actual_outputs = {"output": actual}
+            else:
+                actual_outputs = _invoke_planned_call(
+                    config["operator_id"],
+                    payload,
+                    selected_device,
+                )
         except (RuntimeError, TypeError) as error:
             checked_shapes.append({"shape_id": shape_id, "passed": False})
             errors.append(
@@ -437,30 +694,49 @@ def run_kernel_replay_worker(
             continue
 
         try:
-            if not isinstance(actual, torch.Tensor):
-                raise KernelReplayError("existing Kernel Call did not return a Tensor")
-            if not bool(torch.isfinite(actual).all().item()):
-                raise KernelReplayError("existing Kernel Call returned non-finite values")
-            actual_cpu = actual.detach().to("cpu")
-            expected = payload["outputs"]["output"]
-            if actual_cpu.shape != expected.shape:
-                raise KernelReplayError("Kernel Call output shape differs from CUDA")
-            if (
-                precision["require_same_dtype"]
-                and actual_cpu.dtype != expected.dtype
-            ):
-                raise KernelReplayError("Kernel Call output dtype differs from CUDA")
-            torch.testing.assert_close(
-                actual_cpu,
-                expected,
-                atol=precision["atol"],
-                rtol=precision["rtol"],
-                equal_nan=False,
-                check_device=True,
-                check_dtype=precision["require_same_dtype"],
-                check_layout=True,
-                check_stride=precision["check_stride"],
-            )
+            if not isinstance(actual_outputs, dict) or list(
+                actual_outputs
+            ) != list(payload["outputs"]):
+                raise KernelReplayError(
+                    "existing Kernel Call output structure differs from CUDA"
+                )
+            for name, actual in actual_outputs.items():
+                if not isinstance(actual, torch.Tensor):
+                    raise KernelReplayError(
+                        f"existing Kernel Call output {name} is not a Tensor"
+                    )
+                if not bool(torch.isfinite(actual).all().item()):
+                    raise KernelReplayError(
+                        f"existing Kernel Call output {name} is non-finite"
+                    )
+                actual_cpu = actual.detach().to("cpu")
+                expected = payload["outputs"][name]
+                if actual_cpu.shape != expected.shape:
+                    raise KernelReplayError(
+                        f"Kernel Call output {name} shape differs from CUDA"
+                    )
+                if (
+                    precision["require_same_dtype"]
+                    and actual_cpu.dtype != expected.dtype
+                ):
+                    raise KernelReplayError(
+                        f"Kernel Call output {name} dtype differs from CUDA"
+                    )
+                exact = not (
+                    actual_cpu.dtype.is_floating_point
+                    or actual_cpu.dtype.is_complex
+                )
+                torch.testing.assert_close(
+                    actual_cpu,
+                    expected,
+                    atol=0 if exact else precision["atol"],
+                    rtol=0 if exact else precision["rtol"],
+                    equal_nan=False,
+                    check_device=True,
+                    check_dtype=precision["require_same_dtype"],
+                    check_layout=True,
+                    check_stride=precision["check_stride"],
+                )
             checked_shapes.append({"shape_id": shape_id, "passed": True})
         except (AssertionError, KernelReplayError) as error:
             checked_shapes.append({"shape_id": shape_id, "passed": False})

@@ -1,0 +1,33 @@
+execution_site=SOURCE
+torch_available=false
+cuda_available=false
+capture_session_consumed=false
+
+red_test=ImportError: ATTENTION_CAPTURE_SEAM was not implemented
+red_session_test=expected 7 preflight workers, got 1
+
+command=python3 -m unittest tests.test_ticket26_single_session_vision_capture
+tests_run=6
+result=PASS
+
+command=python3 -m unittest tests.test_ticket21_kernel_scan_scope tests.test_ticket23_swiglu_clamp_adapter tests.test_ticket25_operator_queue tests.test_ticket26_single_session_vision_capture
+tests_run=39
+result=PASS
+
+command=python3 -m unittest tests.test_ticket10_spec_binding tests.test_ticket11_scan_artifact tests.test_ticket12_cuda_capture_entrypoint tests.test_ticket12_cuda_capture_preflight tests.test_ticket12_sglang_capture_plugin tests.test_ticket13_handoff_bundle tests.test_ticket14_repair_loop tests.test_ticket15_formal_cuda_capture_runbook tests.test_ticket15_formal_cuda_evidence_review tests.test_ticket15_handoff_plan tests.test_ticket15_p800_handoff_verification tests.test_ticket16_p800_baseline_runbook tests.test_ticket18_target_only_eager_scan tests.test_ticket19_mlp_boundary tests.test_ticket21_kernel_scan_scope tests.test_ticket23_swiglu_clamp_adapter tests.test_ticket25_operator_queue tests.test_ticket26_single_session_vision_capture
+tests_run=132
+result=PASS
+
+command=PYTHONPYCACHEPREFIX=/tmp/model-adaptation-pycache python3 -m py_compile capture and replay sources
+result=PASS
+
+command=python3 -m json.tool runs/scan-007/result.json
+result=PASS
+
+prepared_run=runs/capture-session-tool-001
+prepared_operator_count=5
+prepared_request_modes=text-only,single-image
+cuda_preflight=PENDING_ON_CUDA_MACHINE
+p800_replay_adapter_swiglu=SOURCE_IMPLEMENTED_RUNTIME_BASELINE_PENDING
+p800_replay_adapters_other_four=PENDING_AGENT_RESOLUTION
+all_golden_bundle=NOT_IMPLEMENTED

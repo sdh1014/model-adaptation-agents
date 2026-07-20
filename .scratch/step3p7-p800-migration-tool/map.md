@@ -53,6 +53,9 @@ attempt 1。
 - [以 kernel 调用为边界重扫并选择最小 Demo](issues/21-kernel-level-scan-and-demo-selection.md)：Contract revision 5 只固定 kernel-call 扫描范围、文本/单图输入和直接参数保存规则；`scan-005` 保留初次结果，`scan-006` 纠正视觉链并补回 clamp SwiGLU 后选择已有 `_swiglu_silu_clamp_mul`。
 - [Gemma RMSNorm kernel adapter（已取消）](issues/22-gemma-rmsnorm-kernel-capture-replay-adapter.md)：保留原票据历史；`scan-006` 改选更小缺口后标记为 `wontfix`。
 - [实现 SwiGLU clamp Kernel Call 采集与重放 adapter](issues/23-swiglu-clamp-kernel-capture-replay-adapter.md)：已完成现有 `_swiglu_silu_clamp_mul` Hook、rank 0 三 shape 样本、CUDA 原函数 self-replay 与 P800 `kunlun_ops.swiglu` baseline 入口；adapter-002 的 `cuda-preflight-r5-002` 已回传并通过，未消耗正式 Session。baseline adapter 只证明缺口；P800 Migration Agent 根据源码补齐 repair replay adapter 后再领取 attempt。
+- [正式审查内联修复边界](issues/24-review-inline-repair-boundary.md)：拒绝生产 helper 和任意 callable replay；候选补丁必须修改原调用位置，并由真实 worktree diff 与调用参数证据共同约束。
+- [单算子通过后继续缺口队列](issues/25-continue-through-operator-gap-queue.md)：revision 6 让后一项继承累计通过 patch，当前项通过并回归旧项后自动进入下一项，全部关闭才进入 `PASS / DONE`。
+- [在同一次 Session 采集视觉 attention 缺口](issues/26-capture-vision-gap-in-one-session.md)：`scan-007` 把单图 `prefill_attention._fwd_kernel` 与四个文本缺口放入同一 capture plan；固定本地图像、一个 session config 和五个 rank-0 collector 的 SOURCE 实现已完成，CUDA preflight 待实机执行。
 - [确认跨 CUDA/P800 的样本格式与精度比较](issues/12-portable-sample-and-precision-compare.md)：CUDA Torch `2.11.0+cu129` 写出的三个 BF16 样本已由 P800 修改版 Torch `2.5.1+cu118` 读回；固定比较器正常 PASS 并正确拒绝有意数值偏差，Run 不保存 P800 actual Tensor。
 - [实现可验证的人工交接包](issues/13-verifiable-manual-handoff-bundle.md)：已完成 pre-replay 样本文件摘要记录、样本摘要与 replay 证据绑定、build/verify、完整允许文件 manifest、CUDA self-replay 结果重算和篡改/错误 Contract 测试；工具不解析 Working State，Agent 按 Skill 校验下一状态临时 Spec 后再原子推进。
 - [实现可恢复的五轮修复闭环](issues/14-five-attempt-repair-loop.md)：已完成固定 Kunlun revision/干净工作区检查、baseline 零计数判定、连续且不可复用的单一假设 Run、replay 前完整 patch 固化、patch/replay 联合摘要、失败恢复、通过保留、未知修改保护和第五轮上限；每轮假设及最小文件由 Migration Agent 依据证据自主选择，baseline 文件列表不锁定后续 attempt；synthetic 只允许绑定测试 Spec，不冒充 P800 实机闭环。

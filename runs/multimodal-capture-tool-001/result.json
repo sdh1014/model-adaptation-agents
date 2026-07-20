@@ -1,0 +1,148 @@
+{
+  "tool": "migration-agent",
+  "action": "implement_revision_6_multimodal_capture_session",
+  "spec_binding": {
+    "spec_id": "step3p7-flash-p800-demo",
+    "contract_revision": 6,
+    "contract_data_sha256": "74723d4cca3008710b04ac56c6ea06a652babd81e101bddaf5ae9b70eb2fbab3"
+  },
+  "passed": true,
+  "execution_site": "SOURCE",
+  "consumes_capture_session": false,
+  "scan_run": "runs/scan-007",
+  "prepared_run": "runs/capture-session-tool-001",
+  "operator_ids": [
+    "sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul",
+    "sgl_kernel.gemma_rmsnorm",
+    "sgl_kernel.gemma_fused_add_rmsnorm",
+    "sgl_kernel.topk_sigmoid",
+    "sglang.srt.layers.attention.triton_ops.prefill_attention._fwd_kernel"
+  ],
+  "request_modes": [
+    "text-only",
+    "single-image"
+  ],
+  "single_image": {
+    "relative_path": "examples/assets/example_image.png",
+    "sha256": "e06917184a00b14abd70cd8ea0ff5dca9abfbbad29f7b25c02f97133d4cd060e",
+    "download_required": false
+  },
+  "attention_boundary": {
+    "capture_seam": "sglang.srt.layers.attention.triton_ops.prefill_attention.context_attention_fwd",
+    "function_return": null,
+    "expected_output": "o after the existing call"
+  },
+  "source_validation": {
+    "unit_tests": {
+      "command": "python3 -m unittest tests.test_ticket26_single_session_vision_capture",
+      "tests_run": 6,
+      "passed": true
+    },
+    "regression_tests": {
+      "command": "python3 -m unittest tests.test_ticket21_kernel_scan_scope tests.test_ticket23_swiglu_clamp_adapter tests.test_ticket25_operator_queue tests.test_ticket26_single_session_vision_capture",
+      "tests_run": 39,
+      "passed": true
+    },
+    "torch_free_regression_tests": {
+      "command": "python3 -m unittest tests.test_ticket10_spec_binding tests.test_ticket11_scan_artifact tests.test_ticket12_cuda_capture_entrypoint tests.test_ticket12_cuda_capture_preflight tests.test_ticket12_sglang_capture_plugin tests.test_ticket13_handoff_bundle tests.test_ticket14_repair_loop tests.test_ticket15_formal_cuda_capture_runbook tests.test_ticket15_formal_cuda_evidence_review tests.test_ticket15_handoff_plan tests.test_ticket15_p800_handoff_verification tests.test_ticket16_p800_baseline_runbook tests.test_ticket18_target_only_eager_scan tests.test_ticket19_mlp_boundary tests.test_ticket21_kernel_scan_scope tests.test_ticket23_swiglu_clamp_adapter tests.test_ticket25_operator_queue tests.test_ticket26_single_session_vision_capture",
+      "tests_run": 132,
+      "passed": true
+    },
+    "python_compile": "PASS",
+    "json_validation": "PASS"
+  },
+  "runtime_validation": {
+    "torch_available": false,
+    "cuda_available": false,
+    "cuda_preflight": "PENDING_ON_CUDA_MACHINE",
+    "p800_baseline": "NOT_STARTED",
+    "p800_replay_adapters": {
+      "sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul": "SOURCE_IMPLEMENTED_RUNTIME_BASELINE_PENDING",
+      "sgl_kernel.gemma_rmsnorm": "PENDING_AGENT_RESOLUTION",
+      "sgl_kernel.gemma_fused_add_rmsnorm": "PENDING_AGENT_RESOLUTION",
+      "sgl_kernel.topk_sigmoid": "PENDING_AGENT_RESOLUTION",
+      "sglang.srt.layers.attention.triton_ops.prefill_attention._fwd_kernel": "PENDING_AGENT_RESOLUTION"
+    },
+    "all_golden_bundle": "NOT_IMPLEMENTED"
+  },
+  "source_files": [
+    {
+      "path": ".scratch/step3p7-p800-migration-tool/map.md",
+      "sha256": "f4901673c0e70b055528c5d50a555acce2d68f3489372be611597b0936faa2b7"
+    },
+    {
+      "path": ".scratch/step3p7-p800-migration-tool/issues/26-capture-vision-gap-in-one-session.md",
+      "sha256": "cab9426c20448a2371b6b650689836460e42e8ef225d0dce67e6fbd3551d7f45"
+    },
+    {
+      "path": "migration-spec.md",
+      "sha256": "040fb422c5ac2aa9618feacb8880467dc9b4badc6dbb8e1f863ecb2e0fb4eb52"
+    },
+    {
+      "path": "model-adaptation/SKILL.md",
+      "sha256": "9ef8669bd131179c6fd2dfa0e99fd5a29fd3b998d1ad0a62f4faecc0712a7ba8"
+    },
+    {
+      "path": "model-adaptation/scripts/capture_golden.py",
+      "sha256": "594888ccd319a4a6f43d2668fa8afd927b3a44b0c6c92f726ae178315be9a646"
+    },
+    {
+      "path": "model-adaptation/scripts/model_adaptation_capture/contracts.py",
+      "sha256": "2985c95243a8d296a859c0dae6b7489b8539038d4b909456a4b2c8aa27ecfc30"
+    },
+    {
+      "path": "model-adaptation/scripts/model_adaptation_capture/plugin.py",
+      "sha256": "538df731fd39de15daf54d9e756bf98e41ce35b0c5d49ac4c5fab292feb80730"
+    },
+    {
+      "path": "model-adaptation/scripts/model_adaptation_capture/kernel_call.py",
+      "sha256": "0677c0141c6a70912d2ee58ba0b1da742f1b0f73317c9b3108ee61be4b42e1dd"
+    },
+    {
+      "path": "model-adaptation/scripts/model_adaptation_capture/kernel_replay.py",
+      "sha256": "67aa6ab846da853b929b9e1f4cf1a8c4e3a5587eb20223a7569cf930f1473136"
+    },
+    {
+      "path": "model-adaptation/scripts/model_adaptation_capture/preflight.py",
+      "sha256": "b9a04653d25b8ad0b64eaaac0901c2586920d750883e57cad0483c4a69058fdd"
+    },
+    {
+      "path": "outputs/step3p7-p800-migration-tool-design.md",
+      "sha256": "943ec5cab5eb1af55829f2d331fec8d93a85f7f7b6a64eea091dbc4f3df6573b"
+    },
+    {
+      "path": "tests/test_ticket11_scan_artifact.py",
+      "sha256": "61c2bd989f4338345739eb489d7bbefd7209408786bbbf830338ee79d05ebf2b"
+    },
+    {
+      "path": "tests/test_ticket12_real_sglang_hook_integration.py",
+      "sha256": "8737527a5a5a4e8149f1bfe6251ba939f658f55c9535a010a84985649cc9c2e4"
+    },
+    {
+      "path": "tests/test_ticket14_repair_loop.py",
+      "sha256": "e7ad7bcd1603a00acf1081d80d6c34703fd6c38c33eec03289babed7c40485cd"
+    },
+    {
+      "path": "tests/test_ticket16_p800_baseline_runbook.py",
+      "sha256": "23f247764562567f000df9725b0f52f65a6f94654a3c947090b58c4213e6e060"
+    },
+    {
+      "path": "tests/test_ticket21_kernel_scan_scope.py",
+      "sha256": "973290fd4105b5118249f386a67093e3cab8eb03e8985c01876c4217b9c419ef"
+    },
+    {
+      "path": "tests/test_ticket25_operator_queue.py",
+      "sha256": "9d9354ba770ae65911b02589eb1244c06e6e2ed9f786b89e36901bfbc25189b9"
+    },
+    {
+      "path": "tests/test_ticket26_single_session_vision_capture.py",
+      "sha256": "5309560a876e6aa0001fe73f04bbe7312918c9831e084da3e1dde52a38a17ad2"
+    }
+  ],
+  "evidence": [
+    "validation.log",
+    "runs/scan-007/result.json",
+    "runs/capture-session-tool-001/result.json"
+  ],
+  "summary": "Revision 6 SOURCE code now prepares one five-operator config and one fixed text-plus-image request set. Tests cover complete-plan validation, multi-hook registration, rank-local collector layout, attention output-buffer capture and per-operator CUDA self-replay orchestration. CUDA preflight is still pending; the all-Golden handoff bundle is not implemented, and non-SwiGLU P800 replay adapters remain Agent work when their queue items become active."
+}

@@ -2,10 +2,10 @@
 
 > 当前版本：Contract revision 6
 >
-> 当前状态：`ACTIVE / SCAN`，最近绑定为 `runs/spec-binding-005`
+> 当前状态：`ACTIVE / CUDA_CAPTURE`，当前扫描为 `runs/scan-007`
 >
-> 当前扫描输入：`runs/scan-006` 只作 revision 5 历史线索；revision 6 Scan Run
-> 尚未生成
+> 当前采集准备：`runs/capture-session-tool-001` 已生成一个五算子、文本加单图的
+> session config；真实 CUDA preflight 尚未执行
 >
 > 证据边界：revision 5 的单算子 CUDA/P800 数值证据保留为历史；`35aa72e`
 > 的自定义 repair helper 未通过正式审查。revision 6 不复用旧 Golden 冒充全队列
@@ -52,6 +52,8 @@ revision 6 继续收紧两个问题：
   Kernel Call，不允许新增生产 helper 或通用 `<module>:<callable>` 协议；
 - 一个算子通过后不能结束 Skill。唯一 CUDA Session 要先收齐本轮 gap queue 的
   Golden，P800 再按队列连续修复，直到全部通过或出现明确停止条件。
+- 视觉 attention 虽然不是队列第一项，也必须在同一次 Session 采集。单图使用固定
+  SGLang 资产和字节摘要，不依赖运行时下载。
 
 ## 3. 为什么必须由 Spec 驱动
 
@@ -160,12 +162,13 @@ Step3p7ForConditionalGeneration.forward
 - Kunlun 上层替换：
   `sglang_kunlun/hooks/layers/quantization/unquant.py:32-155`。
 
-## 6. revision 5 的 scan-006 结果
+## 6. revision 6 的 scan-007 结果
 
-`scan-005` 已封存并保持字节不变。复核发现它漏掉了 clamp SwiGLU，并把视觉路径
-识别错了；因此按 Run 不可变规则新建 `scan-006`，没有原地改写旧证据。
+`scan-005` 与 `scan-006` 都按不可变 Run 保留。`scan-007` 绑定 Contract
+revision 6，复用旧扫描的源码线索，但重新形成完整 gap queue 和全队列
+capture plan，没有改写历史 Run。
 
-`scan-006` 记录 11 个固定输入路径上的 CUDA 专用 Kernel Call：
+`scan-007` 记录 11 个固定输入路径上的 CUDA 专用 Kernel Call：
 
 - `READY=6`
 - `CAPTURE_REQUIRED=5`
@@ -180,9 +183,18 @@ Step3p7ForConditionalGeneration.forward
 5. `sglang.srt.layers.attention.triton_ops.prefill_attention._fwd_kernel`
 
 这里的 `CAPTURE_REQUIRED` 只表示固定源码下缺少 Kunlun 等价调用，需要 CUDA Golden
-和 P800 baseline。它不表示已经在 P800 实机失败。revision 6 可以复用这份源码
-分析作为线索，但必须形成绑定新 Contract 的不可变 Scan Run，并把五项全部写入
-capture plan。
+和 P800 baseline。它不表示已经在 P800 实机失败。五项已经按上述顺序全部进入同一
+capture plan；第一项是活动算子，但不再是唯一采集项。
+
+Scan Run 还固定两条请求：
+
+- 文本：`Write one word.`；
+- 单图：`<im_patch>\nDescribe this image in one short sentence.`，图像取固定
+  worktree 的 `examples/assets/example_image.png`，SHA-256 为
+  `e06917184a00b14abd70cd8ea0ff5dca9abfbbad29f7b25c02f97133d4cd060e`。
+
+两条请求都固定 `temperature=0 / max_new_tokens=1`。它们只用于触发真实路径和
+采集 kernel 输入，不评价回复质量。
 
 ## 7. 候选比较
 
@@ -212,7 +224,7 @@ Step-3.7 的 MoE 确实固定使用 sigmoid、correction bias、top-k 8 和 reno
 它是很好的后续缺口，但首个 Demo 还要比较浮点权重与精确 expert ids，排序一致性比
 单输出 SwiGLU 更复杂。
 
-### 7.2 为什么不是视觉 attention
+### 7.2 为什么视觉 attention 不是第一项，但仍要同批采集
 
 非 Hopper/Blackwell CUDA 默认会选择 `triton_attn`：
 `python/sglang/srt/layers/attention/vision.py:1065-1108`。实际 launcher 与 kernel
@@ -221,8 +233,14 @@ Step-3.7 的 MoE 确实固定使用 sigmoid、correction bias、top-k 8 和 reno
 - `python/sglang/srt/layers/attention/vision.py:337-409`；
 - `python/sglang/srt/layers/attention/triton_ops/prefill_attention.py:34-219`。
 
-固定 Kunlun plugin 没有视觉 `context_attention_fwd` 替换。但这个候选依赖单图
-请求和 CUDA 设备能力，重放还需要 q/k/v 与序列 metadata，因此不是最小首选。
+固定 Kunlun plugin 没有视觉 `context_attention_fwd` 替换。这个候选依赖单图
+请求和 CUDA 设备能力，重放还需要 q/k/v 与序列 metadata，因此不是最小首选；
+但 CUDA 和 P800 不在同一机器，漏采后无法在 P800 修复阶段补 Golden，所以它必须
+和四个文本缺口一起采集。
+
+`context_attention_fwd` 的真实签名包含输出缓冲区 `o`，函数自身返回 `None`。
+collector 在原调用前保留 `q/k/v/b_start_loc/b_seq_len`，原调用完成后把 `o`
+保存为 expected output。没有为采集新增 attention helper。
 
 ### 7.3 为什么选择 `_swiglu_silu_clamp_mul`
 
@@ -377,6 +395,17 @@ worktree 的完整 diff 与 `candidate.patch` 逐字节比较；当前 SwiGLU ad
 `kunlun_ops.swiglu`。重放代码只能装配真实输入和参数，不能复制修复算法或在生产
 源码新增 helper。`workspace_guard.py` 负责累计 patch、replay 顺序与失败恢复。
 
+revision 6 新增 `prepare-session / preflight-session`：一个 config 内含五个
+operator collector 和两条请求。插件只 Hook Scan Run 记录的五个现有调用；每个
+collector 各自按输入 shape 去重并保存 rank 0 最多三份。SOURCE 单元测试已覆盖
+完整 capture plan、固定图像摘要、多 Hook 注册、attention 输出缓冲区和逐算子
+CUDA self-replay 编排。没有 CUDA 的 SOURCE 结果不能替代真实 preflight。
+
+CUDA capture plan 不替 Agent 猜测 P800 修复入口：现有 SwiGLU adapter 继续使用
+`kunlun_ops.swiglu`；其余四项的 P800 replay adapter 保持待实现。队列推进到对应
+算子时，Agent 根据固定 Kunlun 源码的原调用点补齐参数装配。缺少 adapter 是流程
+能力待补齐，不得写成 P800 实机算子失败。
+
 `scan-006` 是不可变证据，所以其中的 `adapter_status=NOT_IMPLEMENTED` 不会被原地
 更新。初始实现证据保存在 `runs/adapter-001`；交接包 code review 后的当前源码
 摘要与样本/replay 绑定证据保存在 `runs/adapter-002`。该 Run 本身只做本机源码
@@ -388,11 +417,12 @@ preflight，且没有消耗正式 Session。
 ```text
 Contract revision 6
   -> spec-binding-005
-  -> 新 Scan Run（scan-006 只作历史线索）
+  -> scan-007（scan-006 只作历史线索）
   -> 排好完整 gap queue，第一项成为 active_operator
-  -> 为全部计划项实现并测试 adapter
-  -> CUDA preflight（不消耗正式 Session）
+  -> 一个 session config 装入五个 collector
+  -> CUDA preflight-session（不消耗正式 Session）
   -> 一次 CUDA 模型 Session 收齐全部计划项
+     同一进程发送固定文本和固定单图请求
      每个算子最多三个 shape
   -> 逐算子记录样本摘要并完成 CUDA self-replay
   -> 一次构建并校验包含全部 Golden 的 Handoff Bundle
@@ -474,12 +504,15 @@ P800 PASS；需要设备验证时仍应形成新 Run。
 
 ## 14. revision 6 当前状态与自动续行
 
-当前 Working State 为 revision 39 `ACTIVE / SCAN`。`runs/spec-binding-005`
-已证明 revision 6 Contract Data 可执行，`runs/operator-queue-tool-002` 封存了
-原调用边界和累计补丁流转的 SOURCE 证据；唯一下一步是生成新的完整 Scan Run。
-revision 6 的实际 operator 尚未由新 Scan Run 决定，因此逐算子 adapter、一个进程
-加载多个 collector 和包含多个 Golden Run 的 bundle 仍是明确的 `PENDING`；旧
-revision 5 单算子 runbook 不可直接执行。
+当前 Working State 为 revision 40 `ACTIVE / CUDA_CAPTURE`。`runs/scan-007`
+已固定五个缺口及同一 capture plan；`runs/multimodal-capture-tool-001` 已在
+SOURCE 实现一个 session config、五个原调用 Hook、逐算子 rank-0 collector 和
+CUDA self-replay 编排。唯一下一步是在固定 CUDA revision 的 TP8 环境执行
+`capture_golden.py --mode preflight-session`。真实 CUDA preflight、正式一次性
+Session 和包含全部 Golden Run 的 bundle 仍为 `PENDING`；旧 revision 5 单算子
+runbook 不可直接执行。除已有 SwiGLU 外，其余 P800 replay adapter 也保持
+`PENDING_AGENT_RESOLUTION`，由 Agent 在队列推进到对应算子时依据原 Kunlun
+调用点补齐。
 
 gap queue 每行直接保存：
 

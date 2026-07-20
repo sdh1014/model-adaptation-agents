@@ -8,6 +8,7 @@ from typing import Any
 CAPTURE_CONFIG_ENV = "MODEL_ADAPTATION_CAPTURE_CONFIG"
 REPLAY_CONFIG_ENV = "MODEL_ADAPTATION_REPLAY_CONFIG"
 CONFIG_SCHEMA = "golden-capture-config/v1"
+SESSION_CONFIG_SCHEMA = "golden-capture-session-config/v1"
 STATE_SCHEMA = "golden-capture-state/v2"
 CANDIDATE_SAMPLE_SCHEMA = "capture-candidate/v1"
 CANDIDATE_SERIALIZATION = "candidate-torch-save/v2"
@@ -24,6 +25,21 @@ SWIGLU_CLAMP_OPERATOR_ID = (
     "sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe."
     "_swiglu_silu_clamp_mul"
 )
+GEMMA_RMSNORM_OPERATOR_ID = "sgl_kernel.gemma_rmsnorm"
+GEMMA_FUSED_ADD_RMSNORM_OPERATOR_ID = "sgl_kernel.gemma_fused_add_rmsnorm"
+TOPK_SIGMOID_OPERATOR_ID = "sgl_kernel.topk_sigmoid"
+ATTENTION_OPERATOR_ID = (
+    "sglang.srt.layers.attention.triton_ops.prefill_attention._fwd_kernel"
+)
+GEMMA_RMSNORM_CAPTURE_SEAM = "sglang.srt.layers.layernorm.gemma_rmsnorm"
+GEMMA_FUSED_ADD_RMSNORM_CAPTURE_SEAM = (
+    "sglang.srt.layers.layernorm.gemma_fused_add_rmsnorm"
+)
+TOPK_SIGMOID_CAPTURE_SEAM = "sglang.srt.layers.moe.topk.topk_sigmoid"
+ATTENTION_CAPTURE_SEAM = (
+    "sglang.srt.layers.attention.triton_ops.prefill_attention."
+    "context_attention_fwd"
+)
 ACTIVATION_GUARD = "self.limit is not None"
 VALIDATION_TP_RANK = 0
 PLUGIN_ENTRY_POINT = "model_adaptation_capture"
@@ -34,6 +50,11 @@ KUNLUN_SWIGLU_TARGET = "kunlun_ops.swiglu"
 MODEL_RELATIVE_PATH = "python/sglang/srt/models/step3p5.py"
 SWIGLU_CLAMP_SOURCE_RELATIVE_PATH = (
     "python/sglang/srt/layers/moe/moe_runner/triton_utils/fused_moe.py"
+)
+LAYERNORM_SOURCE_RELATIVE_PATH = "python/sglang/srt/layers/layernorm.py"
+TOPK_SOURCE_RELATIVE_PATH = "python/sglang/srt/layers/moe/topk.py"
+ATTENTION_SOURCE_RELATIVE_PATH = (
+    "python/sglang/srt/layers/attention/triton_ops/prefill_attention.py"
 )
 SWIGLU_KUNLUN_SOURCE_RELATIVE_PATH = (
     "sglang-kunlun/sglang_kunlun/hooks/layers/quantization/unquant.py"
@@ -66,17 +87,40 @@ def checkpoint_metadata(checkpoint_id: str, config_digest: str) -> dict[str, str
 
 
 def shape_id_for(shape: Any) -> str:
-    if (
-        not isinstance(shape, (list, tuple))
-        or not shape
-        or any(
-            isinstance(size, bool) or not isinstance(size, int) or size < 0
-            for size in shape
-        )
-    ):
-        raise ValueError("tensor shape must be a non-empty list of dimensions")
+    if isinstance(shape, dict):
+        if not shape or not all(
+            isinstance(name, str)
+            and name
+            and isinstance(dimensions, (list, tuple))
+            and dimensions
+            and all(
+                not isinstance(size, bool)
+                and isinstance(size, int)
+                and size >= 0
+                for size in dimensions
+            )
+            for name, dimensions in shape.items()
+        ):
+            raise ValueError(
+                "tensor shapes must map names to non-empty dimension lists"
+            )
+        encoded_value = {
+            name: list(dimensions)
+            for name, dimensions in sorted(shape.items())
+        }
+    else:
+        if (
+            not isinstance(shape, (list, tuple))
+            or not shape
+            or any(
+                isinstance(size, bool) or not isinstance(size, int) or size < 0
+                for size in shape
+            )
+        ):
+            raise ValueError("tensor shape must be a non-empty list of dimensions")
+        encoded_value = {"x": list(shape)}
     encoded = json.dumps(
-        {"x": list(shape)},
+        encoded_value,
         sort_keys=True,
         separators=(",", ":"),
     ).encode("utf-8")

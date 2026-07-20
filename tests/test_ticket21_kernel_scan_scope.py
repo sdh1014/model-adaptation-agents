@@ -361,11 +361,14 @@ class Ticket21KernelScanScopeTest(unittest.TestCase):
             [active_operator],
         )
         self.assertIn(
-            "- `active_operator`: `null`",
+            f"- `active_operator`: `{active_operator}`",
             self.spec_text,
         )
-        self.assertIn("- `scan_run`: `null`", self.spec_text)
-        self.assertIn("`scan-006` 和 revision 5", self.spec_text)
+        self.assertIn("- `scan_run`: `runs/scan-007`", self.spec_text)
+        self.assertIn(
+            "`scan-006` 和 revision 5 的 gap queue 只作 `scan-007`",
+            self.spec_text,
+        )
 
     def test_selected_capture_plan_obeys_parameter_policy(self) -> None:
         plan = self.scan["capture_plan"][0]

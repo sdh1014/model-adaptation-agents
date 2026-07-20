@@ -113,6 +113,9 @@ scripts/replay_compare.py \
 - 从 `Step3p7ForConditionalGeneration.forward` 出发，只进入 target 路径，不进入
   `Step3p5MTP.forward`。
 - 分别沿 `text-only` 和固定最小 `single-image` 请求会激活的路径向下扫描。
+- Step-3.7 的固定单图输入使用当前固定 SGLang worktree 中的
+  `examples/assets/example_image.png`。Scan Run 必须保存其 SHA-256；请求文本包含
+  `<im_patch>`。不得在正式 Session 中临时下载 URL 或换图。
 - 最小边界是源码中已经存在、能直接描述输入输出并可独立替换的 Kernel Call。
   CUDA extension、Triton、SGLang JIT、第三方 kernel 和实际不兼容的
   Torch 调用都可以进入清单。
@@ -162,6 +165,14 @@ passing_run: null`。Contract 保持不变。静态缺口只能写
 
 完整结果写入新的 `runs/scan-NNN/result.json`。旧 Run 不可修改。
 
+当前 revision 6 Scan Run 是 `runs/scan-007`。它把五个
+`CAPTURE_REQUIRED` 项全部写入同一 `capture_plan`，其中包括单图路径上的
+`prefill_attention._fwd_kernel`。该项 Hook 现有
+`context_attention_fwd`：函数返回 `None`，结果写入参数 `o`，所以 capture
+保存调用前的 `q/k/v/b_start_loc/b_seq_len` 和标量参数，并在原调用完成后把 `o`
+保存为 `output`。这只固定 CUDA Golden 边界，不预先指定 attention 在 P800 上应
+改用哪个实现。
+
 ### `CUDA_CAPTURE`
 
 逐项检查 Scan Run 的 `capture_plan.adapter_status`。Scan Run 不可改写；如果某项
@@ -177,15 +188,16 @@ passing_run: null`。Contract 保持不变。静态缺口只能写
 2. Hook Scan Run 指定的现有 capture seam，不新增自定义算子函数；
 3. 用测试证明只保存 Contract 允许的输入、直接参数、非 Tensor 参数和 CUDA 输出，
    最多三个 shape，且 rank 0 以外不落盘；
-4. 用测试证明 CUDA self-replay 调 Scan Run 记录的 CUDA capture seam，P800
-   compare 调 Scan Run 记录的对应 Kunlun seam；两端都只使用已有调用，不新增模型
-   helper 或自定义算子；
+4. 用测试证明 CUDA self-replay 调 Scan Run 记录的 CUDA capture seam。P800
+   replay 入口不由 CUDA capture plan 猜测：除已有 SwiGLU adapter 外，保持
+   `PENDING`，等队列推进到该算子时由 Agent 依据 Kunlun 原调用点补齐；两端都不得
+   新增模型 helper 或自定义算子；
 5. 把实现与测试证据写入新的 Run，不改写 Scan Run；所有计划项 adapter 都完成
    后，才更新 Working State 的 Closure Evidence、`last_completed_action`、
    `last_run` 和唯一 preflight 下一动作。
-6. 如果当前采集工具仍只接受单个 config/collector，必须在上述同一组脚本中补齐
-   “一个模型进程加载全部 capture plan collector”和“一个 bundle 包含全部
-   Golden Run”，并用测试封存；不能仅靠逐项 `prepare` 宣称一次 Session 已实现。
+6. `capture_golden.py --mode prepare-session` 必须生成一个 config，插件从中加载
+   全部 capture plan collector；不能靠逐项 `prepare` 宣称一次 Session。一个
+   bundle 包含全部 Golden Run 的能力仍要在正式 Session 前通过测试封存。
 
 当前仓库中的 `Step3p5MLP.forward` capture/replay adapter 只属于 revision 4
 历史方案，不能消费当前 kernel-scan Contract。缺少当前活动 kernel 的
@@ -204,6 +216,26 @@ adapter 完成后，为当前 Contract revision 生成并审查新的 preflight 
 - rank 0 和最多三个 shape 的去重；
 - 直接参数可保存，但完整 checkpoint 和 module state 会被拒绝；
 - 相同样本可以按固定 Precision Gate self-replay。
+
+revision 6 的多算子 preflight 入口是：
+
+```text
+python3 model-adaptation/scripts/capture_golden.py \
+  --spec migration-spec.md \
+  --run-dir runs/cuda-preflight-r6-001 \
+  --mode preflight-session \
+  --scan-result runs/scan-007/result.json \
+  --sglang-worktree "$SGLANG_CUDA_WORKTREE"
+```
+
+它在一个配置中预检五个现有调用；每项分别验证三种 shape、rank 过滤和 CUDA
+self-replay。这个命令不加载正式 checkpoint，也不消耗唯一 Capture Session。
+只能在 CUDA 机器运行；SOURCE 机器上的单元测试不能替代它。
+
+这一步不宣称其余四项已经有 P800 replay adapter。正式 Golden 会保存原 CUDA
+Kernel Call 的完整最小边界；P800 队列推进到每一项前，Agent 再根据 Kunlun 源码
+补齐该项 baseline/candidate 参数装配。adapter 缺失必须报告为流程能力待补齐，
+不能记成 Operator Gap。
 
 如果 adapter Run 记录的任一源码 SHA 在最近一次 PASS preflight 后发生变化，旧
 preflight 只能作为历史证据；Closure Evidence 必须把当前源码 preflight 标为
@@ -234,25 +266,28 @@ Working State。
 
 1. 启动固定 checkpoint 的真实 TP8/BF16/eager 模型；采集只增加插件配置，不改变
    两端模型启动参数。
-2. 对每个算子，每种真实 shape 最多保存一份 rank 0 样本。样本包含该调用的输入、
+2. 同一模型进程依次发送 Scan Run `request_set` 中的固定文本请求和固定单图请求。
+   启动前重新计算图像 SHA-256；不一致时停止。启动日志必须确认实际 multimodal
+   backend；attention collector 没有命中时不得把 Session 封存为成功。
+3. 对每个算子，每种真实 shape 最多保存一份 rank 0 样本。样本包含该调用的输入、
    直接参数、必要标量和 CUDA 期望输出。一次模型进程同时服务所有 collector；
    “每个算子最多三种 shape”不能误计成整个 Session 只有三个样本。
-3. 停止采集进程后、CUDA self-replay 前，调用 `handoff_bundle.py
+4. 停止采集进程后、CUDA self-replay 前，调用 `handoff_bundle.py
    --mode record-samples`，把每个 Golden Sample 文件的 shape、相对路径、大小和
    SHA-256 写入 Golden Run 的 `sample-files.json`，并把这次动作保存在独立且不可
    修改的 record-samples Run。这一步只接受仍为 `ACTIVE`、尚未 self-replay 的
    Golden Run；失败时不得继续。
-4. 在同一次 CUDA Session 内按各自现有 Kernel Call 完成全部算子的 self-replay。
+5. 在同一次 CUDA Session 内按各自现有 Kernel Call 完成全部算子的 self-replay。
    每个 `golden_run` 都通过才把 Session 标为 `SEALED`。replay config、worker
    result、Golden state 和 wrapper result 必须携带各自
    `sample-files.json` SHA-256；后续 build 会重新计算并要求它们与当前样本字节
    完全一致。
-5. Agent 先生成临时 Spec，把其中的 Working State 写成下一状态：
+6. Agent 先生成临时 Spec，把其中的 Working State 写成下一状态：
    `WAITING / HANDOFF`，保留第一个 `active_operator`，把每个 gap queue 行的
    `golden_run` 写成对应 SEALED Run，并写入 bundle/manifest 路径；唯一
    `next_action` 是人工复制后在 P800 校验。`handoff_bundle.py` 不解析 Working State，
    所以这些字段必须由 Agent 逐项核对。
-6. 用临时 Spec 构建 bundle；build 必须显式接收 record-samples Run 的
+7. 用临时 Spec 构建 bundle；build 必须显式接收 record-samples Run 的
    `result.json`，核对它记录的 sidecar SHA，并把 record result 与 sidecar 的
    SHA-256 写入 manifest。随后在 CUDA 端立即 verify。只有 build、verify 和
    Contract 绑定全部通过后，才用 bundle 中 `migration-spec.md` 的相同字节原子

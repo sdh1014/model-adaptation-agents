@@ -9,9 +9,6 @@ import types
 import unittest
 from unittest.mock import patch
 
-import torch
-
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS_ROOT = REPO_ROOT / "model-adaptation" / "scripts"
 sys.path.insert(0, str(SCRIPTS_ROOT))
@@ -90,6 +87,8 @@ class Ticket12RealSglangHookIntegrationTest(unittest.TestCase):
         configured_worktree = os.environ.get("SGLANG_WORKTREE")
         if worktree_was_configured and not configured_worktree:
             self.fail("SGLANG_WORKTREE must be set to a non-empty path")
+        import torch
+
         worktree = Path(configured_worktree or DEFAULT_SGLANG_WORKTREE).resolve()
         model_path = worktree / "python/sglang/srt/models/step3p5.py"
         registry_path = worktree / "python/sglang/srt/plugins/hook_registry.py"
