@@ -1,0 +1,5 @@
+worker_mode=session-rank-filter
+returncode=0
+--- stdout ---
+
+--- stderr ---

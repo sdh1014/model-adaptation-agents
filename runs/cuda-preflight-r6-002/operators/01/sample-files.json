@@ -1,0 +1,29 @@
+{
+  "files": [
+    {
+      "path": "samples/0e4b2019979d881300ae0cfe47f845c08f1641b9d84f36f6befa963dd5459d7b.pt",
+      "sha256": "fb09d7552b51462f1292bce41901411b9ee7bec004bd8cce94f1c062b2503803",
+      "shape_id": "0e4b2019979d881300ae0cfe47f845c08f1641b9d84f36f6befa963dd5459d7b",
+      "size": 3773
+    },
+    {
+      "path": "samples/5f0aa83cf1e39715be3fb1e566b7ffaca31b949aeaea0633c16e5ff82c72872d.pt",
+      "sha256": "caea085cae397c07b191ea027e0dd139ad5816f9beb362bc069b2e4440090434",
+      "shape_id": "5f0aa83cf1e39715be3fb1e566b7ffaca31b949aeaea0633c16e5ff82c72872d",
+      "size": 3901
+    },
+    {
+      "path": "samples/a6373c992b411bb6ad5a5472c7f15b8c3c443c2f68cb8c40c0aab8bb3c70c9b7.pt",
+      "sha256": "f1f65fab8f355e8f6da0010becbb7867adb8e7f7f44dc61d3b3dc0f2bb29252a",
+      "shape_id": "a6373c992b411bb6ad5a5472c7f15b8c3c443c2f68cb8c40c0aab8bb3c70c9b7",
+      "size": 3709
+    }
+  ],
+  "operator_id": "sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul",
+  "schema": "golden-sample-files/v1",
+  "spec_binding": {
+    "contract_data_sha256": "74723d4cca3008710b04ac56c6ea06a652babd81e101bddaf5ae9b70eb2fbab3",
+    "contract_revision": 6,
+    "spec_id": "step3p7-flash-p800-demo"
+  }
+}

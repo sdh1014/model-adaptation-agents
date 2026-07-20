@@ -1,0 +1,21 @@
+{
+  "applied_hooks": [
+    "sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul",
+    "sglang.srt.layers.layernorm.gemma_rmsnorm",
+    "sglang.srt.layers.layernorm.gemma_fused_add_rmsnorm",
+    "sglang.srt.layers.moe.topk.topk_sigmoid",
+    "sglang.srt.layers.attention.triton_ops.prefill_attention.context_attention_fwd"
+  ],
+  "checkpoint_loaded": false,
+  "cuda_device": "NVIDIA A800-SXM4-80GB",
+  "saved_shape_counts": {
+    "sgl_kernel.gemma_fused_add_rmsnorm": 3,
+    "sgl_kernel.gemma_rmsnorm": 3,
+    "sgl_kernel.topk_sigmoid": 3,
+    "sglang.srt.layers.attention.triton_ops.prefill_attention._fwd_kernel": 3,
+    "sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul": 3
+  },
+  "tensor_parallel_size": 8,
+  "torch_version": "2.11.0+cu129",
+  "tp_rank": 0
+}

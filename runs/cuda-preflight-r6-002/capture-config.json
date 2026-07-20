@@ -1,0 +1,455 @@
+{
+  "checkpoint": {
+    "config_digest": "8d740ba5819e574b7a606ea7aa6d7d381142ed5cc77cab96dde2892c10414042",
+    "id": "stepfun-ai/Step-3.7-Flash@5f6244077ac62e04eec3f320501ff8c2b293373a",
+    "model_path": "stepfun-ai/Step-3.7-Flash",
+    "revision": "5f6244077ac62e04eec3f320501ff8c2b293373a"
+  },
+  "operators": [
+    {
+      "activation_guard": "unquantized routed MoE layers 43 and 44 with gemm1_clamp_limit=7 and the CUDA legacy Triton runner",
+      "adapter": "swiglu-clamp",
+      "boundary": {
+        "inputs": [
+          "x"
+        ],
+        "non_tensor_args": [
+          "gemm1_limit"
+        ],
+        "outputs": [
+          "output"
+        ],
+        "parameters": []
+      },
+      "capture_device_type": "cuda",
+      "checkpoint": {
+        "config_digest": "8d740ba5819e574b7a606ea7aa6d7d381142ed5cc77cab96dde2892c10414042",
+        "id": "stepfun-ai/Step-3.7-Flash@5f6244077ac62e04eec3f320501ff8c2b293373a",
+        "model_path": "stepfun-ai/Step-3.7-Flash",
+        "revision": "5f6244077ac62e04eec3f320501ff8c2b293373a"
+      },
+      "dtype": "bfloat16",
+      "hook_target": "sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul",
+      "max_shapes": 3,
+      "model_path": "target",
+      "operator_id": "sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul",
+      "precision_gate": {
+        "atol": 0.01,
+        "check_stride": false,
+        "comparator": "torch.testing.assert_close",
+        "require_exact_structure": true,
+        "require_finite": true,
+        "require_same_dtype": true,
+        "rtol": 0.02
+      },
+      "preflight_tp_context": {
+        "rank": 0,
+        "size": 8
+      },
+      "replay": {
+        "cuda_target": "sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul",
+        "mode": "standalone-kernel-call",
+        "p800_target": "kunlun_ops.swiglu",
+        "weights_in_golden_sample": false
+      },
+      "run_dir": "/ssd1/sdh/model-adaptation-agents/runs/cuda-preflight-r6-002/operators/01",
+      "sample_fields": {
+        "inputs": [
+          "x"
+        ],
+        "non_tensor_args": [
+          "gemm1_limit"
+        ],
+        "outputs": [
+          "output"
+        ],
+        "parameters": []
+      },
+      "schema": "golden-capture-config/v1",
+      "serialization": "kernel-call-torch-save/v1",
+      "session_config": "/ssd1/sdh/model-adaptation-agents/runs/cuda-preflight-r6-002/capture-config.json",
+      "source": {
+        "capture_module_path": "/ssd1/sdh/sglang/python/sglang/srt/layers/moe/moe_runner/triton_utils/fused_moe.py",
+        "capture_module_sha256": "febef62feda0677b6979eee866586ac55ffec39e583b88db75e39bb0fc6c936d"
+      },
+      "spec_binding": {
+        "contract_data_sha256": "74723d4cca3008710b04ac56c6ea06a652babd81e101bddaf5ae9b70eb2fbab3",
+        "contract_revision": 6,
+        "spec_id": "step3p7-flash-p800-demo"
+      },
+      "tensor_parallel_size": 8,
+      "tp_rank": 0
+    },
+    {
+      "activation_guard": "Step3p5Attention q_norm and k_norm with residual=None",
+      "adapter": "gemma-rmsnorm",
+      "boundary": {
+        "inputs": [
+          "x"
+        ],
+        "non_tensor_args": [
+          "eps"
+        ],
+        "outputs": [
+          "output"
+        ],
+        "parameters": [
+          "weight"
+        ]
+      },
+      "capture_device_type": "cuda",
+      "checkpoint": {
+        "config_digest": "8d740ba5819e574b7a606ea7aa6d7d381142ed5cc77cab96dde2892c10414042",
+        "id": "stepfun-ai/Step-3.7-Flash@5f6244077ac62e04eec3f320501ff8c2b293373a",
+        "model_path": "stepfun-ai/Step-3.7-Flash",
+        "revision": "5f6244077ac62e04eec3f320501ff8c2b293373a"
+      },
+      "dtype": "bfloat16",
+      "hook_target": "sglang.srt.layers.layernorm.gemma_rmsnorm",
+      "max_shapes": 3,
+      "model_path": "target",
+      "operator_id": "sgl_kernel.gemma_rmsnorm",
+      "precision_gate": {
+        "atol": 0.01,
+        "check_stride": false,
+        "comparator": "torch.testing.assert_close",
+        "require_exact_structure": true,
+        "require_finite": true,
+        "require_same_dtype": true,
+        "rtol": 0.02
+      },
+      "preflight_tp_context": {
+        "rank": 0,
+        "size": 8
+      },
+      "replay": {
+        "cuda_target": "sglang.srt.layers.layernorm.gemma_rmsnorm",
+        "mode": "standalone-kernel-call",
+        "p800_target": null,
+        "weights_in_golden_sample": false
+      },
+      "run_dir": "/ssd1/sdh/model-adaptation-agents/runs/cuda-preflight-r6-002/operators/02",
+      "sample_fields": {
+        "inputs": [
+          "x"
+        ],
+        "non_tensor_args": [
+          "eps"
+        ],
+        "outputs": [
+          "output"
+        ],
+        "parameters": [
+          "weight"
+        ]
+      },
+      "schema": "golden-capture-config/v1",
+      "serialization": "kernel-call-torch-save/v1",
+      "session_config": "/ssd1/sdh/model-adaptation-agents/runs/cuda-preflight-r6-002/capture-config.json",
+      "source": {
+        "capture_module_path": "/ssd1/sdh/sglang/python/sglang/srt/layers/layernorm.py",
+        "capture_module_sha256": "5c18eb97e1f101476bb54e2ec7270be496ccae4ccd86a68f5bc8e2f744473a0e"
+      },
+      "spec_binding": {
+        "contract_data_sha256": "74723d4cca3008710b04ac56c6ea06a652babd81e101bddaf5ae9b70eb2fbab3",
+        "contract_revision": 6,
+        "spec_id": "step3p7-flash-p800-demo"
+      },
+      "tensor_parallel_size": 8,
+      "tp_rank": 0
+    },
+    {
+      "activation_guard": "Step3p5 decoder norm with residual present",
+      "adapter": "gemma-fused-add-rmsnorm",
+      "boundary": {
+        "inputs": [
+          "x",
+          "residual"
+        ],
+        "non_tensor_args": [
+          "eps"
+        ],
+        "outputs": [
+          "mutated_x",
+          "mutated_residual"
+        ],
+        "parameters": [
+          "weight"
+        ]
+      },
+      "capture_device_type": "cuda",
+      "checkpoint": {
+        "config_digest": "8d740ba5819e574b7a606ea7aa6d7d381142ed5cc77cab96dde2892c10414042",
+        "id": "stepfun-ai/Step-3.7-Flash@5f6244077ac62e04eec3f320501ff8c2b293373a",
+        "model_path": "stepfun-ai/Step-3.7-Flash",
+        "revision": "5f6244077ac62e04eec3f320501ff8c2b293373a"
+      },
+      "dtype": "bfloat16",
+      "hook_target": "sglang.srt.layers.layernorm.gemma_fused_add_rmsnorm",
+      "max_shapes": 3,
+      "model_path": "target",
+      "operator_id": "sgl_kernel.gemma_fused_add_rmsnorm",
+      "precision_gate": {
+        "atol": 0.01,
+        "check_stride": false,
+        "comparator": "torch.testing.assert_close",
+        "require_exact_structure": true,
+        "require_finite": true,
+        "require_same_dtype": true,
+        "rtol": 0.02
+      },
+      "preflight_tp_context": {
+        "rank": 0,
+        "size": 8
+      },
+      "replay": {
+        "cuda_target": "sglang.srt.layers.layernorm.gemma_fused_add_rmsnorm",
+        "mode": "standalone-kernel-call",
+        "p800_target": null,
+        "weights_in_golden_sample": false
+      },
+      "run_dir": "/ssd1/sdh/model-adaptation-agents/runs/cuda-preflight-r6-002/operators/03",
+      "sample_fields": {
+        "inputs": [
+          "x",
+          "residual"
+        ],
+        "non_tensor_args": [
+          "eps"
+        ],
+        "outputs": [
+          "mutated_x",
+          "mutated_residual"
+        ],
+        "parameters": [
+          "weight"
+        ]
+      },
+      "schema": "golden-capture-config/v1",
+      "serialization": "kernel-call-torch-save/v1",
+      "session_config": "/ssd1/sdh/model-adaptation-agents/runs/cuda-preflight-r6-002/capture-config.json",
+      "source": {
+        "capture_module_path": "/ssd1/sdh/sglang/python/sglang/srt/layers/layernorm.py",
+        "capture_module_sha256": "5c18eb97e1f101476bb54e2ec7270be496ccae4ccd86a68f5bc8e2f744473a0e"
+      },
+      "spec_binding": {
+        "contract_data_sha256": "74723d4cca3008710b04ac56c6ea06a652babd81e101bddaf5ae9b70eb2fbab3",
+        "contract_revision": 6,
+        "spec_id": "step3p7-flash-p800-demo"
+      },
+      "tensor_parallel_size": 8,
+      "tp_rank": 0
+    },
+    {
+      "activation_guard": "MoE layers 3-44 with scoring_func=sigmoid, correction_bias present, top_k=8 and renormalize=true",
+      "adapter": "topk-sigmoid",
+      "boundary": {
+        "inputs": [
+          "gating_output"
+        ],
+        "non_tensor_args": [
+          "renormalize"
+        ],
+        "outputs": [
+          "topk_weights",
+          "topk_ids"
+        ],
+        "parameters": [
+          "correction_bias"
+        ]
+      },
+      "capture_device_type": "cuda",
+      "checkpoint": {
+        "config_digest": "8d740ba5819e574b7a606ea7aa6d7d381142ed5cc77cab96dde2892c10414042",
+        "id": "stepfun-ai/Step-3.7-Flash@5f6244077ac62e04eec3f320501ff8c2b293373a",
+        "model_path": "stepfun-ai/Step-3.7-Flash",
+        "revision": "5f6244077ac62e04eec3f320501ff8c2b293373a"
+      },
+      "dtype": "bfloat16",
+      "hook_target": "sglang.srt.layers.moe.topk.topk_sigmoid",
+      "max_shapes": 3,
+      "model_path": "target",
+      "operator_id": "sgl_kernel.topk_sigmoid",
+      "precision_gate": {
+        "atol": 0.01,
+        "check_stride": false,
+        "comparator": "torch.testing.assert_close",
+        "require_exact_structure": true,
+        "require_finite": true,
+        "require_same_dtype": true,
+        "rtol": 0.02
+      },
+      "preflight_tp_context": {
+        "rank": 0,
+        "size": 8
+      },
+      "replay": {
+        "cuda_target": "sglang.srt.layers.moe.topk.topk_sigmoid",
+        "mode": "standalone-kernel-call",
+        "p800_target": null,
+        "weights_in_golden_sample": false
+      },
+      "run_dir": "/ssd1/sdh/model-adaptation-agents/runs/cuda-preflight-r6-002/operators/04",
+      "sample_fields": {
+        "inputs": [
+          "gating_output"
+        ],
+        "non_tensor_args": [
+          "renormalize"
+        ],
+        "outputs": [
+          "topk_weights",
+          "topk_ids"
+        ],
+        "parameters": [
+          "correction_bias"
+        ]
+      },
+      "schema": "golden-capture-config/v1",
+      "serialization": "kernel-call-torch-save/v1",
+      "session_config": "/ssd1/sdh/model-adaptation-agents/runs/cuda-preflight-r6-002/capture-config.json",
+      "source": {
+        "capture_module_path": "/ssd1/sdh/sglang/python/sglang/srt/layers/moe/topk.py",
+        "capture_module_sha256": "ca35e317522d85b391005f270df34ebd692120927e8c66d9ca22d4778dfa140e"
+      },
+      "spec_binding": {
+        "contract_data_sha256": "74723d4cca3008710b04ac56c6ea06a652babd81e101bddaf5ae9b70eb2fbab3",
+        "contract_revision": 6,
+        "spec_id": "step3p7-flash-p800-demo"
+      },
+      "tensor_parallel_size": 8,
+      "tp_rank": 0
+    },
+    {
+      "activation_guard": "the fixed single-image request reaches the vision encoder and the CUDA multimodal backend resolves to triton_attn",
+      "adapter": "vision-prefill-attention",
+      "boundary": {
+        "inputs": [
+          "q",
+          "k",
+          "v",
+          "b_start_loc",
+          "b_seq_len"
+        ],
+        "non_tensor_args": [
+          "max_input_len",
+          "is_causal",
+          "sm_scale"
+        ],
+        "outputs": [
+          "output"
+        ],
+        "parameters": []
+      },
+      "capture_device_type": "cuda",
+      "checkpoint": {
+        "config_digest": "8d740ba5819e574b7a606ea7aa6d7d381142ed5cc77cab96dde2892c10414042",
+        "id": "stepfun-ai/Step-3.7-Flash@5f6244077ac62e04eec3f320501ff8c2b293373a",
+        "model_path": "stepfun-ai/Step-3.7-Flash",
+        "revision": "5f6244077ac62e04eec3f320501ff8c2b293373a"
+      },
+      "dtype": "bfloat16",
+      "hook_target": "sglang.srt.layers.attention.triton_ops.prefill_attention.context_attention_fwd",
+      "max_shapes": 3,
+      "model_path": "target",
+      "operator_id": "sglang.srt.layers.attention.triton_ops.prefill_attention._fwd_kernel",
+      "precision_gate": {
+        "atol": 0.01,
+        "check_stride": false,
+        "comparator": "torch.testing.assert_close",
+        "require_exact_structure": true,
+        "require_finite": true,
+        "require_same_dtype": true,
+        "rtol": 0.02
+      },
+      "preflight_tp_context": {
+        "rank": 0,
+        "size": 8
+      },
+      "replay": {
+        "cuda_target": "sglang.srt.layers.attention.triton_ops.prefill_attention.context_attention_fwd",
+        "mode": "standalone-kernel-call",
+        "p800_target": null,
+        "weights_in_golden_sample": false
+      },
+      "run_dir": "/ssd1/sdh/model-adaptation-agents/runs/cuda-preflight-r6-002/operators/05",
+      "sample_fields": {
+        "inputs": [
+          "q",
+          "k",
+          "v",
+          "b_start_loc",
+          "b_seq_len"
+        ],
+        "non_tensor_args": [
+          "max_input_len",
+          "is_causal",
+          "sm_scale"
+        ],
+        "outputs": [
+          "output"
+        ],
+        "parameters": []
+      },
+      "schema": "golden-capture-config/v1",
+      "serialization": "kernel-call-torch-save/v1",
+      "session_config": "/ssd1/sdh/model-adaptation-agents/runs/cuda-preflight-r6-002/capture-config.json",
+      "source": {
+        "capture_module_path": "/ssd1/sdh/sglang/python/sglang/srt/layers/attention/triton_ops/prefill_attention.py",
+        "capture_module_sha256": "eb158c4c03e69091eb95a1bce093c9b054ac1ca5aab12769063d2e84630ca7f3"
+      },
+      "spec_binding": {
+        "contract_data_sha256": "74723d4cca3008710b04ac56c6ea06a652babd81e101bddaf5ae9b70eb2fbab3",
+        "contract_revision": 6,
+        "spec_id": "step3p7-flash-p800-demo"
+      },
+      "tensor_parallel_size": 8,
+      "tp_rank": 0
+    }
+  ],
+  "preflight_tp_context": {
+    "rank": 0,
+    "size": 8
+  },
+  "requests": [
+    {
+      "input_mode": "text-only",
+      "request": {
+        "sampling_params": {
+          "max_new_tokens": 1,
+          "temperature": 0
+        },
+        "text": "Write one word."
+      }
+    },
+    {
+      "image_sha256": "e06917184a00b14abd70cd8ea0ff5dca9abfbbad29f7b25c02f97133d4cd060e",
+      "input_mode": "single-image",
+      "request": {
+        "image_data": "/ssd1/sdh/sglang/examples/assets/example_image.png",
+        "sampling_params": {
+          "max_new_tokens": 1,
+          "temperature": 0
+        },
+        "text": "<im_patch>\nDescribe this image in one short sentence."
+      }
+    }
+  ],
+  "run_dir": "/ssd1/sdh/model-adaptation-agents/runs/cuda-preflight-r6-002",
+  "scan_result": {
+    "path": "/ssd1/sdh/model-adaptation-agents/runs/scan-007/result.json",
+    "sha256": "7581209a85c6e501c0d5e9623371189219437641295e1e5d58bea041ac308fe5"
+  },
+  "schema": "golden-capture-session-config/v1",
+  "source": {
+    "sglang_revision": "49e384ce9d304648e9959666ecb8ce8cd98d0deb",
+    "sglang_worktree": "/ssd1/sdh/sglang"
+  },
+  "spec_binding": {
+    "contract_data_sha256": "74723d4cca3008710b04ac56c6ea06a652babd81e101bddaf5ae9b70eb2fbab3",
+    "contract_revision": 6,
+    "spec_id": "step3p7-flash-p800-demo"
+  },
+  "tensor_parallel_size": 8,
+  "tp_rank": 0
+}

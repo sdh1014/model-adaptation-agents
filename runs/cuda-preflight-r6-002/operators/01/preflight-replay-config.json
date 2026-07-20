@@ -1,0 +1,39 @@
+{
+  "adapter": "swiglu-clamp",
+  "allow_active_capture": true,
+  "execution_site": "cuda",
+  "golden_run": "/ssd1/sdh/model-adaptation-agents/runs/cuda-preflight-r6-002/operators/01",
+  "invocation_target": "sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul",
+  "operator_id": "sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul",
+  "precision_gate": {
+    "atol": 0.01,
+    "check_stride": false,
+    "comparator": "torch.testing.assert_close",
+    "require_exact_structure": true,
+    "require_finite": true,
+    "require_same_dtype": true,
+    "rtol": 0.02
+  },
+  "run_dir": "/ssd1/sdh/model-adaptation-agents/runs/cuda-preflight-r6-002/operators/01",
+  "sample_fields": {
+    "inputs": [
+      "x"
+    ],
+    "non_tensor_args": [
+      "gemm1_limit"
+    ],
+    "outputs": [
+      "output"
+    ],
+    "parameters": []
+  },
+  "sample_files_sha256": "6ca54d2c149696b8a75141c511510c5d2dda99771a66295dcd912ea584c37408",
+  "schema": "kernel-call-replay-config/v1",
+  "spec_binding": {
+    "contract_data_sha256": "74723d4cca3008710b04ac56c6ea06a652babd81e101bddaf5ae9b70eb2fbab3",
+    "contract_revision": 6,
+    "spec_id": "step3p7-flash-p800-demo"
+  },
+  "tensor_parallel_size": 8,
+  "tp_rank": 0
+}

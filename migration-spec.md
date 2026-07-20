@@ -217,14 +217,14 @@ Agent 每次动作前完整读取 Contract 与本区；每次动作结束后立�
 ### Current
 
 - `observed_contract_revision`: `6`
-- `state_revision`: `44`
+- `state_revision`: `45`
 - `status`: `ACTIVE`
 - `phase`: `CUDA_CAPTURE`
-- `execution_site`: `SOURCE`
+- `execution_site`: `CUDA`
 - `active_operator`: `sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul`
-- `last_completed_action`: `formal_capture_session_binding_review_closed_at_source`
-- `last_run`: `runs/gap-driven-handoff-tool-003`
-- `next_action`: `在固定 CUDA revision 的 TP8 环境执行 capture_golden.py --mode preflight-session，验证 scan-007 五个现有调用的多 collector、rank 过滤与逐算子 CUDA self-replay；该动作不消耗正式 Capture Session`
+- `last_completed_action`: `revision6_cuda_preflight_passed_after_seam_module_source_fixation`
+- `last_run`: `runs/cuda-preflight-r6-002`
+- `next_action`: `在固定 CUDA revision 的 TP8 环境执行唯一的 revision 6 正式 Capture Session（真实 TP8 服务、文本与单图请求逐项匹配 scan-007），一次收齐 gap queue 五个计划算子的 rank 0 Golden、逐算子 self-replay 与样本摘要；该动作消耗唯一 Capture Session`
 
 规则：`ACTIVE` 时 `next_action` 必须恰好一条；`WAITING` 时必须是一条人工动作；`PASS`、`BLOCKED`、`NEEDS_HUMAN` 时必须为 `none`。
 
@@ -318,7 +318,7 @@ replay。`finish-attempt` 只有收到完整列表且全部通过才保留新 pa
 | P800 Kunlun required launch environment and Agent-selected optional policy implemented at SOURCE | `PASS` | `runs/p800-launch-environment-tool-001/result.json` |
 | gap-driven multi-Golden bundle build and verification implemented and reviewed at SOURCE | `PASS` | `runs/gap-driven-handoff-tool-001/result.json`; `runs/gap-driven-handoff-tool-002/result.json`; `runs/gap-driven-handoff-tool-003/result.json` |
 | P800 replay adapter resolved from the original Kunlun call site for each active operator | `PENDING` | `null` |
-| revision 6 CUDA preflight and all-Golden bundle runtime pass | `PENDING` | `null` |
+| revision 6 CUDA preflight and all-Golden bundle runtime pass | `PENDING` | `runs/cuda-preflight-r6-002/result.json` |
 | one revision 6 CUDA Session and at most three samples per operator | `PENDING` | `null` |
 | every planned operator has a SEALED Golden Run | `PENDING` | `null` |
 | bundle verified on CUDA and P800 | `PENDING` | `null` |
@@ -384,5 +384,6 @@ replay。`finish-attempt` 只有收到完整列表且全部通过才保留新 pa
 | `42` | Handoff Manifest v2 改为从不可变 Scan Run 读取完整 `CAPTURE_REQUIRED` 队列，不在 bundle 工具中固定算子名或数量；每项必须恰好匹配一个 SEALED Golden 和 record-samples Run，包内同时保存原 Scan 结果。正式 Session 后由同一 CUDA Agent 连续完成样本审查、临时 WAITING Spec、build 与 verify，只在全部通过后原子更新 Spec 并一次性回传；当前下一动作仍是 CUDA preflight | `runs/gap-driven-handoff-tool-001/result.json` |
 | `43` | Ticket 28 正式复审整改完成：Manifest v2 除了从 Scan 得到完整缺口集合，还要求所有 Golden 绑定同一个 Session 配置和同一个采集进程，包内保存原 Session 配置并校验输出 Tensor 元数据；revision 6 禁止省略 Scan 回退到历史 v1。当前仍只有 SOURCE 证据，下一动作保持 CUDA preflight | `runs/gap-driven-handoff-tool-002/result.json` |
 | `44` | 后续复审补齐“正式 Session”证据：显式拒绝 preflight 配置，Session 中的文本与单图请求必须逐项匹配 Scan Run，并要求 `formal-result.json` 封存共同进程、Session 配置和全部 Golden state/sidecar 摘要；该结果一同进入 Bundle。下一动作仍保持 CUDA preflight | `runs/gap-driven-handoff-tool-003/result.json` |
+| `45` | 首次 revision 6 CUDA preflight（`runs/cuda-preflight-r6-001`）在算子 `sgl_kernel.gemma_rmsnorm` 处 `PREFLIGHT_FAILED`：worker 用被调用对象的定义模块解析固定源，而 `sglang.srt.layers.layernorm` 对该 kernel 是 `from sgl_kernel import …` 的 re-export，`__module__` 落到 `sgl_kernel/elementwise.py`，与固定 seam 源 layernorm.py 不一致。按用户决定改用 SGLang 侧调用它的 layernorm.py：把 `preflight.py` 多 collector 分支的固定源解析改为取 `hook_target` seam 模块的源文件（不改 Contract、不新增 wrapper）。保留失败 Run 为历史，重跑 `runs/cuda-preflight-r6-002` 五算子各三 shape、rank 过滤与逐算子 CUDA self-replay 全部 PASS，未消耗正式 Session；下一动作为唯一 revision 6 正式 Capture Session | `runs/cuda-preflight-r6-002/result.json`、`runs/cuda-preflight-r6-001/result.json`、`.scratch/step3p7-p800-migration-tool/issues/29-preflight-seam-module-source-fixation.md` |
 
 <!-- AGENT-WRITABLE WORKING STATE: END -->

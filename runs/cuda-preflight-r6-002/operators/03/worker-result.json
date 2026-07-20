@@ -1,0 +1,42 @@
+{
+  "actual_tensors_saved": false,
+  "checked_shape_count": 3,
+  "checked_shapes": [
+    {
+      "passed": true,
+      "shape_id": "84e8125ae08bba8599838124e15a76d459afd69a66b3928ad61660f46cc1873d"
+    },
+    {
+      "passed": true,
+      "shape_id": "6fa14e5db81c65edbf9a26654590423a1a169ecbfbf89baf22f92cfa2e7c6010"
+    },
+    {
+      "passed": true,
+      "shape_id": "57be8ee26d24b85de8e9b48a79b01c80585c40d4afe101f14d55380118a5d798"
+    }
+  ],
+  "errors": [],
+  "execution_site": "cuda",
+  "failed_shape_count": 0,
+  "invocation_target": "sglang.srt.layers.layernorm.gemma_fused_add_rmsnorm",
+  "operator_id": "sgl_kernel.gemma_fused_add_rmsnorm",
+  "passed": true,
+  "precision_gate": {
+    "atol": 0.01,
+    "check_stride": false,
+    "comparator": "torch.testing.assert_close",
+    "require_exact_structure": true,
+    "require_finite": true,
+    "require_same_dtype": true,
+    "rtol": 0.02
+  },
+  "sample_files_sha256": "4435c8e45b68e7a4d149cef22ddad39baa7c9e4d92deb32634df3295d0c21498",
+  "schema": "kernel-call-replay-result/v1",
+  "spec_binding": {
+    "contract_data_sha256": "74723d4cca3008710b04ac56c6ea06a652babd81e101bddaf5ae9b70eb2fbab3",
+    "contract_revision": 6,
+    "spec_id": "step3p7-flash-p800-demo"
+  },
+  "tensor_parallel_size": 8,
+  "tp_rank": 0
+}

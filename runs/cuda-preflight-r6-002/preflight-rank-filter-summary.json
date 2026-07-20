@@ -1,0 +1,13 @@
+{
+  "applied_hooks": [
+    "sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul",
+    "sglang.srt.layers.layernorm.gemma_rmsnorm",
+    "sglang.srt.layers.layernorm.gemma_fused_add_rmsnorm",
+    "sglang.srt.layers.moe.topk.topk_sigmoid",
+    "sglang.srt.layers.attention.triton_ops.prefill_attention.context_attention_fwd"
+  ],
+  "capture_tp_rank": 0,
+  "checkpoint_loaded": false,
+  "runtime_tp_rank": 1,
+  "tensor_parallel_size": 8
+}

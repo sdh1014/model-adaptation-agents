@@ -1,0 +1,29 @@
+{
+  "files": [
+    {
+      "path": "samples/716b2ac213ca9a476f9712fca8653299d0be678ee81e98e9b6b288417ff43b6d.pt",
+      "sha256": "f8b0c935b06c922c0864d72d2fd8fd750c692796275b555178f46a86dbd3241d",
+      "shape_id": "716b2ac213ca9a476f9712fca8653299d0be678ee81e98e9b6b288417ff43b6d",
+      "size": 267705
+    },
+    {
+      "path": "samples/a477fce61e64c2024affb4405e6c7903faf5e322176e644891a0baee5fd6b726.pt",
+      "sha256": "ecdba4f449b811c5ba82113ea4eed56a0f1fe1084a6e1371a7b42c3e5ce68ac4",
+      "shape_id": "a477fce61e64c2024affb4405e6c7903faf5e322176e644891a0baee5fd6b726",
+      "size": 71097
+    },
+    {
+      "path": "samples/aa0deaed6cf3ee212f8f17bce6c2446989d0bc43d922a2574b67dc8c1b1eb7ca.pt",
+      "sha256": "a30b0f607583cb65af65d51a7a833ca74d77795eacb5bfd47d0c568a65c9cc41",
+      "shape_id": "aa0deaed6cf3ee212f8f17bce6c2446989d0bc43d922a2574b67dc8c1b1eb7ca",
+      "size": 136633
+    }
+  ],
+  "operator_id": "sglang.srt.layers.attention.triton_ops.prefill_attention._fwd_kernel",
+  "schema": "golden-sample-files/v1",
+  "spec_binding": {
+    "contract_data_sha256": "74723d4cca3008710b04ac56c6ea06a652babd81e101bddaf5ae9b70eb2fbab3",
+    "contract_revision": 6,
+    "spec_id": "step3p7-flash-p800-demo"
+  }
+}

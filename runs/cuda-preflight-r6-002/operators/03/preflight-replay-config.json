@@ -1,0 +1,43 @@
+{
+  "adapter": "gemma-fused-add-rmsnorm",
+  "allow_active_capture": true,
+  "execution_site": "cuda",
+  "golden_run": "/ssd1/sdh/model-adaptation-agents/runs/cuda-preflight-r6-002/operators/03",
+  "invocation_target": "sglang.srt.layers.layernorm.gemma_fused_add_rmsnorm",
+  "operator_id": "sgl_kernel.gemma_fused_add_rmsnorm",
+  "precision_gate": {
+    "atol": 0.01,
+    "check_stride": false,
+    "comparator": "torch.testing.assert_close",
+    "require_exact_structure": true,
+    "require_finite": true,
+    "require_same_dtype": true,
+    "rtol": 0.02
+  },
+  "run_dir": "/ssd1/sdh/model-adaptation-agents/runs/cuda-preflight-r6-002/operators/03",
+  "sample_fields": {
+    "inputs": [
+      "x",
+      "residual"
+    ],
+    "non_tensor_args": [
+      "eps"
+    ],
+    "outputs": [
+      "mutated_x",
+      "mutated_residual"
+    ],
+    "parameters": [
+      "weight"
+    ]
+  },
+  "sample_files_sha256": "4435c8e45b68e7a4d149cef22ddad39baa7c9e4d92deb32634df3295d0c21498",
+  "schema": "kernel-call-replay-config/v1",
+  "spec_binding": {
+    "contract_data_sha256": "74723d4cca3008710b04ac56c6ea06a652babd81e101bddaf5ae9b70eb2fbab3",
+    "contract_revision": 6,
+    "spec_id": "step3p7-flash-p800-demo"
+  },
+  "tensor_parallel_size": 8,
+  "tp_rank": 0
+}

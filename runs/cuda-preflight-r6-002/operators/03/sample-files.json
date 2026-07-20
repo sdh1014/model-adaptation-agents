@@ -1,0 +1,29 @@
+{
+  "files": [
+    {
+      "path": "samples/57be8ee26d24b85de8e9b48a79b01c80585c40d4afe101f14d55380118a5d798.pt",
+      "sha256": "4cc45969ba0ba586a3aaca76bbd2ca367accc73b91872db3909ce69ae370e029",
+      "shape_id": "57be8ee26d24b85de8e9b48a79b01c80585c40d4afe101f14d55380118a5d798",
+      "size": 5498
+    },
+    {
+      "path": "samples/6fa14e5db81c65edbf9a26654590423a1a169ecbfbf89baf22f92cfa2e7c6010.pt",
+      "sha256": "2586888dcc17f676b96909d04c29bb041c1bd455abed014755c4e529f9fd5bcc",
+      "shape_id": "6fa14e5db81c65edbf9a26654590423a1a169ecbfbf89baf22f92cfa2e7c6010",
+      "size": 5242
+    },
+    {
+      "path": "samples/84e8125ae08bba8599838124e15a76d459afd69a66b3928ad61660f46cc1873d.pt",
+      "sha256": "a06f9468250c99ec9eb7f97ef02bd6789c7c1abf8d50d0e11f9372cd22184ac2",
+      "shape_id": "84e8125ae08bba8599838124e15a76d459afd69a66b3928ad61660f46cc1873d",
+      "size": 4986
+    }
+  ],
+  "operator_id": "sgl_kernel.gemma_fused_add_rmsnorm",
+  "schema": "golden-sample-files/v1",
+  "spec_binding": {
+    "contract_data_sha256": "74723d4cca3008710b04ac56c6ea06a652babd81e101bddaf5ae9b70eb2fbab3",
+    "contract_revision": 6,
+    "spec_id": "step3p7-flash-p800-demo"
+  }
+}

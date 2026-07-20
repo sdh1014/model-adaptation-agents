@@ -11,11 +11,8 @@ import sys
 from typing import Any, Dict
 
 from .contracts import (
-    ATTENTION_OPERATOR_ID,
     CAPTURE_CONFIG_ENV,
     FORWARD_HOOK_TARGET,
-    GEMMA_FUSED_ADD_RMSNORM_OPERATOR_ID,
-    GEMMA_RMSNORM_OPERATOR_ID,
     KERNEL_REPLAY_CONFIG_SCHEMA,
     KERNEL_REPLAY_RESULT_SCHEMA,
     MLP_HOOK_TARGET,
@@ -23,7 +20,6 @@ from .contracts import (
     SESSION_CONFIG_SCHEMA,
     SWIGLU_CLAMP_HOOK_TARGET,
     SWIGLU_CLAMP_OPERATOR_ID,
-    TOPK_SIGMOID_OPERATOR_ID,
 )
 
 
@@ -620,16 +616,17 @@ def run_capture_worker(config_path: Path) -> None:
         )
         from sglang.srt.layers.moe.topk import topk_sigmoid
 
-        calls = {
-            SWIGLU_CLAMP_OPERATOR_ID: _swiglu_silu_clamp_mul,
-            GEMMA_RMSNORM_OPERATOR_ID: gemma_rmsnorm,
-            GEMMA_FUSED_ADD_RMSNORM_OPERATOR_ID: gemma_fused_add_rmsnorm,
-            TOPK_SIGMOID_OPERATOR_ID: topk_sigmoid,
-            ATTENTION_OPERATOR_ID: context_attention_fwd,
-        }
         for item in config["operators"]:
-            call = calls[item["operator_id"]]
-            loaded_source = Path(sys.modules[call.__module__].__file__).resolve()
+            # The fixed source is the SGLang-side module that owns the capture
+            # seam (the hook target the plugin patches), not the module where the
+            # underlying kernel object is defined. Re-exported sgl_kernel calls
+            # such as gemma_rmsnorm keep their __module__ inside the compiled
+            # sgl_kernel package, so resolving call.__module__ would point at
+            # sgl_kernel/elementwise.py instead of the pinned SGLang worktree
+            # file. Resolve the loaded source from the hook target's module so
+            # every operator is checked against the SGLang-side call site.
+            seam_module = item["hook_target"].rsplit(".", 1)[0]
+            loaded_source = Path(sys.modules[seam_module].__file__).resolve()
             expected_source = Path(
                 item["source"]["capture_module_path"]
             ).resolve()

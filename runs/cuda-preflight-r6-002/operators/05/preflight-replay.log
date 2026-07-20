@@ -1,0 +1,6 @@
+worker_mode=cuda-self-replay
+operator_id=sglang.srt.layers.attention.triton_ops.prefill_attention._fwd_kernel
+returncode=0
+--- stdout ---
+
+--- stderr ---

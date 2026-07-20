@@ -1,0 +1,6 @@
+worker_mode=cuda-self-replay
+operator_id=sgl_kernel.topk_sigmoid
+returncode=0
+--- stdout ---
+
+--- stderr ---

@@ -1,0 +1,29 @@
+{
+  "files": [
+    {
+      "path": "samples/511d81a4a09b53b456138e8f596c629a1b479fe6712aa5f005e28368670a3f52.pt",
+      "sha256": "628dd6c3cc9209f30c1cd3245b996de1571da7a456c334350db7429e78b2d70e",
+      "shape_id": "511d81a4a09b53b456138e8f596c629a1b479fe6712aa5f005e28368670a3f52",
+      "size": 5115
+    },
+    {
+      "path": "samples/f3d3829e00d5a8f602cb5254be44d0b47c936a5775b1233eb0ebd3d0005eb392.pt",
+      "sha256": "0cc2c41c176e9ebc7db399821c34c99e1e70deca9932a8b365685348e4fc2134",
+      "shape_id": "f3d3829e00d5a8f602cb5254be44d0b47c936a5775b1233eb0ebd3d0005eb392",
+      "size": 4859
+    },
+    {
+      "path": "samples/f6723ae71f5b6dce9d552a04d77eb55abeaa7695672b9216b9ded4ffa9078aab.pt",
+      "sha256": "6f06b24d34a34a2c6ea505338793c7229ad49b85d6e7d7f26bd7b02c132324e0",
+      "shape_id": "f6723ae71f5b6dce9d552a04d77eb55abeaa7695672b9216b9ded4ffa9078aab",
+      "size": 4667
+    }
+  ],
+  "operator_id": "sgl_kernel.topk_sigmoid",
+  "schema": "golden-sample-files/v1",
+  "spec_binding": {
+    "contract_data_sha256": "74723d4cca3008710b04ac56c6ea06a652babd81e101bddaf5ae9b70eb2fbab3",
+    "contract_revision": 6,
+    "spec_id": "step3p7-flash-p800-demo"
+  }
+}
