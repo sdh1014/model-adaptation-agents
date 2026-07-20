@@ -508,6 +508,8 @@ class PlannedKernelCallCollector:
                 "tensor_parallel_size": self.tp_size,
                 "checkpoint": self.config["checkpoint"],
                 "loaded_checkpoint": self.loaded_checkpoint,
+                "capture_session_config": self.config["session_config"],
+                "capture_process_id": os.getpid(),
             }
             if any(state.get(field) != expected for field, expected in checks.items()):
                 raise KernelCallError("existing capture state does not match config")
@@ -525,6 +527,8 @@ class PlannedKernelCallCollector:
             "tensor_parallel_size": self.tp_size,
             "checkpoint": self.config["checkpoint"],
             "loaded_checkpoint": self.loaded_checkpoint,
+            "capture_session_config": self.config["session_config"],
+            "capture_process_id": os.getpid(),
             "status": "ACTIVE",
             "capture_closed": False,
             "saved_shape_count": 0,
@@ -627,6 +631,10 @@ class PlannedKernelCallCollector:
                 for name, value in parameters.items()
             },
             "non_tensor_args": dict(non_tensor_args),
+            "outputs": {
+                name: self._tensor_metadata(value)
+                for name, value in outputs.items()
+            },
         }
         current_shape_id = shape_id_for(
             {name: list(value.shape) for name, value in inputs.items()}

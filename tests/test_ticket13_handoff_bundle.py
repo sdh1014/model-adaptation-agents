@@ -26,7 +26,9 @@ def current_contract() -> dict:
     text = MIGRATION_SPEC.read_text(encoding="utf-8")
     begin = "<!-- CONTRACT-DATA: BEGIN -->"
     end = "<!-- CONTRACT-DATA: END -->"
-    return json.loads(text.split(begin, 1)[1].split(end, 1)[0])
+    contract = json.loads(text.split(begin, 1)[1].split(end, 1)[0])
+    contract["contract_revision"] = 5
+    return contract
 
 
 def contract_binding(contract: dict) -> dict:
@@ -633,7 +635,7 @@ class Ticket13HandoffBundleTest(unittest.TestCase):
             self.assertIn("sha256 differs", content_evidence["error"])
 
             changed_contract = json.loads(json.dumps(contract))
-            changed_contract["contract_revision"] += 1
+            changed_contract["source"]["sglang_revision"] = "0" * 40
             wrong_spec = workspace / "wrong-contract-spec.md"
             write_spec(wrong_spec, changed_contract, "status: WAITING")
             contract_run = workspace / "runs" / "verify-contract"

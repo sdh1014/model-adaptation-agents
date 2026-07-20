@@ -195,6 +195,7 @@ def _validate_config(config: Dict[str, Any]) -> None:
         raise KernelReplayError(
             "P800 replay adapter is not implemented for this operator"
         )
+    planned_capture = isinstance(config.get("sample_fields"), dict)
     if operator_id == SWIGLU_CLAMP_OPERATOR_ID:
         expected_target = (
             SWIGLU_CLAMP_OPERATOR_ID
@@ -203,6 +204,7 @@ def _validate_config(config: Dict[str, Any]) -> None:
         )
     else:
         expected_target = PLANNED_TARGETS[operator_id]
+    if operator_id != SWIGLU_CLAMP_OPERATOR_ID or planned_capture:
         if not isinstance(config.get("adapter"), str) or not config["adapter"]:
             raise KernelReplayError("planned kernel replay is missing its adapter")
         sample_fields = config.get("sample_fields")
@@ -512,6 +514,16 @@ def _load_planned_sample(
             for name, value in payload["parameters"].items()
         },
         "non_tensor_args": payload["non_tensor_args"],
+        "outputs": {
+            name: {
+                "kind": "tensor",
+                "shape": list(value.shape),
+                "dtype": str(value.dtype).removeprefix("torch."),
+                "layout": str(value.layout).removeprefix("torch."),
+                "stride": list(value.stride()),
+            }
+            for name, value in payload["outputs"].items()
+        },
     }
     if payload["signature"] != signature:
         raise KernelReplayError("Kernel Call sample signature has drifted")
@@ -628,6 +640,7 @@ def run_kernel_replay_worker(
         torch.cuda.current_device(),
     )
     is_swiglu = config["operator_id"] == SWIGLU_CLAMP_OPERATOR_ID
+    planned_capture = isinstance(config.get("sample_fields"), dict)
     if is_swiglu:
         if config["execution_site"] == "cuda":
             invoke = cuda_call or _default_cuda_call
@@ -649,9 +662,9 @@ def run_kernel_replay_worker(
 
     for sample in state["samples"]:
         payload = (
-            _load_sample(config, sample)
-            if is_swiglu
-            else _load_planned_sample(config, sample)
+            _load_planned_sample(config, sample)
+            if planned_capture
+            else _load_sample(config, sample)
         )
         shape_id = sample["shape_id"]
         if is_swiglu:

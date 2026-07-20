@@ -289,13 +289,16 @@ Working State。
 7. 用临时 Spec 构建 bundle。build 必须接收当前 Scan Run，并为每项重复传入一个
    `--golden-run` 和一个 `--sample-record-result`。工具从 Scan Run 的
    `gap_queue` 得到唯一有序算子集合，拒绝缺失、额外或重复证据；不要在 runbook
-   中维护另一份固定算子列表。Manifest v2 包含原始 `scan-result.json`、全部
-   Golden、每项 record result/sidecar 摘要和完整文件清单。
+   中维护另一份固定算子列表。全部 Golden 还必须引用同一个 Session 配置、来自
+   同一个采集进程，并对应 Session 中按队列排列的目录。Manifest v2 包含原始
+   `scan-result.json`、原始 Session 配置、全部 Golden、每项 record
+   result/sidecar 摘要和完整文件清单。revision 6 未提供 `--scan-result` 时必须
+   停止，不能回退到历史 Manifest v1。
 8. 在 CUDA 端立即执行 `--mode verify`。verify 只信任包内 Scan Run，重新得到期望
-   算子集合并逐项核对。只有本地 Agent 的正式样本审查、build、verify 和 Contract
-   绑定全部通过后，才用 bundle 中 `migration-spec.md` 的相同字节原子替换当前
-   Spec，并做采集后的唯一一次 GitHub 回传；不得在 manifest 生成后再次编辑该
-   Spec。
+   算子集合，并用包内 Session 配置交叉核对全部 Golden。只有本地 Agent 的正式
+   样本审查、build、verify 和 Contract 绑定全部通过后，才用 bundle 中
+   `migration-spec.md` 的相同字节原子替换当前 Spec，并做采集后的唯一一次 GitHub
+   回传；不得在 manifest 生成后再次编辑该 Spec。
 
 任何步骤失败都要保留本地证据，不替换当前 Spec；随后把失败证据追加到同一
 GitHub evidence 分支。Session 已消耗但不能形成可信 Golden 时进入

@@ -84,12 +84,12 @@ class Ticket16P800BaselineRunbookTest(unittest.TestCase):
     def test_current_state_reopens_under_revision_6_queue_contract(self) -> None:
         spec = SPEC.read_text(encoding="utf-8")
 
-        self.assertIn("- `state_revision`: `42`", spec)
+        self.assertIn("- `state_revision`: `43`", spec)
         self.assertIn("- `status`: `ACTIVE`", spec)
         self.assertIn("- `phase`: `CUDA_CAPTURE`", spec)
         self.assertIn("- `execution_site`: `SOURCE`", spec)
         self.assertIn(
-            "- `last_run`: `runs/gap-driven-handoff-tool-001`",
+            "- `last_run`: `runs/gap-driven-handoff-tool-002`",
             spec,
         )
         self.assertIn(
