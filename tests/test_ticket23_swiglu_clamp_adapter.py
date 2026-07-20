@@ -201,7 +201,11 @@ class Ticket23SwiGLUClampAdapterTest(unittest.TestCase):
             / "model_adaptation_capture"
             / "kernel_replay.py"
         ).read_text(encoding="utf-8")
-        invocation = worker.index("actual = invoke(")
+        device_transfer = worker.index(
+            'input_x = payload["inputs"]["x"].to(selected_device)'
+        )
+        invocation_try = worker.index("        try:", device_transfer)
+        invocation = worker.index("kunlun_ops.swiglu(", device_transfer)
         invocation_failure = worker.index(
             "except (RuntimeError, TypeError) as error:",
             invocation,
@@ -210,6 +214,8 @@ class Ticket23SwiGLUClampAdapterTest(unittest.TestCase):
             "except (AssertionError, KernelReplayError) as error:",
             invocation_failure,
         )
+        self.assertLess(device_transfer, invocation_try)
+        self.assertLess(invocation_try, invocation)
         self.assertLess(invocation, invocation_failure)
         self.assertLess(invocation_failure, comparison_failure)
 

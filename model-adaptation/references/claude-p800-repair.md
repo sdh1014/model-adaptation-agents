@@ -21,12 +21,23 @@ test "$(git rev-parse HEAD)" = \
 export SGLANG_KUNLUN_WORKTREE=/workspace/baidu/aicapx/sglang
 test "$(git -C "$SGLANG_KUNLUN_WORKTREE" rev-parse HEAD)" = \
   "546ad8c682392922792bbbfe53a8bf575545f118"
+export SGLANG_PLATFORM=kunlun
+export SGLANG_IS_FLASHINFER_AVAILABLE=False
+export PYTHONPATH="$SGLANG_KUNLUN_WORKTREE/python:$SGLANG_KUNLUN_WORKTREE/sglang-kunlun${PYTHONPATH:+:$PYTHONPATH}"
 ```
 
 如果实际路径不同，只替换 `SGLANG_KUNLUN_WORKTREE`。不要手工填写
 `active_hypothesis`，也不要提前修改或清理 SGLang-Kunlun。第一个算子应处于固定
 revision 的干净工作区；后续算子会由主 Skill 用上一项 `passing_run` 核对累计
 patch，不能用手工 reset 代替。
+
+上述两个 Kunlun 变量与 `PYTHONPATH` 前缀是服务、baseline 和 candidate replay 的
+共同启动基线。其余候选变量由主 Skill 按
+`docs/p800-environment-and-repair.md` 的节点、拓扑、backend 和活动算子条件选择；
+不能整表无条件导出，并要把最终值与原因写入 P800 环境证据。
+执行 baseline 或 candidate replay 时，对每个实际导出的候选变量追加
+`--p800-environment-reason '变量名=选择原因'`；没有候选变量时不传。工具会从
+进程环境读取真实值，缺值或缺原因时必须在算子调用前停止。
 
 ## 2. 启动 Claude Code
 

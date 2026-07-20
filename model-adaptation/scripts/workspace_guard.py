@@ -22,6 +22,8 @@ from model_adaptation_capture.contracts import (
     checkpoint_metadata,
 )
 from replay_compare import (
+    P800_OPTIONAL_ENVIRONMENT,
+    P800_REQUIRED_ENVIRONMENT,
     ToolError as ReplayToolError,
     _kernel_sample_files_sha256,
     _load_kernel_capture_state,
@@ -422,6 +424,58 @@ def validate_p800_replay_evidence(
     golden_raw = config.get("golden_run")
     if not isinstance(golden_raw, str) or not golden_raw:
         raise ToolError("P800 replay golden_run is invalid")
+    launch_environment = result.get("launch_environment")
+    if (
+        not isinstance(launch_environment, dict)
+        or launch_environment.get("SGLANG_PLATFORM")
+        != P800_REQUIRED_ENVIRONMENT["SGLANG_PLATFORM"]
+        or launch_environment.get("SGLANG_IS_FLASHINFER_AVAILABLE")
+        != P800_REQUIRED_ENVIRONMENT["SGLANG_IS_FLASHINFER_AVAILABLE"]
+    ):
+        raise ToolError("P800 replay launch environment has drifted")
+    pythonpath_prefix = launch_environment.get("PYTHONPATH_PREFIX")
+    if (
+        not isinstance(pythonpath_prefix, list)
+        or len(pythonpath_prefix) != 2
+        or any(
+            not isinstance(path, str)
+            or not Path(path).is_absolute()
+            for path in pythonpath_prefix
+        )
+        or Path(pythonpath_prefix[0]).name != "python"
+        or Path(pythonpath_prefix[1]).name != "sglang-kunlun"
+        or Path(pythonpath_prefix[0]).parent
+        != Path(pythonpath_prefix[1]).parent
+    ):
+        raise ToolError("P800 replay PYTHONPATH prefix has drifted")
+    selected_optional = launch_environment.get("selected_optional")
+    if (
+        set(launch_environment)
+        != {
+            *P800_REQUIRED_ENVIRONMENT,
+            "PYTHONPATH_PREFIX",
+            "selected_optional",
+        }
+        or not isinstance(selected_optional, dict)
+        or any(
+            name not in P800_OPTIONAL_ENVIRONMENT
+            or not isinstance(record, dict)
+            or set(record) != {"value", "reason"}
+            or not isinstance(record["value"], str)
+            or not isinstance(record["reason"], str)
+            or not record["reason"].strip()
+            or record["reason"] != record["reason"].strip()
+            or "\n" in record["reason"]
+            for name, record in selected_optional.items()
+        )
+    ):
+        raise ToolError(
+            "P800 replay optional environment evidence has drifted"
+        )
+    if config.get("launch_environment") != launch_environment:
+        raise ToolError(
+            "P800 replay config launch environment has drifted"
+        )
     golden_run = Path(golden_raw)
     if not golden_run.is_absolute() or golden_run.is_symlink():
         raise ToolError(
@@ -518,6 +572,7 @@ def validate_p800_replay_evidence(
         "precision_gate": contract["precision_gate"],
         "sample_files_sha256": sample_files_digest,
         "allow_active_capture": False,
+        "launch_environment": launch_environment,
         **candidate_fields,
     }
     if config != expected_config:
@@ -547,6 +602,7 @@ def validate_p800_replay_evidence(
         "sample_files_sha256": sample_files_digest,
         "actual_tensors_saved": False,
         "evidence": evidence_names,
+        "launch_environment": launch_environment,
     }
     if candidate is not None:
         wrapper_checks["candidate_patch_sha256"] = candidate["patch_sha256"]
@@ -565,12 +621,28 @@ def validate_p800_replay_evidence(
     ]
     if log_lines[:3] != expected_prefix:
         raise ToolError("P800 replay process result has drifted")
-    if candidate is not None and (
-        len(log_lines) < 4
-        or log_lines[3]
-        != f"candidate_patch_sha256={candidate['patch_sha256']}"
+    log_index = 3
+    if candidate is not None:
+        if (
+            len(log_lines) <= log_index
+            or log_lines[log_index]
+            != f"candidate_patch_sha256={candidate['patch_sha256']}"
+        ):
+            raise ToolError(
+                "P800 replay log lost its candidate.patch binding"
+            )
+        log_index += 1
+    expected_launch_log = "launch_environment=" + json.dumps(
+        launch_environment,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    if (
+        len(log_lines) <= log_index
+        or log_lines[log_index] != expected_launch_log
     ):
-        raise ToolError("P800 replay log lost its candidate.patch binding")
+        raise ToolError("P800 replay launch environment log has drifted")
     return replay_evidence_sha256(result_path, evidence_names)
 
 

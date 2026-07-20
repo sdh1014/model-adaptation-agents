@@ -406,6 +406,22 @@ CUDA capture plan 不替 Agent 猜测 P800 修复入口：现有 SwiGLU adapter 
 算子时，Agent 根据固定 Kunlun 源码的原调用点补齐参数装配。缺少 adapter 是流程
 能力待补齐，不得写成 P800 实机算子失败。
 
+P800 服务和 replay 还有一层独立的启动环境门槛。以下三项固定：
+
+```bash
+export SGLANG_PLATFORM=kunlun
+export SGLANG_IS_FLASHINFER_AVAILABLE=False
+export PYTHONPATH="$SGLANG_KUNLUN_WORKTREE/python:$SGLANG_KUNLUN_WORKTREE/sglang-kunlun${PYTHONPATH:+:$PYTHONPATH}"
+```
+
+完整候选变量表保存在 `docs/p800-environment-and-repair.md`，由 Agent 根据 D/P
+节点、DeepEP/BKCL 拓扑、实际 backend 和活动算子按需选择并记录理由，不能把全表
+无条件变成启动模板。环境、导入或设备发现失败停在环境检查，不进入 Operator Gap。
+实际选中的候选变量通过
+`--p800-environment-reason '变量名=选择原因'` 与进程环境中的真实值一起写入
+replay Run；未选择候选变量时不增加参数。CUDA worker 会移除两个 P800 强制变量，
+避免同一 shell 的 Kunlun 设置污染 CUDA self-replay。
+
 `scan-006` 是不可变证据，所以其中的 `adapter_status=NOT_IMPLEMENTED` 不会被原地
 更新。初始实现证据保存在 `runs/adapter-001`；交接包 code review 后的当前源码
 摘要与样本/replay 绑定证据保存在 `runs/adapter-002`。该 Run 本身只做本机源码
@@ -504,10 +520,12 @@ P800 PASS；需要设备验证时仍应形成新 Run。
 
 ## 14. revision 6 当前状态与自动续行
 
-当前 Working State 为 revision 40 `ACTIVE / CUDA_CAPTURE`。`runs/scan-007`
+当前 Working State 为 revision 41 `ACTIVE / CUDA_CAPTURE`。`runs/scan-007`
 已固定五个缺口及同一 capture plan；`runs/multimodal-capture-tool-001` 已在
 SOURCE 实现一个 session config、五个原调用 Hook、逐算子 rank-0 collector 和
-CUDA self-replay 编排。唯一下一步是在固定 CUDA revision 的 TP8 环境执行
+CUDA self-replay 编排；`runs/p800-launch-environment-tool-001` 又固定了 P800
+Kunlun 必需环境和 Agent 按需选择其余变量的边界。唯一下一步是在固定 CUDA
+revision 的 TP8 环境执行
 `capture_golden.py --mode preflight-session`。真实 CUDA preflight、正式一次性
 Session 和包含全部 Golden Run 的 bundle 仍为 `PENDING`；旧 revision 5 单算子
 runbook 不可直接执行。除已有 SwiGLU 外，其余 P800 replay adapter 也保持

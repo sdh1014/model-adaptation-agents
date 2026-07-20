@@ -217,13 +217,13 @@ Agent 每次动作前完整读取 Contract 与本区；每次动作结束后立�
 ### Current
 
 - `observed_contract_revision`: `6`
-- `state_revision`: `40`
+- `state_revision`: `41`
 - `status`: `ACTIVE`
 - `phase`: `CUDA_CAPTURE`
 - `execution_site`: `SOURCE`
 - `active_operator`: `sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul`
-- `last_completed_action`: `revision_6_multimodal_capture_session_prepared_at_source`
-- `last_run`: `runs/multimodal-capture-tool-001`
+- `last_completed_action`: `p800_kunlun_launch_environment_policy_recorded_at_source`
+- `last_run`: `runs/p800-launch-environment-tool-001`
 - `next_action`: `在固定 CUDA revision 的 TP8 环境执行 capture_golden.py --mode preflight-session，验证 scan-007 五个现有调用的多 collector、rank 过滤与逐算子 CUDA self-replay；该动作不消耗正式 Capture Session`
 
 规则：`ACTIVE` 时 `next_action` 必须恰好一条；`WAITING` 时必须是一条人工动作；`PASS`、`BLOCKED`、`NEEDS_HUMAN` 时必须为 `none`。
@@ -278,6 +278,22 @@ Session 为 `SEALED` 或 `FAILED`，不得创建第二个 revision 6 Session。�
 - `active_hypothesis`: `null`
 - `passing_run`: `null`
 
+P800 启动服务、baseline replay 和 candidate replay 都必须使用：
+
+```bash
+export SGLANG_PLATFORM=kunlun
+export SGLANG_IS_FLASHINFER_AVAILABLE=False
+export PYTHONPATH="$SGLANG_KUNLUN_WORKTREE/python:$SGLANG_KUNLUN_WORKTREE/sglang-kunlun${PYTHONPATH:+:$PYTHONPATH}"
+```
+
+完整候选环境变量保存在 `docs/p800-environment-and-repair.md`。Agent 根据 D/P
+节点类型、DeepEP/BKCL 拓扑、实际 backend 和当前算子按需选择；不能整表导出。
+每个额外设置的变量必须在 P800 环境 Run 中记录最终值和原因。需要节点专属值却
+无法确认 D/P 类型时进入 `NEEDS_HUMAN`。环境、插件导入或设备发现失败不能记作
+Operator Gap。Kernel replay 对每个实际导出的候选变量使用
+`--p800-environment-reason '变量名=选择原因'`，由工具把进程中的真实值和原因
+一起封入 replay Run；没有候选变量时不传。
+
 这四项是当前活动行的便捷副本，真实逐算子进度以 gap queue 行为准。baseline
 replay 不算修复尝试。失败 Run 恢复到上一项 `passing_run` 的累计 patch；通过
 patch 成为下一项的 `--accepted-result`。若一行 baseline 直接 PASS，它的
@@ -299,6 +315,7 @@ replay。`finish-attempt` 只有收到完整列表且全部通过才保留新 pa
 | target-only eager scan complete | `PASS` | `runs/scan-007/result.json` |
 | gap queue complete, including fixed single-image vision attention | `PASS` | `runs/scan-007/result.json` |
 | all planned CUDA capture/self-replay adapters and one-config multi-collector path implemented at SOURCE | `PASS` | `runs/multimodal-capture-tool-001/result.json` |
+| P800 Kunlun required launch environment and Agent-selected optional policy implemented at SOURCE | `PASS` | `runs/p800-launch-environment-tool-001/result.json` |
 | P800 replay adapter resolved from the original Kunlun call site for each active operator | `PENDING` | `null` |
 | revision 6 CUDA preflight and all-Golden bundle path pass | `PENDING` | `null` |
 | one revision 6 CUDA Session and at most three samples per operator | `PENDING` | `null` |
@@ -362,5 +379,6 @@ replay。`finish-attempt` 只有收到完整列表且全部通过才保留新 pa
 | `38` | 复审补齐两条封存门槛：候选 replay 前后逐字节核对真实 worktree，并从原生产调用点确认参数装配；后续 attempt 在领取时固定全部历史 operator，`finish-attempt` 只有活动 replay 和完整回归列表全部通过才保留累计 patch。revision 6 多 adapter、多 collector 和全量 bundle 仍为扫描后的待实现能力，旧 revision 5 runbook 禁止复用 | `runs/operator-queue-tool-001/result.json` |
 | `39` | 后继 SOURCE Run 修正复审发现：SwiGLU 候选必须保持基线 `x/y`、从模型配置读取真实 clamp limit 并保留 `None` 分支；新的 accepted Run 继承完整历史回归列表，第三个及以后算子不能删掉更早项；全 baseline 直接 PASS 时允许以干净固定 revision 和空 `passing_run` 闭环。`operator-queue-tool-001` 保留为被替代的历史证据 | `runs/operator-queue-tool-002/result.json` |
 | `40` | `scan-007` 绑定 revision 6 并把四个文本缺口与单图视觉 attention 全部放入同一 capture plan；固定 SGLang 图像和摘要。SOURCE 已实现一个 session config、五个现有 CUDA 调用 Hook、逐算子 rank-0 collector 与 CUDA self-replay 编排；除已有 SwiGLU 外不预设 P800 replay 入口，由 Agent 推进到各项时依据 Kunlun 原调用点补齐。未运行 Torch/CUDA，也未消耗正式 Session；下一动作只是在 CUDA 机器执行多算子 preflight | `runs/scan-007/result.json`、`runs/multimodal-capture-tool-001/result.json` |
+| `41` | 固定 P800 Kunlun 启动基线：服务与 replay 必须设置 `SGLANG_PLATFORM=kunlun`、`SGLANG_IS_FLASHINFER_AVAILABLE=False`，并优先加载固定 worktree 的 `python` 与 `sglang-kunlun`；其余完整变量表由 Agent 按节点、拓扑、backend 和活动算子选择并记录理由，不得无条件全量导出。该变化不修改 Contract Data，也不使既有 CUDA Scan/Capture 绑定失效 | `runs/p800-launch-environment-tool-001/result.json` |
 
 <!-- AGENT-WRITABLE WORKING STATE: END -->

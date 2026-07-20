@@ -22,8 +22,9 @@ MODEL_ADAPTATION_SKILL = ROOT / "model-adaptation" / "SKILL.md"
 CLAUDE_SKILL = ROOT / ".claude" / "skills" / "model-adaptation" / "SKILL.md"
 MIGRATION_SPEC = ROOT / "migration-spec.md"
 REPAIR_LOOP_RUN = ROOT / "runs" / "operator-queue-tool-002" / "result.json"
-CURRENT_CAPTURE_RUN = (
-    ROOT / "runs" / "multimodal-capture-tool-001" / "result.json"
+CURRENT_SOURCE_RUNS = (
+    ROOT / "runs" / "multimodal-capture-tool-001" / "result.json",
+    ROOT / "runs" / "p800-launch-environment-tool-001" / "result.json",
 )
 ALLOWED_PATHS = (
     "sglang-kunlun/sglang_kunlun/ops/swiglu.py",
@@ -281,8 +282,9 @@ class Ticket14RepairLoopTest(unittest.TestCase):
         )
         current_paths = {
             source["path"]
+            for run_path in CURRENT_SOURCE_RUNS
             for source in json.loads(
-                CURRENT_CAPTURE_RUN.read_text(encoding="utf-8")
+                run_path.read_text(encoding="utf-8")
             )["source_files"]
         }
         for source in result["source_files"]:

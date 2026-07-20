@@ -84,12 +84,12 @@ class Ticket16P800BaselineRunbookTest(unittest.TestCase):
     def test_current_state_reopens_under_revision_6_queue_contract(self) -> None:
         spec = SPEC.read_text(encoding="utf-8")
 
-        self.assertIn("- `state_revision`: `40`", spec)
+        self.assertIn("- `state_revision`: `41`", spec)
         self.assertIn("- `status`: `ACTIVE`", spec)
         self.assertIn("- `phase`: `CUDA_CAPTURE`", spec)
         self.assertIn("- `execution_site`: `SOURCE`", spec)
         self.assertIn(
-            "- `last_run`: `runs/multimodal-capture-tool-001`",
+            "- `last_run`: `runs/p800-launch-environment-tool-001`",
             spec,
         )
         self.assertIn(
@@ -197,7 +197,10 @@ class Ticket16P800BaselineRunbookTest(unittest.TestCase):
             runbook,
         )
         self.assertIn("worker-result.json.errors", runbook)
-        self.assertNotIn("--sglang-worktree", runbook)
+        self.assertIn(
+            '--sglang-worktree "$SGLANG_KUNLUN_WORKTREE"',
+            runbook,
+        )
         self.assertNotIn("sglang.launch_server", runbook)
         self.assertNotIn("torch.save", runbook)
         self.assertNotIn("git add migration-spec.md", runbook)

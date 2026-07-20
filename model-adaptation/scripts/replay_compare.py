@@ -47,6 +47,44 @@ DEFAULT_SYNTHETIC_CASE = {
     "expected": {"spec_binding_smoke": "ready"},
     "actual": {"spec_binding_smoke": "ready"},
 }
+P800_REQUIRED_ENVIRONMENT = {
+    "SGLANG_PLATFORM": "kunlun",
+    "SGLANG_IS_FLASHINFER_AVAILABLE": "False",
+}
+P800_OPTIONAL_ENVIRONMENT = (
+    "SGLANG_DEEPEP_NUM_MAX_DISPATCH_TOKENS_PER_RANK",
+    "XSHMEM_SYMMETRIC_SIZE",
+    "XSHMEM_QP_NUM_PER_RANK",
+    "ENABLE_CONTROL_THINK",
+    "DEFAULT_ENABLE_THINKING",
+    "XPU_HYBRID_ATTN_USE_GATHER_MULTISTREAM",
+    "SGLANG_HEALTH_CHECK_TIMEOUT",
+    "MODEL_PATH",
+    "SGLANG_HACK_FLASHMLA_BACKEND",
+    "SGLANG_OPT_USE_TILELANG_MHC_PRE",
+    "SGLANG_OPT_DEEPGEMM_HC_PRENORM",
+    "SGLANG_OPT_USE_TILELANG_MHC_POST",
+    "SGLANG_OPT_USE_MULTI_STREAM_OVERLAP",
+    "USE_FAST_ALLOC_EXTEND_KUNLUN",
+    "SGLANG_FP8_PAGED_MQA_LOGITS_TORCH",
+    "SGLANG_OPT_USE_JIT_NORM",
+    "SGLANG_OPT_USE_FUSED_STORE_CACHE",
+    "SGLANG_OPT_FP8_WO_A_GEMM",
+    "SGLANG_OPT_BF16_FP32_GEMM_ALGO",
+    "SGLANG_TOPK_TRANSFORM_512_TORCH",
+    "SGLANG_FIX_DSV4_BASE_MODEL_LOAD",
+    "SGLANG_JIT_DEEPGEMM_PRECOMPILE",
+    "SGLANG_DSV4_FP4_EXPERTS",
+    "SGLANG_PREP_IN_CUDA_GRAPH",
+    "SGLANG_OPT_SWIGLU_CLAMP_FUSION",
+    "SGLANG_OPT_USE_FUSED_HASH_TOPK",
+    "SGLANG_OPT_USE_JIT_KERNEL_FUSED_TOPK",
+    "SGLANG_OPT_CP_REARRANGE_TRITON",
+    "SGLANG_ENABLE_THINKING",
+    "SGLANG_TOOL_STRICT_LEVEL",
+    "BKCL_RDMA_VERBS",
+    "SGLANG_DISAGGREGATION_BOOTSTRAP_TIMEOUT",
+)
 
 
 def require_loaded_model_mlp_adapter(contract: Dict[str, Any]) -> None:
@@ -1091,15 +1129,87 @@ def _load_kernel_capture_state(
 
 def _kernel_worker_environment(
     sglang_worktree: Optional[Path],
-) -> Dict[str, str]:
+    execution_site: str,
+    p800_environment_reasons: Optional[Dict[str, str]] = None,
+) -> tuple[Dict[str, str], Dict[str, Any]]:
+    if execution_site not in {"cuda", "p800"}:
+        raise ToolError("kernel worker execution_site must be cuda or p800")
+    if execution_site == "p800" and sglang_worktree is None:
+        raise ToolError("P800 kernel worker requires an explicit Kunlun worktree")
+    if (
+        p800_environment_reasons
+        and execution_site != "p800"
+    ):
+        raise ToolError("P800 environment reasons are only valid on P800")
+
     environment = os.environ.copy()
-    python_paths = [str(Path(__file__).resolve().parent)]
-    if sglang_worktree is not None:
-        python_paths.append(str((sglang_worktree / "python").resolve()))
+    scripts_path = str(Path(__file__).resolve().parent)
+    if execution_site == "p800":
+        python_paths = [
+            str((sglang_worktree / "python").resolve()),
+            str((sglang_worktree / "sglang-kunlun").resolve()),
+            scripts_path,
+        ]
+        environment.update(P800_REQUIRED_ENVIRONMENT)
+    else:
+        for name in P800_REQUIRED_ENVIRONMENT:
+            environment.pop(name, None)
+        python_paths = [scripts_path]
+        if sglang_worktree is not None:
+            python_paths.append(str((sglang_worktree / "python").resolve()))
     if environment.get("PYTHONPATH"):
-        python_paths.append(environment["PYTHONPATH"])
+        for path in environment["PYTHONPATH"].split(os.pathsep):
+            if path and path not in python_paths:
+                python_paths.append(path)
     environment["PYTHONPATH"] = os.pathsep.join(python_paths)
-    return environment
+
+    if execution_site == "cuda":
+        return environment, {}
+
+    reasons = p800_environment_reasons or {}
+    if (
+        not isinstance(reasons, dict)
+        or any(
+            not isinstance(name, str)
+            or name not in P800_OPTIONAL_ENVIRONMENT
+            or not isinstance(reason, str)
+            or not reason.strip()
+            or reason != reason.strip()
+            or "\n" in reason
+            for name, reason in reasons.items()
+        )
+    ):
+        raise ToolError("P800 environment reasons are invalid")
+    selected_names = {
+        name
+        for name in P800_OPTIONAL_ENVIRONMENT
+        if name in environment
+    }
+    missing_reasons = selected_names - set(reasons)
+    if missing_reasons:
+        raise ToolError(
+            "selected P800 environment "
+            + ", ".join(sorted(missing_reasons))
+            + " is missing a reason"
+        )
+    unused_reasons = set(reasons) - selected_names
+    if unused_reasons:
+        raise ToolError(
+            "P800 environment reason has no selected value: "
+            + ", ".join(sorted(unused_reasons))
+        )
+    return environment, {
+        **P800_REQUIRED_ENVIRONMENT,
+        "PYTHONPATH_PREFIX": python_paths[:2],
+        "selected_optional": {
+            name: {
+                "value": environment[name],
+                "reason": reasons[name],
+            }
+            for name in P800_OPTIONAL_ENVIRONMENT
+            if name in selected_names
+        },
+    }
 
 
 def _validate_kernel_worker_result(
@@ -1134,6 +1244,7 @@ def run_kernel_replay(
     execution_site: str,
     sglang_worktree: Optional[Path] = None,
     candidate_result: Optional[Path] = None,
+    p800_environment_reasons: Optional[Dict[str, str]] = None,
 ) -> None:
     binding = load_spec_binding(spec_path)
     contract = load_contract_data(spec_path)
@@ -1168,10 +1279,10 @@ def run_kernel_replay(
                 "SGLang worktree revision does not match Contract Data: "
                 f"expected {expected_revision}, got {actual_revision}"
             )
-    elif candidate_result is not None:
+    else:
         if sglang_worktree is None:
             raise ToolError(
-                "--sglang-worktree is required for P800 candidate replay"
+                "--sglang-worktree is required for P800 replay"
             )
         actual_revision = resolve_git_revision(sglang_worktree)
         kunlun_revision = contract["source"]["sglang_kunlun_revision"]
@@ -1180,14 +1291,13 @@ def run_kernel_replay(
                 "SGLang-Kunlun worktree revision does not match Contract Data: "
                 f"expected {kunlun_revision}, got {actual_revision}"
             )
-        candidate = load_candidate_replay_metadata(
-            candidate_result,
-            binding=binding.as_result_dict(),
-            worktree=sglang_worktree,
-            baseline_revision=kunlun_revision,
-        )
-    elif sglang_worktree is not None:
-        raise ToolError("--sglang-worktree is not valid for P800 baseline")
+        if candidate_result is not None:
+            candidate = load_candidate_replay_metadata(
+                candidate_result,
+                binding=binding.as_result_dict(),
+                worktree=sglang_worktree,
+                baseline_revision=kunlun_revision,
+            )
 
     try:
         checkpoint = checkpoint_metadata(
@@ -1227,6 +1337,11 @@ def run_kernel_replay(
         invocation_target = SWIGLU_CLAMP_OPERATOR_ID
     else:
         invocation_target = KUNLUN_SWIGLU_TARGET
+    worker_environment, launch_environment = _kernel_worker_environment(
+        sglang_worktree,
+        execution_site,
+        p800_environment_reasons,
+    )
     create_run_dir(run_dir)
     config = {
         "schema": KERNEL_REPLAY_CONFIG_SCHEMA,
@@ -1242,6 +1357,8 @@ def run_kernel_replay(
         "sample_files_sha256": sample_files_digest,
         "allow_active_capture": execution_site == "cuda",
     }
+    if execution_site == "p800":
+        config["launch_environment"] = launch_environment
     if candidate is not None:
         config["candidate"] = candidate
     config_path = run_dir / "replay-config.json"
@@ -1260,7 +1377,7 @@ def run_kernel_replay(
     completed = subprocess.run(
         command,
         cwd=sglang_worktree if sglang_worktree is not None else Path.cwd(),
-        env=_kernel_worker_environment(sglang_worktree),
+        env=worker_environment,
         text=True,
         capture_output=True,
         check=False,
@@ -1285,6 +1402,19 @@ def run_kernel_replay(
                 *(
                     [f"candidate_patch_sha256={candidate['patch_sha256']}"]
                     if candidate is not None
+                    else []
+                ),
+                *(
+                    [
+                        "launch_environment="
+                        + json.dumps(
+                            launch_environment,
+                            ensure_ascii=False,
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        )
+                    ]
+                    if execution_site == "p800"
                     else []
                 ),
                 "--- stdout ---",
@@ -1363,6 +1493,8 @@ def run_kernel_replay(
             else f"At least one Kernel Call sample failed through {invocation_target}."
         ),
     }
+    if execution_site == "p800":
+        result["launch_environment"] = launch_environment
     if candidate is not None:
         result["candidate_patch_sha256"] = candidate["patch_sha256"]
     atomic_write_json(run_dir / "result.json", result)
@@ -1391,6 +1523,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--execution-site", choices=("cuda", "p800"))
     parser.add_argument("--sglang-worktree", type=Path)
     parser.add_argument("--candidate-result", type=Path)
+    parser.add_argument(
+        "--p800-environment-reason",
+        action="append",
+        metavar="NAME=REASON",
+    )
     return parser.parse_args()
 
 
@@ -1407,6 +1544,7 @@ def main() -> int:
                     args.execution_site,
                     args.sglang_worktree,
                     args.candidate_result,
+                    args.p800_environment_reason,
                 )
             ):
                 raise ToolError(
@@ -1431,6 +1569,7 @@ def main() -> int:
                     args.execution_site,
                     args.sglang_worktree,
                     args.candidate_result,
+                    args.p800_environment_reason,
                 )
             ):
                 raise ToolError(
@@ -1452,6 +1591,7 @@ def main() -> int:
                     args.execution_site,
                     args.sglang_worktree,
                     args.candidate_result,
+                    args.p800_environment_reason,
                 )
             ):
                 raise ToolError(
@@ -1471,6 +1611,7 @@ def main() -> int:
                     args.execution_site,
                     args.sglang_worktree,
                     args.candidate_result,
+                    args.p800_environment_reason,
                 )
             ):
                 raise ToolError(
@@ -1493,6 +1634,19 @@ def main() -> int:
                 raise ToolError(
                     "--case and --result are not valid for kernel-replay mode"
                 )
+            p800_environment_reasons = {}
+            for item in args.p800_environment_reason or []:
+                name, separator, reason = item.partition("=")
+                if (
+                    not separator
+                    or not name
+                    or name in p800_environment_reasons
+                ):
+                    raise ToolError(
+                        "--p800-environment-reason must use unique "
+                        "NAME=REASON values"
+                    )
+                p800_environment_reasons[name] = reason
             run_kernel_replay(
                 args.spec,
                 args.run_dir,
@@ -1502,6 +1656,7 @@ def main() -> int:
                 execution_site=args.execution_site,
                 sglang_worktree=args.sglang_worktree,
                 candidate_result=args.candidate_result,
+                p800_environment_reasons=p800_environment_reasons,
             )
     except (SpecContractError, ToolError, OSError) as error:
         print(f"replay_compare.py: {error}", file=sys.stderr)

@@ -1,0 +1,130 @@
+{
+  "tool": "migration-agent",
+  "action": "implement_p800_kunlun_launch_environment_policy",
+  "spec_binding": {
+    "spec_id": "step3p7-flash-p800-demo",
+    "contract_revision": 6,
+    "contract_data_sha256": "74723d4cca3008710b04ac56c6ea06a652babd81e101bddaf5ae9b70eb2fbab3"
+  },
+  "passed": true,
+  "execution_site": "SOURCE",
+  "p800_runtime_executed": false,
+  "required_environment": {
+    "SGLANG_PLATFORM": "kunlun",
+    "SGLANG_IS_FLASHINFER_AVAILABLE": "False"
+  },
+  "pythonpath_prefix": [
+    "$SGLANG_KUNLUN_WORKTREE/python",
+    "$SGLANG_KUNLUN_WORKTREE/sglang-kunlun"
+  ],
+  "optional_environment_policy": {
+    "catalog_size": 32,
+    "agent_selects_by": [
+      "D/P node type",
+      "DeepEP/BKCL topology",
+      "resolved backend",
+      "active operator"
+    ],
+    "auto_export_all": false,
+    "record_selected_values_and_reasons": true,
+    "unknown_required_node_type": "NEEDS_HUMAN"
+  },
+  "implementation": {
+    "p800_replay_requires_explicit_worktree": true,
+    "p800_worker_forces_required_environment": true,
+    "p800_worker_prioritizes_fixed_worktree_sources": true,
+    "cuda_worker_removes_required_p800_environment": true,
+    "optional_values_and_reasons_are_bound": true,
+    "environment_failures_are_operator_gaps": false,
+    "device_transfer_failures_are_operator_gaps": false
+  },
+  "source_validation": {
+    "ticket27_tests": {
+      "command": "python3 -m unittest tests.test_ticket27_p800_kunlun_environment",
+      "tests_run": 8,
+      "passed": true
+    },
+    "focused_tests": {
+      "command": "python3 -m unittest tests.test_ticket16_p800_baseline_runbook tests.test_ticket27_p800_kunlun_environment",
+      "tests_run": 13,
+      "passed": true
+    },
+    "torch_free_regression_tests": {
+      "tests_run": 140,
+      "passed": true
+    },
+    "python_compile": "PASS",
+    "json_validation": "PASS",
+    "git_diff_check": "PASS"
+  },
+  "source_files": [
+    {
+      "path": ".scratch/step3p7-p800-migration-tool/map.md",
+      "sha256": "50dc0f471f00ecdf30db41bd63b1f29709f4a078df1a66576085da83101d0929"
+    },
+    {
+      "path": ".scratch/step3p7-p800-migration-tool/issues/27-require-p800-kunlun-launch-environment.md",
+      "sha256": "d98e5939bec6775d20f98bde89731d65d0c2dcb2f1ad07ee7fe7925d5ecdec68"
+    },
+    {
+      "path": "docs/p800-environment-and-repair.md",
+      "sha256": "d5a3f449f6547289e16ece4afbb5d9d7fa133fa0e0724c6848fde6d1306ca068"
+    },
+    {
+      "path": "migration-spec.md",
+      "sha256": "2d87f54a45191baee0afab71228fdc3890da1e2a87d020e68503807483188215"
+    },
+    {
+      "path": "model-adaptation/SKILL.md",
+      "sha256": "c0a0fb5953cf2ef0551ad1fdd076e070fd110e87a01193210c7fed3c5dcd83ed"
+    },
+    {
+      "path": "model-adaptation/references/claude-p800-repair.md",
+      "sha256": "d045830474557009d69ba1d43d7ff967f44e7a6bd4a4d07a520c0c2f13bc1450"
+    },
+    {
+      "path": "model-adaptation/references/p800-baseline-replay.md",
+      "sha256": "bfb0224e522f41a8064ff8b8ec9c50842dcb15ffe20de3126075026afe2eb2b8"
+    },
+    {
+      "path": "model-adaptation/scripts/model_adaptation_capture/kernel_replay.py",
+      "sha256": "d3147367d955140c048aba98efed098af2e8e8049e27d024f3c351ea8218b2ce"
+    },
+    {
+      "path": "model-adaptation/scripts/replay_compare.py",
+      "sha256": "7c7c537bfff15dbbefdb5746ca356cd293b440c4b4c4978b7c19949284a3879f"
+    },
+    {
+      "path": "model-adaptation/scripts/workspace_guard.py",
+      "sha256": "3632e9118e451ec6d2d09b4caabad0f18c0723e73cc0923d1eb2f94f72f4929c"
+    },
+    {
+      "path": "outputs/step3p7-p800-migration-tool-design.md",
+      "sha256": "a6dbb9188bad806caa17e17dbcb49ebd7f1d2edd38dd9286626fdebf371417ad"
+    },
+    {
+      "path": "tests/test_ticket14_repair_loop.py",
+      "sha256": "2433f7c71efdd57f80262e00021c5a2aa2506a5167435cd9293512559467fc13"
+    },
+    {
+      "path": "tests/test_ticket16_p800_baseline_runbook.py",
+      "sha256": "8506e27d2b3c2257be61fab69cc73d8b1a1a22a3347d4788ac281c51c1d9822b"
+    },
+    {
+      "path": "tests/test_ticket23_kernel_replay.py",
+      "sha256": "28e62dc670f2ea9916cb62a8ac3a872dc79882de5656538233b3d7c9e005009b"
+    },
+    {
+      "path": "tests/test_ticket23_swiglu_clamp_adapter.py",
+      "sha256": "c72debdbe6803acbd0485b183c6ff41c076c30cdf31f388a6d1085ae89dca055"
+    },
+    {
+      "path": "tests/test_ticket27_p800_kunlun_environment.py",
+      "sha256": "617e10d02011f9f099e031420e49cacf4a7215405f42c65dbe6530d1a13730c5"
+    }
+  ],
+  "evidence": [
+    "validation.log"
+  ],
+  "summary": "SOURCE code and documentation now force the confirmed Kunlun platform, FlashInfer disablement and fixed-worktree Python import order for P800 replay. The full environment catalog remains Agent-selected; no P800 service or kernel was executed in this Run."
+}

@@ -14,6 +14,9 @@ set -euo pipefail
 cd /root/model-adaptation-agents
 export SGLANG_KUNLUN_WORKTREE=/替换为实际的/SGLang-Kunlun/仓库根目录
 test -n "${SGLANG_KUNLUN_WORKTREE:-}"
+export SGLANG_PLATFORM=kunlun
+export SGLANG_IS_FLASHINFER_AVAILABLE=False
+export PYTHONPATH="$SGLANG_KUNLUN_WORKTREE/python:$SGLANG_KUNLUN_WORKTREE/sglang-kunlun${PYTHONPATH:+:$PYTHONPATH}"
 
 git fetch origin
 export SOURCE_BRANCH=origin/chore/step3p7-p800-baseline
@@ -42,8 +45,12 @@ git switch -c "$EVIDENCE_BRANCH" "$SOURCE_BRANCH"
 test -z "$(git status --short)"
 ```
 
-只替换 `SGLANG_KUNLUN_WORKTREE`。其他变量固定，不能换 Run 名重试。若 evidence
-分支或任一 Run 已存在，停止并告诉 Agent。
+只替换 `SGLANG_KUNLUN_WORKTREE`。上述两个 Kunlun 变量和 `PYTHONPATH` 前缀不可
+删除。其他可选 P800 环境变量由 Agent 按
+`docs/p800-environment-and-repair.md` 选择，不能整表无条件导出；实际选择及原因
+必须进入环境证据。对每个实际导出的可选变量，准备一个
+`--p800-environment-reason '变量名=选择原因'` 参数；没有选择可选变量时不传。
+不能换 Run 名重试。若 evidence 分支或任一 Run 已存在，停止并告诉 Agent。
 
 ## 2. 在读取 Tensor 前复核状态
 
@@ -119,13 +126,26 @@ PY
 python - <<'PY'
 import torch
 import kunlun_ops
+import sglang_kunlun
+import os
+from pathlib import Path
 
 assert torch.cuda.is_available(), "当前 Python 看不到 P800 设备"
 assert torch.cuda.device_count() >= 1, torch.cuda.device_count()
 assert callable(torch.testing.assert_close)
 assert callable(kunlun_ops.swiglu)
+assert os.environ["SGLANG_PLATFORM"] == "kunlun"
+assert os.environ["SGLANG_IS_FLASHINFER_AVAILABLE"] == "False"
+worktree = Path(os.environ["SGLANG_KUNLUN_WORKTREE"]).resolve()
+sglang = __import__("sglang")
+assert Path(sglang.__file__).resolve().is_relative_to(worktree / "python")
+assert Path(sglang_kunlun.__file__).resolve().is_relative_to(
+    worktree / "sglang-kunlun"
+)
 print("torch_version=", torch.__version__)
 print("device_count=", torch.cuda.device_count())
+print("sglang=", sglang.__file__)
+print("sglang_kunlun=", sglang_kunlun.__file__)
 print("kunlun_ops=", kunlun_ops.__file__)
 PY
 ```
@@ -163,8 +183,19 @@ python model-adaptation/scripts/replay_compare.py \
   --scan-result runs/scan-006/result.json \
   --operator-id "$OPERATOR_ID" \
   --golden-run "$GOLDEN_RUN" \
-  --execution-site p800
+  --execution-site p800 \
+  --sglang-worktree "$SGLANG_KUNLUN_WORKTREE"
 ```
+
+如果 Agent 例如设置了 `MODEL_PATH`，在末尾追加：
+
+```bash
+  --p800-environment-reason \
+  'MODEL_PATH=加载 Contract 固定的 Step-3.7-Flash checkpoint'
+```
+
+每个已设置的候选变量都追加一次；工具会核对变量确实存在，并把实际值和原因一起
+写入 `result.json`。不要给未设置的变量编造原因。
 
 工具把数值不一致记录为有效的 `passed: false` 结果，而不是命令错误。退出码 `2`、
 缺少 `result.json` 或 Run 不完整属于工具/环境失败，此时直接进入文末失败处理。
@@ -208,6 +239,19 @@ assessment = json.loads(
 assert replay["action"] == "kernel-replay"
 assert replay["execution_site"] == "p800"
 assert replay["invocation_target"] == "kunlun_ops.swiglu"
+assert replay["launch_environment"]["SGLANG_PLATFORM"] == "kunlun"
+assert (
+    replay["launch_environment"]["SGLANG_IS_FLASHINFER_AVAILABLE"]
+    == "False"
+)
+assert replay["launch_environment"]["PYTHONPATH_PREFIX"] == [
+    str(Path(os.environ["SGLANG_KUNLUN_WORKTREE"]) / "python"),
+    str(Path(os.environ["SGLANG_KUNLUN_WORKTREE"]) / "sglang-kunlun"),
+]
+assert all(
+    set(record) == {"value", "reason"} and record["reason"]
+    for record in replay["launch_environment"]["selected_optional"].values()
+)
 assert replay["checked_shape_count"] == 3
 assert replay["failed_shape_count"] in {0, 1, 2, 3}
 assert replay["actual_tensors_saved"] is False

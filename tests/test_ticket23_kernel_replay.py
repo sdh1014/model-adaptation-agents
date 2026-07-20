@@ -1,5 +1,6 @@
 import hashlib
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -22,6 +23,7 @@ REVISION5_SPEC = (
 )
 
 from model_adaptation_capture.contracts import shape_id_for
+from model_adaptation_capture import kernel_replay
 from model_adaptation_capture.kernel_replay import (
     KernelReplayError,
     run_kernel_replay_worker,
@@ -294,6 +296,36 @@ class Ticket23KernelReplayTest(unittest.TestCase):
 
             self.assertFalse((run_dir / "worker-result.json").exists())
 
+    def test_device_transfer_failure_is_a_tool_error(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            golden_run = workspace / "golden-001"
+            write_golden_run(golden_run)
+            run_dir = workspace / "p800-replay"
+
+            class UnavailableDeviceInput:
+                def to(self, _device):
+                    raise RuntimeError("P800 device is unavailable")
+
+            with patch.object(
+                kernel_replay,
+                "_load_sample",
+                return_value={
+                    "inputs": {"x": UnavailableDeviceInput()},
+                    "non_tensor_args": {"gemm1_limit": 7.0},
+                },
+            ), self.assertRaisesRegex(
+                RuntimeError,
+                "P800 device is unavailable",
+            ):
+                run_kernel_replay_worker(
+                    replay_config(golden_run, run_dir, "p800"),
+                    p800_call=lambda x, limit: x,
+                    device=torch.device("cpu"),
+                )
+
+            self.assertFalse((run_dir / "worker-result.json").exists())
+
     def test_comparator_runtime_failure_is_a_tool_error(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = Path(temp_dir)
@@ -424,7 +456,19 @@ class Ticket23KernelReplayTest(unittest.TestCase):
             self.assertTrue(sealed_state["self_replay"]["passed"])
 
             p800_run = workspace / "p800-baseline-001"
-            with patch.object(replay_compare.subprocess, "run", side_effect=run_worker):
+            with patch.dict(
+                os.environ,
+                {"MODEL_PATH": "/models/step-3.7-flash"},
+                clear=True,
+            ), patch.object(
+                replay_compare,
+                "resolve_git_revision",
+                return_value="546ad8c682392922792bbbfe53a8bf575545f118",
+            ), patch.object(
+                replay_compare.subprocess,
+                "run",
+                side_effect=run_worker,
+            ):
                 replay_compare.run_kernel_replay(
                     REVISION5_SPEC,
                     p800_run,
@@ -432,6 +476,12 @@ class Ticket23KernelReplayTest(unittest.TestCase):
                     OPERATOR_ID,
                     golden_run,
                     execution_site="p800",
+                    sglang_worktree=worktree,
+                    p800_environment_reasons={
+                        "MODEL_PATH": (
+                            "load the fixed Step-3.7-Flash checkpoint"
+                        )
+                    },
                 )
 
             p800_result = json.loads(
@@ -441,6 +491,17 @@ class Ticket23KernelReplayTest(unittest.TestCase):
             self.assertEqual(
                 p800_result["invocation_target"],
                 "kunlun_ops.swiglu",
+            )
+            self.assertEqual(
+                p800_result["launch_environment"]["selected_optional"],
+                {
+                    "MODEL_PATH": {
+                        "value": "/models/step-3.7-flash",
+                        "reason": (
+                            "load the fixed Step-3.7-Flash checkpoint"
+                        ),
+                    }
+                },
             )
             self.assertEqual(
                 json.loads(
@@ -457,7 +518,11 @@ class Ticket23KernelReplayTest(unittest.TestCase):
                 encoding="utf-8",
             )
             rejected_run = workspace / "p800-baseline-wrong-samples"
-            with self.assertRaisesRegex(
+            with patch.object(
+                replay_compare,
+                "resolve_git_revision",
+                return_value="546ad8c682392922792bbbfe53a8bf575545f118",
+            ), self.assertRaisesRegex(
                 replay_compare.ToolError,
                 "sample_files_sha256",
             ):
@@ -468,6 +533,7 @@ class Ticket23KernelReplayTest(unittest.TestCase):
                     OPERATOR_ID,
                     golden_run,
                     execution_site="p800",
+                    sglang_worktree=worktree,
                 )
             self.assertFalse(rejected_run.exists())
 

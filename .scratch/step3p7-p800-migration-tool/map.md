@@ -5,11 +5,11 @@
 交付一份可直接指导最小 Demo 实现的中文方案设计文档：说明一个 Spec 驱动、单 Agent、少量确定性脚本组成的算子迁移工具，如何完成 Step-3.7-Flash 真实路径扫描、一次性 CUDA Golden 采集、人工跨机器交接，以及 P800 上单算子最多三种 shape 的自动修复与精度验收。
 
 最终文档保存为 `outputs/step3p7-p800-migration-tool-design.md`。设计形成后，本地图
-继续记录通过 tickets 实现最小 Demo 的范围变化。唯一实际采集 Session 已封存并
-接受 Golden；Handoff Bundle 已在 CUDA 与 P800 两端通过 manifest 校验，当前为
-`ACTIVE / P800_REPAIR`。P800 baseline 已确认三个 shape 中两个存在精度缺口且不计
-修复轮数；唯一下一步是在 P800 的 Claude Code 中由 Migration Agent 自主开始
-attempt 1。
+继续记录通过 tickets 实现最小 Demo 的范围变化。revision 5 的单算子 Golden、
+Handoff 和 P800 baseline 保留为历史；当前 revision 6 已完成 `scan-007` 与五算子
+Session 的 SOURCE 实现，状态为 `ACTIVE / CUDA_CAPTURE`。P800 Kunlun 必需启动
+环境和 Agent 按需选择其余变量的规则也已封存。唯一下一步是在 CUDA 机器执行
+不消耗正式 Session 的五算子 `preflight-session`。
 
 ## Notes
 
@@ -56,6 +56,7 @@ attempt 1。
 - [正式审查内联修复边界](issues/24-review-inline-repair-boundary.md)：拒绝生产 helper 和任意 callable replay；候选补丁必须修改原调用位置，并由真实 worktree diff 与调用参数证据共同约束。
 - [单算子通过后继续缺口队列](issues/25-continue-through-operator-gap-queue.md)：revision 6 让后一项继承累计通过 patch，当前项通过并回归旧项后自动进入下一项，全部关闭才进入 `PASS / DONE`。
 - [在同一次 Session 采集视觉 attention 缺口](issues/26-capture-vision-gap-in-one-session.md)：`scan-007` 把单图 `prefill_attention._fwd_kernel` 与四个文本缺口放入同一 capture plan；固定本地图像、一个 session config 和五个 rank-0 collector 的 SOURCE 实现已完成，CUDA preflight 待实机执行。
+- [固定 P800 Kunlun 启动环境边界](issues/27-require-p800-kunlun-launch-environment.md)：服务与 replay 强制设置 Kunlun 平台、关闭 FlashInfer，并优先加载固定 worktree 的两个源码目录；其余完整变量表由 Agent 根据节点、拓扑、backend 和活动算子按需选择并记录原因。
 - [确认跨 CUDA/P800 的样本格式与精度比较](issues/12-portable-sample-and-precision-compare.md)：CUDA Torch `2.11.0+cu129` 写出的三个 BF16 样本已由 P800 修改版 Torch `2.5.1+cu118` 读回；固定比较器正常 PASS 并正确拒绝有意数值偏差，Run 不保存 P800 actual Tensor。
 - [实现可验证的人工交接包](issues/13-verifiable-manual-handoff-bundle.md)：已完成 pre-replay 样本文件摘要记录、样本摘要与 replay 证据绑定、build/verify、完整允许文件 manifest、CUDA self-replay 结果重算和篡改/错误 Contract 测试；工具不解析 Working State，Agent 按 Skill 校验下一状态临时 Spec 后再原子推进。
 - [实现可恢复的五轮修复闭环](issues/14-five-attempt-repair-loop.md)：已完成固定 Kunlun revision/干净工作区检查、baseline 零计数判定、连续且不可复用的单一假设 Run、replay 前完整 patch 固化、patch/replay 联合摘要、失败恢复、通过保留、未知修改保护和第五轮上限；每轮假设及最小文件由 Migration Agent 依据证据自主选择，baseline 文件列表不锁定后续 attempt；synthetic 只允许绑定测试 Spec，不冒充 P800 实机闭环。

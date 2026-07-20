@@ -1,7 +1,6 @@
 """Replay the selected Kernel Call through the existing CUDA or Kunlun seam."""
 
 import argparse
-from functools import partial
 import hashlib
 import json
 import math
@@ -90,26 +89,6 @@ def _default_cuda_call(x: torch.Tensor, gemm1_limit: float) -> torch.Tensor:
     )
 
     return _swiglu_silu_clamp_mul(x, gemm1_limit)
-
-
-def _default_p800_call(
-    x: torch.Tensor,
-    gemm1_limit: float,
-    *,
-    pass_limit: bool = False,
-) -> torch.Tensor:
-    import kunlun_ops
-
-    actual = torch.empty(
-        x.shape[:-1] + (x.shape[-1] // 2,),
-        dtype=x.dtype,
-        device=x.device,
-    )
-    if pass_limit:
-        kunlun_ops.swiglu(x=x, y=actual, limit=float(gemm1_limit))
-    else:
-        kunlun_ops.swiglu(x=x, y=actual)
-    return actual
 
 
 def _is_git_revision(value: Any) -> bool:
@@ -652,12 +631,18 @@ def run_kernel_replay_worker(
     if is_swiglu:
         if config["execution_site"] == "cuda":
             invoke = cuda_call or _default_cuda_call
+            kunlun_ops = None
+            pass_limit = False
+        elif p800_call is not None:
+            invoke = p800_call
+            kunlun_ops = None
+            pass_limit = False
         else:
             candidate = config.get("candidate")
-            invoke = p800_call or partial(
-                _default_p800_call,
-                pass_limit=isinstance(candidate, dict),
-            )
+            import kunlun_ops
+
+            invoke = None
+            pass_limit = isinstance(candidate, dict)
     precision = config["precision_gate"]
     checked_shapes = []
     errors = []
@@ -669,12 +654,30 @@ def run_kernel_replay_worker(
             else _load_planned_sample(config, sample)
         )
         shape_id = sample["shape_id"]
+        if is_swiglu:
+            input_x = payload["inputs"]["x"].to(selected_device)
+            gemm1_limit = float(
+                payload["non_tensor_args"]["gemm1_limit"]
+            )
+            if kunlun_ops is not None:
+                actual = torch.empty(
+                    input_x.shape[:-1] + (input_x.shape[-1] // 2,),
+                    dtype=input_x.dtype,
+                    device=input_x.device,
+                )
         try:
             if is_swiglu:
-                actual = invoke(
-                    payload["inputs"]["x"].to(selected_device),
-                    float(payload["non_tensor_args"]["gemm1_limit"]),
-                )
+                if kunlun_ops is not None:
+                    if pass_limit:
+                        kunlun_ops.swiglu(
+                            x=input_x,
+                            y=actual,
+                            limit=gemm1_limit,
+                        )
+                    else:
+                        kunlun_ops.swiglu(x=input_x, y=actual)
+                else:
+                    actual = invoke(input_x, gemm1_limit)
                 actual_outputs = {"output": actual}
             else:
                 actual_outputs = _invoke_planned_call(

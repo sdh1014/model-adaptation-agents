@@ -1,0 +1,37 @@
+execution_site=SOURCE
+p800_runtime_executed=false
+
+red_test=_kernel_worker_environment accepted no execution site and did not force the P800 Kunlun environment
+red_documentation_test=required exports and the complete Agent-selected environment catalog were absent
+red_evidence_test=runs/p800-launch-environment-tool-001/result.json was absent
+
+command=python3 -m unittest tests.test_ticket27_p800_kunlun_environment
+tests_run=8
+result=PASS
+
+command=python3 -m unittest tests.test_ticket16_p800_baseline_runbook tests.test_ticket27_p800_kunlun_environment
+tests_run=13
+result=PASS
+
+command=python3 -m unittest <19 torch-free ticket modules>
+tests_run=140
+result=PASS
+
+command=PYTHONPYCACHEPREFIX=/tmp/model-adaptation-pycache python3 -m py_compile modified Python files
+result=PASS
+
+command=python3 -m json.tool runs/p800-launch-environment-tool-001/result.json
+result=PASS
+
+command=git diff --check
+result=PASS
+
+required_environment=SGLANG_PLATFORM=kunlun,SGLANG_IS_FLASHINFER_AVAILABLE=False
+pythonpath_prefix=$SGLANG_KUNLUN_WORKTREE/python,$SGLANG_KUNLUN_WORKTREE/sglang-kunlun
+optional_environment_catalog_size=32
+auto_export_all_optional_environment=false
+optional_environment_values_and_reasons_bound=true
+cuda_worker_removes_required_p800_environment=true
+device_transfer_failure_is_operator_gap=false
+standards_review_remaining_findings=0
+spec_review_remaining_findings=0

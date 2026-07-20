@@ -314,6 +314,26 @@ P800 目标仓库由环境变量 `SGLANG_KUNLUN_WORKTREE` 指向。Agent 必须�
 Contract 固定 revision 的 Git 根目录。变量缺失或路径无法确认时，才进入
 `NEEDS_HUMAN` 询问一个环境问题；不能猜路径。
 
+在 P800 启动服务、baseline replay 或 candidate replay 前，必须先固定 Kunlun
+导入环境：
+
+```bash
+export SGLANG_PLATFORM=kunlun
+export SGLANG_IS_FLASHINFER_AVAILABLE=False
+export PYTHONPATH="$SGLANG_KUNLUN_WORKTREE/python:$SGLANG_KUNLUN_WORKTREE/sglang-kunlun${PYTHONPATH:+:$PYTHONPATH}"
+```
+
+完整候选变量表位于 `docs/p800-environment-and-repair.md`。Agent 必须完整读取该表，
+再根据 D/P 节点类型、DeepEP/BKCL 拓扑、实际 backend 和当前活动算子按需选择；
+除上述三个导入约束外，不能整表导出。每个额外设置的变量都要在当前 P800 环境
+Run 中记录最终值和选择原因。需要 D/P 专属值但节点类型无法确认时进入
+`NEEDS_HUMAN`，不能猜值。环境、插件导入或设备发现失败是工具/环境失败，不是
+Operator Gap。
+
+调用 `replay_compare.py --mode kernel-replay` 时，对每个实际导出的候选变量追加
+`--p800-environment-reason '变量名=选择原因'`。工具自动读取真实值并写入 Run；
+没有选择任何候选变量时不传该参数。缺少原因时先补齐环境证据，不能执行 replay。
+
 先用 `workspace_guard.py` 检查固定 revision。第一个算子要求干净工作区；后续算子
 允许工作区恰好等于上一项 `passing_run` 的完整通过 patch。把该 Run 作为
 `--accepted-result` 传入，工具必须逐字节核对；除此之外的已有修改进入
