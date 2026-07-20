@@ -489,45 +489,48 @@ def prepare_capture_session_config(
             if operator_id == SWIGLU_CLAMP_OPERATOR_ID
             else None
         )
-        operator_configs.append(
-            {
-                "schema": CONFIG_SCHEMA,
-                "session_config": session_config_path,
-                "adapter": ADAPTER_NAMES[operator_id],
-                "spec_binding": binding.as_result_dict(),
-                "operator_id": operator_id,
-                "activation_guard": operator["activation_guard"],
-                "model_path": "target",
-                "max_shapes": contract["limits"]["max_shapes_per_operator"],
-                "tensor_parallel_size": contract["runtime"][
-                    "tensor_parallel_size"
-                ],
-                "tp_rank": contract["sample_policy"]["capture_tp_rank"],
-                "serialization": KERNEL_CALL_SERIALIZATION,
-                "capture_device_type": "cuda",
-                "dtype": contract["runtime"]["dtype"],
-                "checkpoint": checkpoint,
-                "precision_gate": contract["precision_gate"],
-                "run_dir": str(operator_run_dir.resolve()),
-                "hook_target": plan["hook_target"],
-                "boundary": operator["boundary"],
-                "sample_fields": {
-                    "inputs": plan["saved_inputs"],
-                    "parameters": plan["saved_parameters"],
-                    "non_tensor_args": plan["saved_non_tensor_args"],
-                    "outputs": plan["saved_outputs"],
-                },
-                "replay": {
-                    "mode": "standalone-kernel-call",
-                    "cuda_target": plan["hook_target"],
-                    "p800_target": p800_target,
-                    "weights_in_golden_sample": False,
-                },
-                "source": {
-                    "capture_module_path": str(source_path),
-                    "capture_module_sha256": file_sha256(source_path),
-                },
-            }
+        operator_config = {
+            "schema": CONFIG_SCHEMA,
+            "session_config": session_config_path,
+            "adapter": ADAPTER_NAMES[operator_id],
+            "spec_binding": binding.as_result_dict(),
+            "operator_id": operator_id,
+            "activation_guard": operator["activation_guard"],
+            "model_path": "target",
+            "max_shapes": contract["limits"]["max_shapes_per_operator"],
+            "tensor_parallel_size": contract["runtime"][
+                "tensor_parallel_size"
+            ],
+            "tp_rank": contract["sample_policy"]["capture_tp_rank"],
+            "serialization": KERNEL_CALL_SERIALIZATION,
+            "capture_device_type": "cuda",
+            "dtype": contract["runtime"]["dtype"],
+            "checkpoint": checkpoint,
+            "precision_gate": contract["precision_gate"],
+            "run_dir": str(operator_run_dir.resolve()),
+            "hook_target": plan["hook_target"],
+            "boundary": operator["boundary"],
+            "sample_fields": {
+                "inputs": plan["saved_inputs"],
+                "parameters": plan["saved_parameters"],
+                "non_tensor_args": plan["saved_non_tensor_args"],
+                "outputs": plan["saved_outputs"],
+            },
+            "replay": {
+                "mode": "standalone-kernel-call",
+                "cuda_target": plan["hook_target"],
+                "p800_target": p800_target,
+                "weights_in_golden_sample": False,
+            },
+            "source": {
+                "capture_module_path": str(source_path),
+                "capture_module_sha256": file_sha256(source_path),
+            },
+        }
+        operator_configs.append(operator_config)
+        write_json(
+            operator_run_dir / "capture-config.json",
+            operator_config,
         )
 
     requests = json.loads(json.dumps(scan_result["request_set"]))

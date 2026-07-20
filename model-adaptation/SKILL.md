@@ -246,14 +246,11 @@ preflight 只能作为历史证据；Closure Evidence 必须把当前源码 pref
 GitHub evidence 分支回传要求，保持 Working State 不变并停止本次执行。
 
 preflight 通过且唯一下一动作已进入正式 Session 时，完整读取当前 revision 新生成
-且绑定新 Scan Run、全部 adapter Run 和全部 capture plan 的正式 runbook。跨机器
-由 GitHub 回传时分成两段：
-
-1. 人在 CUDA 机运行唯一真实模型 Session，完成 `record-samples` 和 CUDA
-   self-replay，回传 Session Run、Golden Run 和 record-samples Run 后停止；
-2. Agent 核验真实样本与自回放证据，生成包含 `WAITING / HANDOFF` Working State
-   的临时 Spec；人再回到同一 CUDA 环境 build + verify bundle。第二段不得重启
-   模型，不是第二个 Capture Session。
+且绑定新 Scan Run、全部 adapter Run 和全部 capture plan 的正式 runbook。正式
+Session 启动前仍先通过 GitHub 提交占位；模型停止后不再为了审查样本做一次中途
+回传。同一个 CUDA Agent 继续在本地完成样本审查、临时 Spec、bundle build 和
+verify，全部通过后再一次性回传 Session、Golden、record-samples、bundle 和审查
+证据。后处理不得重启模型，也不算第二个 Capture Session。
 
 正式模型启动前，必须先把 `session-start.json` 和 prepare 证据提交到 runbook
 固定的 GitHub evidence 分支。只有首次 push 成功才消耗并授权该 Session；成功或
@@ -273,10 +270,12 @@ Working State。
    直接参数、必要标量和 CUDA 期望输出。一次模型进程同时服务所有 collector；
    “每个算子最多三种 shape”不能误计成整个 Session 只有三个样本。
 4. 停止采集进程后、CUDA self-replay 前，调用 `handoff_bundle.py
-   --mode record-samples`，把每个 Golden Sample 文件的 shape、相对路径、大小和
-   SHA-256 写入 Golden Run 的 `sample-files.json`，并把这次动作保存在独立且不可
-   修改的 record-samples Run。这一步只接受仍为 `ACTIVE`、尚未 self-replay 的
-   Golden Run；失败时不得继续。
+   --mode record-samples --scan-result <当前 Scan result.json>`，把每个 Golden
+   Sample 文件的 shape、相对路径、大小和 SHA-256 写入 Golden Run 的
+   `sample-files.json`，并把这次动作保存在独立且不可修改的 record-samples Run。
+   对 gap queue 每项各执行一次；算子 id 从 capture state 和 Scan Run 核对，不在
+   命令或工具里写死。这一步只接受仍为 `ACTIVE`、尚未 self-replay 的 Golden Run；
+   失败时不得继续。
 5. 在同一次 CUDA Session 内按各自现有 Kernel Call 完成全部算子的 self-replay。
    每个 `golden_run` 都通过才把 Session 标为 `SEALED`。replay config、worker
    result、Golden state 和 wrapper result 必须携带各自
@@ -287,13 +286,19 @@ Working State。
    `golden_run` 写成对应 SEALED Run，并写入 bundle/manifest 路径；唯一
    `next_action` 是人工复制后在 P800 校验。`handoff_bundle.py` 不解析 Working State，
    所以这些字段必须由 Agent 逐项核对。
-7. 用临时 Spec 构建 bundle；build 必须显式接收 record-samples Run 的
-   `result.json`，核对它记录的 sidecar SHA，并把 record result 与 sidecar 的
-   SHA-256 写入 manifest。随后在 CUDA 端立即 verify。只有 build、verify 和
-   Contract 绑定全部通过后，才用 bundle 中 `migration-spec.md` 的相同字节原子
-   替换当前 Spec；不得在 manifest 生成后再次编辑该 Spec。
+7. 用临时 Spec 构建 bundle。build 必须接收当前 Scan Run，并为每项重复传入一个
+   `--golden-run` 和一个 `--sample-record-result`。工具从 Scan Run 的
+   `gap_queue` 得到唯一有序算子集合，拒绝缺失、额外或重复证据；不要在 runbook
+   中维护另一份固定算子列表。Manifest v2 包含原始 `scan-result.json`、全部
+   Golden、每项 record result/sidecar 摘要和完整文件清单。
+8. 在 CUDA 端立即执行 `--mode verify`。verify 只信任包内 Scan Run，重新得到期望
+   算子集合并逐项核对。只有本地 Agent 的正式样本审查、build、verify 和 Contract
+   绑定全部通过后，才用 bundle 中 `migration-spec.md` 的相同字节原子替换当前
+   Spec，并做采集后的唯一一次 GitHub 回传；不得在 manifest 生成后再次编辑该
+   Spec。
 
-任何步骤失败都要保留证据。Session 已消耗但不能形成可信 Golden 时进入
+任何步骤失败都要保留本地证据，不替换当前 Spec；随后把失败证据追加到同一
+GitHub evidence 分支。Session 已消耗但不能形成可信 Golden 时进入
 `BLOCKED / CUDA_CAPTURE`，不能重开第二次 Session。
 
 ### `HANDOFF`

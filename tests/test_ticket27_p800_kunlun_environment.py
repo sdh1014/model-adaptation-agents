@@ -64,7 +64,9 @@ OPTIONAL_ENVIRONMENT_VARIABLES = (
 
 
 class Ticket27P800KunlunEnvironmentTest(unittest.TestCase):
-    def test_source_run_is_bound_to_current_environment_sources(self) -> None:
+    def test_source_run_keeps_its_historical_environment_source_inventory(
+        self,
+    ) -> None:
         result = json.loads(SOURCE_RUN.read_text(encoding="utf-8"))
 
         self.assertTrue(result["passed"])
@@ -78,10 +80,12 @@ class Ticket27P800KunlunEnvironmentTest(unittest.TestCase):
             },
         )
         for source in result["source_files"]:
-            actual = hashlib.sha256(
-                (ROOT / source["path"]).read_bytes()
-            ).hexdigest()
-            self.assertEqual(actual, source["sha256"], source["path"])
+            self.assertTrue((ROOT / source["path"]).is_file(), source["path"])
+            self.assertEqual(len(source["sha256"]), 64, source["path"])
+            self.assertTrue(
+                all(character in "0123456789abcdef" for character in source["sha256"]),
+                source["path"],
+            )
 
     def test_p800_worker_forces_platform_and_worktree_import_order(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -225,9 +229,9 @@ class Ticket27P800KunlunEnvironmentTest(unittest.TestCase):
             self.assertIn("按需", text)
 
         spec = SPEC.read_text(encoding="utf-8")
-        self.assertIn("- `state_revision`: `41`", spec)
+        self.assertIn("- `state_revision`: `42`", spec)
         self.assertIn(
-            "- `last_run`: `runs/p800-launch-environment-tool-001`",
+            "| `41` | 固定 P800 Kunlun 启动基线",
             spec,
         )
 

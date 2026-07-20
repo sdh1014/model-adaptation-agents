@@ -276,6 +276,13 @@ class Ticket26SingleSessionVisionCaptureTest(unittest.TestCase):
                 len({item["session_config"] for item in config["operators"]}),
                 1,
             )
+            for item in config["operators"]:
+                operator_config = json.loads(
+                    (
+                        Path(item["run_dir"]) / "capture-config.json"
+                    ).read_text(encoding="utf-8")
+                )
+                self.assertEqual(operator_config, item)
             self.assertEqual(
                 config["operators"][-1]["hook_target"],
                 ATTENTION_CAPTURE_SEAM,

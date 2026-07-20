@@ -217,13 +217,13 @@ Agent 每次动作前完整读取 Contract 与本区；每次动作结束后立�
 ### Current
 
 - `observed_contract_revision`: `6`
-- `state_revision`: `41`
+- `state_revision`: `42`
 - `status`: `ACTIVE`
 - `phase`: `CUDA_CAPTURE`
 - `execution_site`: `SOURCE`
 - `active_operator`: `sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul`
-- `last_completed_action`: `p800_kunlun_launch_environment_policy_recorded_at_source`
-- `last_run`: `runs/p800-launch-environment-tool-001`
+- `last_completed_action`: `gap_driven_multi_golden_handoff_implemented_at_source`
+- `last_run`: `runs/gap-driven-handoff-tool-001`
 - `next_action`: `在固定 CUDA revision 的 TP8 环境执行 capture_golden.py --mode preflight-session，验证 scan-007 五个现有调用的多 collector、rank 过滤与逐算子 CUDA self-replay；该动作不消耗正式 Capture Session`
 
 规则：`ACTIVE` 时 `next_action` 必须恰好一条；`WAITING` 时必须是一条人工动作；`PASS`、`BLOCKED`、`NEEDS_HUMAN` 时必须为 `none`。
@@ -316,8 +316,9 @@ replay。`finish-attempt` 只有收到完整列表且全部通过才保留新 pa
 | gap queue complete, including fixed single-image vision attention | `PASS` | `runs/scan-007/result.json` |
 | all planned CUDA capture/self-replay adapters and one-config multi-collector path implemented at SOURCE | `PASS` | `runs/multimodal-capture-tool-001/result.json` |
 | P800 Kunlun required launch environment and Agent-selected optional policy implemented at SOURCE | `PASS` | `runs/p800-launch-environment-tool-001/result.json` |
+| gap-driven multi-Golden bundle build and verification implemented at SOURCE | `PASS` | `runs/gap-driven-handoff-tool-001/result.json` |
 | P800 replay adapter resolved from the original Kunlun call site for each active operator | `PENDING` | `null` |
-| revision 6 CUDA preflight and all-Golden bundle path pass | `PENDING` | `null` |
+| revision 6 CUDA preflight and all-Golden bundle runtime pass | `PENDING` | `null` |
 | one revision 6 CUDA Session and at most three samples per operator | `PENDING` | `null` |
 | every planned operator has a SEALED Golden Run | `PENDING` | `null` |
 | bundle verified on CUDA and P800 | `PENDING` | `null` |
@@ -380,5 +381,6 @@ replay。`finish-attempt` 只有收到完整列表且全部通过才保留新 pa
 | `39` | 后继 SOURCE Run 修正复审发现：SwiGLU 候选必须保持基线 `x/y`、从模型配置读取真实 clamp limit 并保留 `None` 分支；新的 accepted Run 继承完整历史回归列表，第三个及以后算子不能删掉更早项；全 baseline 直接 PASS 时允许以干净固定 revision 和空 `passing_run` 闭环。`operator-queue-tool-001` 保留为被替代的历史证据 | `runs/operator-queue-tool-002/result.json` |
 | `40` | `scan-007` 绑定 revision 6 并把四个文本缺口与单图视觉 attention 全部放入同一 capture plan；固定 SGLang 图像和摘要。SOURCE 已实现一个 session config、五个现有 CUDA 调用 Hook、逐算子 rank-0 collector 与 CUDA self-replay 编排；除已有 SwiGLU 外不预设 P800 replay 入口，由 Agent 推进到各项时依据 Kunlun 原调用点补齐。未运行 Torch/CUDA，也未消耗正式 Session；下一动作只是在 CUDA 机器执行多算子 preflight | `runs/scan-007/result.json`、`runs/multimodal-capture-tool-001/result.json` |
 | `41` | 固定 P800 Kunlun 启动基线：服务与 replay 必须设置 `SGLANG_PLATFORM=kunlun`、`SGLANG_IS_FLASHINFER_AVAILABLE=False`，并优先加载固定 worktree 的 `python` 与 `sglang-kunlun`；其余完整变量表由 Agent 按节点、拓扑、backend 和活动算子选择并记录理由，不得无条件全量导出。该变化不修改 Contract Data，也不使既有 CUDA Scan/Capture 绑定失效 | `runs/p800-launch-environment-tool-001/result.json` |
+| `42` | Handoff Manifest v2 改为从不可变 Scan Run 读取完整 `CAPTURE_REQUIRED` 队列，不在 bundle 工具中固定算子名或数量；每项必须恰好匹配一个 SEALED Golden 和 record-samples Run，包内同时保存原 Scan 结果。正式 Session 后由同一 CUDA Agent 连续完成样本审查、临时 WAITING Spec、build 与 verify，只在全部通过后原子更新 Spec 并一次性回传；当前下一动作仍是 CUDA preflight | `runs/gap-driven-handoff-tool-001/result.json` |
 
 <!-- AGENT-WRITABLE WORKING STATE: END -->

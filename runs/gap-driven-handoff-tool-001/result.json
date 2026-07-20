@@ -1,0 +1,109 @@
+{
+  "tool": "migration-agent",
+  "action": "implement_gap_driven_multi_golden_handoff",
+  "spec_binding": {
+    "spec_id": "step3p7-flash-p800-demo",
+    "contract_revision": 6,
+    "contract_data_sha256": "74723d4cca3008710b04ac56c6ea06a652babd81e101bddaf5ae9b70eb2fbab3"
+  },
+  "passed": true,
+  "execution_site": "SOURCE",
+  "consumes_capture_session": false,
+  "scan_run": "runs/scan-007",
+  "manifest_schema": "handoff-manifest/v2",
+  "gap_inventory": {
+    "source": "Scan Run gap_queue",
+    "required_operator_verdict": "CAPTURE_REQUIRED",
+    "requires_exact_operator_set": true,
+    "requires_queue_order": true,
+    "production_operator_constants_in_v2": false
+  },
+  "bundle_contents": [
+    "migration-spec.md",
+    "scan-result.json",
+    "every matching SEALED Golden Run",
+    "complete file manifest"
+  ],
+  "post_capture_flow": {
+    "reservation_push_before_session": true,
+    "intermediate_evidence_round_trip": false,
+    "same_cuda_agent_reviews_builds_and_verifies": true,
+    "final_evidence_push_after_local_verify": true
+  },
+  "source_validation": {
+    "focused_tests": {
+      "command": "python3 -m unittest tests.test_ticket28_gap_driven_handoff_bundle",
+      "tests_run": 7,
+      "passed": true
+    },
+    "torch_free_regression_tests": {
+      "command": "python3 -m unittest tests.test_ticket10_spec_binding tests.test_ticket11_scan_artifact tests.test_ticket12_cuda_capture_entrypoint tests.test_ticket12_cuda_capture_preflight tests.test_ticket12_sglang_capture_plugin tests.test_ticket13_handoff_bundle tests.test_ticket14_repair_loop tests.test_ticket15_formal_cuda_capture_runbook tests.test_ticket15_formal_cuda_evidence_review tests.test_ticket15_handoff_plan tests.test_ticket15_p800_handoff_verification tests.test_ticket16_p800_baseline_runbook tests.test_ticket18_target_only_eager_scan tests.test_ticket19_mlp_boundary tests.test_ticket21_kernel_scan_scope tests.test_ticket23_swiglu_clamp_adapter tests.test_ticket25_operator_queue tests.test_ticket26_single_session_vision_capture tests.test_ticket27_p800_kunlun_environment tests.test_ticket28_gap_driven_handoff_bundle",
+      "tests_run": 147,
+      "passed": true
+    },
+    "python_compile": "PASS",
+    "git_diff_check": "PASS",
+    "torch_available": false
+  },
+  "runtime_validation": {
+    "cuda_preflight": "PENDING_ON_CUDA_MACHINE",
+    "formal_cuda_capture": "NOT_STARTED",
+    "formal_bundle_build": "NOT_STARTED",
+    "p800_bundle_verify": "NOT_STARTED"
+  },
+  "source_files": [
+    {
+      "path": ".scratch/step3p7-p800-migration-tool/map.md",
+      "sha256": "bcadd2efdaec5586533fa34715d2244236d23476c106219e9bf09ab901865730"
+    },
+    {
+      "path": ".scratch/step3p7-p800-migration-tool/issues/28-build-gap-driven-multi-golden-bundle.md",
+      "sha256": "06be488a71e73de4c51ac91c3c3aac3a17a69ae51b0e5141db22ece7997038b5"
+    },
+    {
+      "path": "migration-spec.md",
+      "sha256": "b67e4e658a0741deb187a160f7136b3b1a32b2586a65318d9dcb3375cfa402f9"
+    },
+    {
+      "path": "model-adaptation/SKILL.md",
+      "sha256": "8bbbc5f2cf9de70461f62cb62f1acf1f2afe6451437bd3b0c720f58d89bae5b0"
+    },
+    {
+      "path": "model-adaptation/scripts/capture_golden.py",
+      "sha256": "d0d3b9e397bd28d22e37a21bdc58cedf8281d24da8ac51eb765f48a5a14eeb1f"
+    },
+    {
+      "path": "model-adaptation/scripts/handoff_bundle.py",
+      "sha256": "9bce717342d5b9c817eb2cb956c3097d1383ccebf74aeb7df67fe1ee3119ee80"
+    },
+    {
+      "path": "outputs/step3p7-p800-migration-tool-design.md",
+      "sha256": "ffa16123fafaa756938dc6ea73fc8f991b7557bdc8e914164113c7d39431f6c8"
+    },
+    {
+      "path": "tests/test_ticket13_handoff_bundle.py",
+      "sha256": "675d9b3c7e560acfbf6d398b16ae1a7be69be8bd61441062252a34b35e8ac40c"
+    },
+    {
+      "path": "tests/test_ticket16_p800_baseline_runbook.py",
+      "sha256": "b0dc8e377917fe07e18973d41384043c74ce917d9d08b31955ca14633e784f59"
+    },
+    {
+      "path": "tests/test_ticket26_single_session_vision_capture.py",
+      "sha256": "06882a545ea8ad2be2231a2d527e934d4eb2378e770be1ba8e8144735d1a3437"
+    },
+    {
+      "path": "tests/test_ticket27_p800_kunlun_environment.py",
+      "sha256": "96f0e9457069a290e448fbc42c7c4aece1a6a59ecceb67a2398aeaa09e4069c6"
+    },
+    {
+      "path": "tests/test_ticket28_gap_driven_handoff_bundle.py",
+      "sha256": "7484d77d1943846c3f1cf9b0d0a9ad280addf6efc31bfbfef6a05196cece4de1"
+    }
+  ],
+  "evidence": [
+    "validation.log",
+    "runs/scan-007/result.json"
+  ],
+  "summary": "Manifest v2 now derives its complete Golden set from the immutable Scan gap queue. SOURCE tests use arbitrary operator ids to prove that adding or removing a gap changes evidence inputs rather than production constants. CUDA and P800 runtime validation remain pending."
+}

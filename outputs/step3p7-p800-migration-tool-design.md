@@ -366,7 +366,7 @@ P800 actual output 只在内存中参与比较，不落盘。
 | `capture_golden.py` | 校验 Scan/Contract、生成采集配置、控制三 shape/rank 0 | 选择算子、修改 Contract |
 | 采集插件 | Hook 现有调用、保存允许的输入/参数/输出 | 新增 helper 或自定义算子 |
 | `replay_compare.py` | self-replay、当前活动边界的 P800 replay、结构与精度比较 | 放宽容差、决定修复位置或假设函数签名 |
-| `handoff_bundle.py` | self-replay 前记录样本文件摘要，生成与校验 manifest | 自动跨机器复制 |
+| `handoff_bundle.py` | self-replay 前记录样本文件摘要；从 Scan gap queue 生成并校验包含全部 Golden 的 manifest | 自动跨机器复制、预设算子名或数量 |
 | `workspace_guard.py` | 固定基线、保护每轮文件、保存累计 patch、把活动 replay 与全部历史回归作为同一门槛、失败时恢复上一份通过 patch | 选择修复假设、生成代码、自动 commit/push |
 
 当前代码中的 MLP adapter 是 revision 4 历史实现。revision 5 的
@@ -400,6 +400,13 @@ operator collector 和两条请求。插件只 Hook Scan Run 记录的五个现�
 collector 各自按输入 shape 去重并保存 rank 0 最多三份。SOURCE 单元测试已覆盖
 完整 capture plan、固定图像摘要、多 Hook 注册、attention 输出缓冲区和逐算子
 CUDA self-replay 编排。没有 CUDA 的 SOURCE 结果不能替代真实 preflight。
+
+revision 6 的 Handoff 使用 Manifest v2。build 不再读取生产代码中的单算子常量，
+而是校验不可变 Scan Run 的 `CAPTURE_REQUIRED` operators、gap queue 和 capture
+plan 三者完全一致，再要求每项恰好匹配一个 SEALED Golden 和一个
+record-samples Run。包内保存原始 `scan-result.json`，因此 P800 verify 可以从
+同一证据重建期望集合；增减缺口只改变 Scan 与传入证据，不修改 bundle 工具。
+revision 5 Manifest v1 仅保留历史兼容。
 
 CUDA capture plan 不替 Agent 猜测 P800 修复入口：现有 SwiGLU adapter 继续使用
 `kunlun_ops.swiglu`；其余四项的 P800 replay adapter 保持待实现。队列推进到对应
@@ -441,7 +448,9 @@ Contract revision 6
      同一进程发送固定文本和固定单图请求
      每个算子最多三个 shape
   -> 逐算子记录样本摘要并完成 CUDA self-replay
-  -> 一次构建并校验包含全部 Golden 的 Handoff Bundle
+  -> 同一 CUDA Agent 审查全部 Golden，生成临时 WAITING Spec
+  -> 按 Scan gap queue 一次构建并校验包含全部 Golden 的 Handoff Bundle
+  -> 原子更新 Spec，采集后只做一次 GitHub 回传
   -> 人工复制
   -> P800 manifest 校验
   -> 按队列 baseline / 最多五轮修复
@@ -520,15 +529,17 @@ P800 PASS；需要设备验证时仍应形成新 Run。
 
 ## 14. revision 6 当前状态与自动续行
 
-当前 Working State 为 revision 41 `ACTIVE / CUDA_CAPTURE`。`runs/scan-007`
+当前 Working State 为 revision 42 `ACTIVE / CUDA_CAPTURE`。`runs/scan-007`
 已固定五个缺口及同一 capture plan；`runs/multimodal-capture-tool-001` 已在
 SOURCE 实现一个 session config、五个原调用 Hook、逐算子 rank-0 collector 和
 CUDA self-replay 编排；`runs/p800-launch-environment-tool-001` 又固定了 P800
-Kunlun 必需环境和 Agent 按需选择其余变量的边界。唯一下一步是在固定 CUDA
+Kunlun 必需环境和 Agent 按需选择其余变量的边界；
+`runs/gap-driven-handoff-tool-001` 已实现由 Scan 缺口集合驱动的多 Golden
+Manifest v2，并封存缺失、额外、篡改与动态算子数量测试。唯一下一步是在固定 CUDA
 revision 的 TP8 环境执行
 `capture_golden.py --mode preflight-session`。真实 CUDA preflight、正式一次性
-Session 和包含全部 Golden Run 的 bundle 仍为 `PENDING`；旧 revision 5 单算子
-runbook 不可直接执行。除已有 SwiGLU 外，其余 P800 replay adapter 也保持
+Session 和真实样本构建的 bundle 仍为 `PENDING`；旧 revision 5 单算子 runbook
+不可直接执行。除已有 SwiGLU 外，其余 P800 replay adapter 也保持
 `PENDING_AGENT_RESOLUTION`，由 Agent 在队列推进到对应算子时依据原 Kunlun
 调用点补齐。
 
