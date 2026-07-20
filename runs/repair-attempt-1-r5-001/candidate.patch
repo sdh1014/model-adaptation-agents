@@ -1,0 +1,44 @@
+diff --git a/sglang-kunlun/sglang_kunlun/hooks/layers/quantization/unquant.py b/sglang-kunlun/sglang_kunlun/hooks/layers/quantization/unquant.py
+index a2054be4c..9ffbd993b 100644
+--- a/sglang-kunlun/sglang_kunlun/hooks/layers/quantization/unquant.py
++++ b/sglang-kunlun/sglang_kunlun/hooks/layers/quantization/unquant.py
+@@ -29,6 +29,28 @@ if TYPE_CHECKING:  # pragma: no cover
+     )
+ 
+ 
++def apply_gemm1_swiglu_clamp(
++    x: torch.Tensor,
++    gemm1_limit: "float | None",
++) -> torch.Tensor:
++    """SwiGLU activation with the gemm1 clamp used by the fused-MoE path.
++
++    Mirrors the CUDA ``_swiglu_silu_clamp_mul`` reference: SiLU-gated SwiGLU
++    with the gate clamped to ``max=gemm1_limit`` and the linear half clamped to
++    ``[-gemm1_limit, gemm1_limit]``. ``kunlun_ops.swiglu`` applies the same
++    clamp when given ``limit=``; without a limit it is the un-clamped SwiGLU.
++    """
++    import kunlun_ops  # local-only dep
++
++    d = x.shape[-1] // 2
++    out = torch.empty(x.shape[:-1] + (d,), dtype=x.dtype, device=x.device)
++    if gemm1_limit is None:
++        kunlun_ops.swiglu(x=x, y=out)
++    else:
++        kunlun_ops.swiglu(x=x, y=out, limit=float(gemm1_limit))
++    return out
++
++
+ @plugin_hook(
+     "sglang.srt.layers.quantization.unquant.UnquantizedFusedMoEMethod.apply",
+     type=HookType.REPLACE,
+@@ -119,9 +141,7 @@ def unquantized_fused_moe_apply_kunlun(
+         act=None,
+     )
+ 
+-    d = y.shape[-1] // 2
+-    out1 = torch.empty(y.shape[:-1] + (d,), dtype=y.dtype, device=y.device)
+-    kunlun_ops.swiglu(x=y, y=out1)
++    out1 = apply_gemm1_swiglu_clamp(y, layer.moe_runner_config.gemm1_clamp_limit)
+     out1 = out1.reshape(-1, out1.shape[-1])
+ 
+     out = cache[: M * top_k * layer.w2_weight.shape[1]].view(

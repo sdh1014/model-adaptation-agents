@@ -1,0 +1,7 @@
+{
+  "modified_paths": [
+    "sglang-kunlun/sglang_kunlun/hooks/layers/quantization/unquant.py"
+  ],
+  "patch_sha256": "2b00c8becd619c36cfbab3dbf5537cbc897652efefc7b4662a72dd6a6e0aaf34",
+  "schema": "repair-candidate/v1"
+}

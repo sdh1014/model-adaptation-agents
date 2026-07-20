@@ -81,17 +81,18 @@ class Ticket16P800BaselineRunbookTest(unittest.TestCase):
         self.assertFalse(review["replay"]["actual_tensors_saved"])
         self.assertFalse(review["tensor_payloads_deserialized"])
 
-    def test_current_state_hands_repair_to_the_p800_agent(self) -> None:
+    def test_current_state_records_the_passing_p800_repair(self) -> None:
         spec = SPEC.read_text(encoding="utf-8")
 
-        self.assertIn("- `state_revision`: `32`", spec)
-        self.assertIn("- `status`: `ACTIVE`", spec)
+        self.assertIn("- `state_revision`: `34`", spec)
+        self.assertIn("- `status`: `PASS`", spec)
         self.assertIn("- `phase`: `P800_REPAIR`", spec)
         self.assertIn("- `execution_site`: `SOURCE`", spec)
         self.assertIn(
-            "- `last_run`: `runs/repair-loop-tool-002`",
+            "- `last_run`: `runs/repair-attempt-1-r5-001`",
             spec,
         )
+        self.assertIn("- `next_action`: `none`", spec)
         self.assertIn(
             "- `p800_verification_run`: "
             "`runs/handoff-verify-p800-r5-001`",
@@ -106,11 +107,13 @@ class Ticket16P800BaselineRunbookTest(unittest.TestCase):
             "`runs/p800-baseline-assessment-r5-001`",
             spec,
         )
-        self.assertIn("- `attempts_used`: `0`", spec)
-        self.assertIn("- `active_hypothesis`: `null`", spec)
-        self.assertIn("Claude Code", spec)
-        self.assertIn("再选择 attempt 1", spec)
-        self.assertIn("原始 Kernel Call 重放方式", spec)
+        self.assertIn("- `attempts_used`: `1`", spec)
+        self.assertIn(
+            "- `passing_run`: `runs/repair-attempt-1-r5-001`",
+            spec,
+        )
+        self.assertNotIn("- `active_hypothesis`: `null`", spec)
+        self.assertIn("repair-kernel-call/v1", spec)
 
     def test_claude_runbook_only_launches_the_migration_agent(self) -> None:
         runbook = CLAUDE_RUNBOOK.read_text(encoding="utf-8")

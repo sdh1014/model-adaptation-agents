@@ -211,14 +211,14 @@ Agent 每次动作前完整读取 Contract 与本区；每次动作结束后立�
 ### Current
 
 - `observed_contract_revision`: `5`
-- `state_revision`: `32`
-- `status`: `ACTIVE`
+- `state_revision`: `34`
+- `status`: `PASS`
 - `phase`: `P800_REPAIR`
 - `execution_site`: `SOURCE`
 - `active_operator`: `sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul`
-- `last_completed_action`: `agent_driven_repair_handoff_prepared`
-- `last_run`: `runs/repair-loop-tool-002`
-- `next_action`: `在 P800 的 Claude Code 中用项目 model-adaptation Skill 恢复：Agent 读取已验收 baseline、失败样本元数据和目标源码，自主确定原始 Kernel Call 重放方式，先补齐并封存 repair replay adapter（不计 attempt），再选择 attempt 1 的单一假设、最小允许文件和修复实现，执行三个 Golden shape 的固定精度比较及有限迭代，直到 PASS、BLOCKED 或 NEEDS_HUMAN`
+- `last_completed_action`: `p800_repair_attempt_1_passed`
+- `last_run`: `runs/repair-attempt-1-r5-001`
+- `next_action`: `none`
 
 规则：`ACTIVE` 时 `next_action` 必须恰好一条；`WAITING` 时必须是一条人工动作；`PASS`、`BLOCKED`、`NEEDS_HUMAN` 时必须为 `none`。
 
@@ -233,7 +233,7 @@ Agent 每次动作前完整读取 Contract 与本区；每次动作结束后立�
 
 | operator_id | scan_verdict | golden | demo_role | repair | evidence |
 |---|---|---|---|---|---|
-| `sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul` | `CAPTURE_REQUIRED` | `SEALED` | 首选最小 Demo | P800 baseline 的三个 shape 中两个精度失败，已证实为 `Operator Gap`；等待 P800 Agent 自主修复 | `runs/p800-baseline-review-r5-001/result.json` |
+| `sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul` | `CAPTURE_REQUIRED` | `SEALED` | 首选最小 Demo | P800 baseline 两个 shape 精度失败，证实为 `Operator Gap`；attempt 1 在 `unquant.py` 内补上 clamp 后三个 shape 全部通过固定精度比较 | `runs/repair-attempt-1-r5-001/result.json` |
 | `sgl_kernel.gemma_rmsnorm` | `CAPTURE_REQUIRED` | `NOT_PLANNED` | 对比候选 | 缺少 Gemma symbol，且样本需要保存一个直接参数 `weight` | `runs/scan-006/result.json` |
 | `sgl_kernel.gemma_fused_add_rmsnorm` | `CAPTURE_REQUIRED` | `NOT_PLANNED` | 后续缺口 | 双 in-place 输出比首选边界复杂 | `runs/scan-006/result.json` |
 | `sgl_kernel.topk_sigmoid` | `CAPTURE_REQUIRED` | `NOT_PLANNED` | 对比候选 | 权重与 ids 双输出、排序语义比首选复杂 | `runs/scan-006/result.json` |
@@ -269,9 +269,9 @@ Golden shape：一个通过、两个仅因固定精度比较失败，因此它�
 ### P800 Repair
 
 - `baseline_run`: `runs/p800-baseline-assessment-r5-001`
-- `attempts_used`: `0`
-- `active_hypothesis`: `null`
-- `passing_run`: `null`
+- `attempts_used`: `1`
+- `active_hypothesis`: `unquant.py swiglu ignores gemm1 clamp; pass limit=layer.moe_runner_config.gemm1_clamp_limit into kunlun_ops.swiglu via a production callable to add the missing SiLU/linear clamp`
+- `passing_run`: `runs/repair-attempt-1-r5-001`
 
 baseline replay 不算修复尝试。每轮修改源码前递增 `attempts_used`，每轮只有一个 `active_hypothesis`。失败 Run 封存后恢复同一固定基线；通过 patch 是 P800 工作区唯一未提交修改。
 
@@ -283,7 +283,7 @@ baseline replay 不算修复尝试。每轮修改源码前递增 `attempts_used`
 | target-only eager kernel scan complete | `PASS` | `runs/scan-006/result.json` |
 | gap queue and Demo selection complete | `PASS` | `runs/scan-006/result.json` |
 | selected Kernel Call capture/CUDA self-replay/P800 baseline adapter implemented and sample-bound | `PASS` | `runs/adapter-003/result.json` |
-| repair replay adapter exercises the Agent-selected original Kernel Call boundary | `PENDING` | `null` |
+| repair replay adapter exercises the Agent-selected original Kernel Call boundary | `PASS` | `runs/repair-replay-adapter-r5-001/result.json` |
 | adapter-001 CUDA preflight passed without consuming formal Session | `PASS` | `runs/cuda-preflight-r5-001/result.json` |
 | capture-time adapter-002 CUDA preflight passed without consuming formal Session | `PASS` | `runs/cuda-preflight-r5-002/result.json` |
 | CUDA/P800 sample format and fixed comparator validated | `PASS` | `runs/p800-portability-r5-001/result.json` |
@@ -293,10 +293,10 @@ baseline replay 不算修复尝试。每轮修改源码前递增 `attempts_used`
 | CUDA self-replay passed | `PASS` | `runs/cuda-golden-r5-001/self-replay/result.json` |
 | bundle verified on CUDA and P800 | `PASS` | CUDA: `runs/handoff-verify-cuda-r5-001/result.json`; P800: `runs/handoff-verify-p800-r5-001/result.json` |
 | selected operator failed P800 baseline | `PASS` | `runs/p800-baseline-review-r5-001/result.json` |
-| repair stayed inside boundary and attempt limit | `PENDING` | `null` |
-| all selected samples passed Precision Gate | `PENDING` | `null` |
-| passing patch is the only workspace change | `PENDING` | `null` |
-| failed Runs traceable and next_action none | `PENDING` | `null` |
+| repair stayed inside boundary and attempt limit | `PASS` | `runs/repair-attempt-1-r5-001/result.json` |
+| all selected samples passed Precision Gate | `PASS` | `runs/repair-attempt-1-r5-001/replay/result.json` |
+| passing patch is the only workspace change | `PASS` | `runs/repair-attempt-1-r5-001/result.json` |
+| failed Runs traceable and next_action none | `PASS` | `runs/repair-attempt-1-r5-001/result.json` |
 
 ### Stop reason
 
@@ -342,5 +342,7 @@ baseline replay 不算修复尝试。每轮修改源码前递增 `attempts_used`
 | `30` | 修复实现交由 P800 Migration Agent 自主决定：baseline 检查路径不再锁定 attempt 文件，每轮 Agent 依据单一假设声明最小允许文件，工具只负责轮次、补丁、replay 绑定和恢复；当前尚未领取 attempt 1 | `runs/repair-loop-tool-002/result.json` |
 | `31` | 人工明确 baseline 验收后不预填 attempt 假设：`attempts_used: 0`、`active_hypothesis: null` 是合法交接，Agent 在领取 attempt 时写入单一假设 | `runs/repair-loop-tool-002/result.json` |
 | `32` | 取消预设 `<module>:<function>` 修复接口：固定 Kunlun 源码的真实入口接收模型层与 dispatch 数据，SwiGLU 只是内部调用，不能假设存在统一 `(x, limit)` 函数。P800 Agent 根据源码自主决定修复与原始 Kernel Call 重放方式；baseline adapter 只证明缺口。Agent 在领取 attempt 前先补齐并封存 repair replay adapter，该准备动作不计 repair attempt | `runs/repair-loop-tool-002/result.json` |
+| `33` | repair replay adapter 已在 model-adaptation 流程代码中补齐并封存：`invocation_target` 采用 `repair-kernel-call/v1:<module>:<callable>`，Agent 自选入口且该 callable 必须位于固定 revision 的 SGLang-Kunlun worktree 内，worktree 外的 flow-code 捷径被拒绝；`replay_compare.py` 与 `workspace_guard.py` 可生成并接受经真实修复路径的 P800 replay。此准备不改 SGLang-Kunlun 源码、不计 repair attempt，下一动作为领取 attempt 1 | `runs/repair-replay-adapter-r5-001/result.json` |
+| `34` | attempt 1 通过并封存：Agent 选定单一假设，在唯一允许文件 `unquant.py` 内把内部 SwiGLU 提取为生产可调用 `apply_gemm1_swiglu_clamp(x, gemm1_limit)`，向既有 `kunlun_ops.swiglu` 传入 `limit=layer.moe_runner_config.gemm1_clamp_limit` 补上缺失的 clamp。经已封存 repair replay adapter 导入固定 worktree 内该 callable 执行三个 Golden shape 固定精度比较，全部通过（0 失败）。通过 patch 为工作区唯一未提交修改，一轮即 PASS，进入 `PASS`，`next_action: none` | `runs/repair-attempt-1-r5-001/result.json`、`runs/repair-attempt-1-r5-001/replay/result.json` |
 
 <!-- AGENT-WRITABLE WORKING STATE: END -->

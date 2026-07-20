@@ -8,7 +8,7 @@ import os
 from pathlib import Path, PurePosixPath
 import subprocess
 import sys
-from typing import Any, Dict, Iterable
+from typing import Any, Dict, Iterable, Optional
 
 from _lib.spec_contract import (
     SpecContractError,
@@ -20,6 +20,7 @@ from model_adaptation_capture.contracts import (
     KUNLUN_SWIGLU_TARGET,
     SWIGLU_CLAMP_OPERATOR_ID,
     checkpoint_metadata,
+    parse_repair_invocation_target,
 )
 from replay_compare import (
     ToolError as ReplayToolError,
@@ -293,6 +294,8 @@ def validate_p800_replay_evidence(
     result: Dict[str, Any],
     binding: Dict[str, Any],
     contract: Dict[str, Any],
+    *,
+    repair_target: Optional[bool] = None,
 ) -> str:
     evidence_names = [
         "replay-config.json",
@@ -340,12 +343,41 @@ def validate_p800_replay_evidence(
             f"P800 Golden/replay evidence is invalid: {error}"
         ) from error
 
+    invocation_target = config.get("invocation_target")
+    repair_fields: Dict[str, Any] = {}
+    if invocation_target == KUNLUN_SWIGLU_TARGET:
+        if repair_target is True:
+            raise ToolError(
+                "attempt replay must route through the repaired Kernel Call "
+                "boundary, not the baseline adapter"
+            )
+    else:
+        if repair_target is False:
+            raise ToolError(
+                "baseline replay must use the plain Kunlun adapter"
+            )
+        try:
+            repair_entry = parse_repair_invocation_target(invocation_target)
+        except ValueError as error:
+            raise ToolError(
+                f"P800 replay invocation target has drifted: {error}"
+            ) from error
+        expected_revision = contract["source"]["sglang_kunlun_revision"]
+        worktree = config.get("sglang_kunlun_worktree")
+        if not isinstance(worktree, str) or not worktree:
+            raise ToolError("P800 repair replay is missing the SGLang-Kunlun worktree")
+        repair_fields = {
+            "repair_entry": repair_entry,
+            "sglang_kunlun_worktree": worktree,
+            "sglang_kunlun_revision": expected_revision,
+        }
+
     expected_config = {
         "schema": KERNEL_REPLAY_CONFIG_SCHEMA,
         "spec_binding": binding,
         "operator_id": SWIGLU_CLAMP_OPERATOR_ID,
         "execution_site": "p800",
-        "invocation_target": KUNLUN_SWIGLU_TARGET,
+        "invocation_target": invocation_target,
         "golden_run": str(golden_run),
         "run_dir": str(result_path.parent.resolve()),
         "tensor_parallel_size": contract["runtime"][
@@ -355,6 +387,7 @@ def validate_p800_replay_evidence(
         "precision_gate": contract["precision_gate"],
         "sample_files_sha256": sample_files_digest,
         "allow_active_capture": False,
+        **repair_fields,
     }
     if config != expected_config:
         raise ToolError("P800 replay config has drifted")
@@ -375,7 +408,7 @@ def validate_p800_replay_evidence(
         "spec_binding": binding,
         "operator_id": SWIGLU_CLAMP_OPERATOR_ID,
         "execution_site": "p800",
-        "invocation_target": KUNLUN_SWIGLU_TARGET,
+        "invocation_target": invocation_target,
         "passed": worker["passed"],
         "checked_shape_count": worker["checked_shape_count"],
         "failed_shape_count": worker["failed_shape_count"],
@@ -394,7 +427,7 @@ def validate_p800_replay_evidence(
     expected_returncode = 0 if worker["passed"] else 1
     expected_prefix = [
         "execution_site=p800",
-        f"invocation_target={KUNLUN_SWIGLU_TARGET}",
+        f"invocation_target={invocation_target}",
         f"returncode={expected_returncode}",
     ]
     if log_lines[:3] != expected_prefix:
@@ -408,6 +441,7 @@ def validate_replay_result(
     contract: Dict[str, Any],
     *,
     allow_synthetic_replay: bool,
+    repair_target: Optional[bool] = None,
 ) -> tuple[Dict[str, Any], str, str]:
     result = read_json_object(result_path, "replay result")
     checks = {
@@ -459,6 +493,7 @@ def validate_replay_result(
             result,
             binding,
             contract,
+            repair_target=repair_target,
         )
     return result, file_sha256(result_path), evidence_digest
 
@@ -534,6 +569,7 @@ def run_assess_baseline(
         binding,
         contract,
         allow_synthetic_replay=allow_synthetic_replay,
+        repair_target=False,
     )
     create_run_dir(run_dir)
     passed = replay_result["passed"]
@@ -1241,6 +1277,7 @@ def run_finish_attempt(
         binding,
         contract,
         allow_synthetic_replay=allow_synthetic_replay,
+        repair_target=True,
     )
     changes = require_known_changes(
         worktree,

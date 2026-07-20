@@ -1,0 +1,17 @@
+action=start-attempt
+attempt=1
+max_repair_attempts=5
+hypothesis=unquant.py swiglu ignores gemm1 clamp; pass limit=layer.moe_runner_config.gemm1_clamp_limit into kunlun_ops.swiglu via a production callable to add the missing SiLU/linear clamp
+previous_result_sha256=7533daff6fe85d8647f1321676a682660b0df49f963c7d9e0a2f931bb189fdbd
+workspace_clean=true
+action=record-candidate
+patch_sha256=2b00c8becd619c36cfbab3dbf5537cbc897652efefc7b4662a72dd6a6e0aaf34
+workspace_state=CANDIDATE_RECORDED
+action=seal-outcome
+replay_passed=true
+patch_sha256=2b00c8becd619c36cfbab3dbf5537cbc897652efefc7b4662a72dd6a6e0aaf34
+recovery_action=RETAIN_PATCH
+action=finish-attempt
+replay_passed=true
+patch_sha256=2b00c8becd619c36cfbab3dbf5537cbc897652efefc7b4662a72dd6a6e0aaf34
+workspace_state=PATCH_RETAINED

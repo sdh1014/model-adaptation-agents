@@ -1,0 +1,121 @@
+{
+  "action": "build_and_seal_repair_replay_adapter",
+  "active_operator": "sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul",
+  "actual_tensors_saved": false,
+  "behavior": {
+    "agent_selects_allowed_paths_per_attempt": true,
+    "agent_selects_hypothesis": true,
+    "baseline_adapter_proves_candidate_path": false,
+    "baseline_paths_lock_attempts": false,
+    "human_supplied_patch_required": false,
+    "fixed_candidate_function_signature": false,
+    "new_sglang_replay_helper_allowed": false,
+    "preauthored_attempt_patch": false,
+    "repair_entry_selected_by_agent": true,
+    "repair_entry_must_live_in_pinned_worktree": true,
+    "flow_code_shortcut_rejected": true,
+    "same_agent_continues_while_active": true,
+    "unknown_changes_rejected": true
+  },
+  "consumes_capture_session": false,
+  "delegated_to_p800_agent": {
+    "repair_implementation": true,
+    "repair_replay_adapter": true,
+    "single_hypothesis_per_attempt": true
+  },
+  "evidence": [
+    "adapter.log"
+  ],
+  "passed": true,
+  "scope": "REPAIR_REPLAY_ADAPTER_BUILD",
+  "baseline_adapter_run": "runs/adapter-003/result.json",
+  "run_id": "repair-replay-adapter-r5-001",
+  "runtime_validation": {
+    "attempts_used": 0,
+    "p800_operator_repair": "NOT_RUN",
+    "repair_replay_method": "PINNED_WORKTREE_MODULE_CALLABLE",
+    "repair_replay_adapter_built": true,
+    "synthetic_replay_scope": "TEST_SPEC_ONLY",
+    "test_repository_only": false,
+    "torch_available": true
+  },
+  "source_files": [
+    {
+      "path": "model-adaptation/scripts/model_adaptation_capture/contracts.py",
+      "sha256": "cc5677af147a86f36e0661fbb6e5465133ae7900efc7b1c25c0056ad1b6b838d"
+    },
+    {
+      "path": "model-adaptation/scripts/model_adaptation_capture/kernel_replay.py",
+      "sha256": "f74c3b3432e065534cb2bdb0689f532fb8f1befed6b51f8fd19aec56ce06e626"
+    },
+    {
+      "path": "model-adaptation/scripts/workspace_guard.py",
+      "sha256": "f25743a1320ac7364b87c0b77bbd85cac696534fc11b2f5d891b70959ea49fc5"
+    },
+    {
+      "path": "model-adaptation/scripts/replay_compare.py",
+      "sha256": "1499d96dd39c7f09dd8d3abb8dd1badd7e88f7ce0e54c990301cc501912bb2af"
+    },
+    {
+      "path": "model-adaptation/SKILL.md",
+      "sha256": "54dfc4e44949ae78c60c44c03a6301193748cae81ace33064868067e23c45d36"
+    },
+    {
+      "path": ".claude/skills/model-adaptation/SKILL.md",
+      "sha256": "0e739877e9956556c89304be22b62d1eefd512758cbe48b7d97617a8d743f90d"
+    },
+    {
+      "path": "model-adaptation/references/claude-p800-repair.md",
+      "sha256": "212f8a5dbf72da5418b6d1a5b0f94e2a0d0257aa3b3f371b4f7439c2ae9bd6fa"
+    },
+    {
+      "path": "tests/test_ticket14_repair_loop.py",
+      "sha256": "3628c6a66aa674055df82eec451cfdfd5d1675e3ee0244534cb19619d95c299b"
+    },
+    {
+      "path": "tests/test_ticket16_p800_baseline_runbook.py",
+      "sha256": "ab954030e2e4d7e226bb9d6b9171efd71629f22c3ddff7fa5c6bf7a3fceb0a20"
+    },
+    {
+      "path": "tests/test_ticket23_kernel_replay.py",
+      "sha256": "4ee97f3570505ca07b809eeb130dcaaf80d71372169e55a79c3ff606b22c3f98"
+    },
+    {
+      "path": "tests/test_ticket24_repair_replay_adapter.py",
+      "sha256": "c081f5326fdf83a2ccee9de0ba68974d6fc17829d6eaba3e410d68fada58b982"
+    }
+  ],
+  "spec_binding": {
+    "contract_data_sha256": "f683ea62427279da3c899a3ef0afcfa1d16298b7424154664c7e3fac9b13d938",
+    "contract_revision": 5,
+    "spec_id": "step3p7-flash-p800-demo"
+  },
+  "summary": "The repair replay adapter is built and sealed in the model-adaptation flow code. replay_compare.py and workspace_guard.py can now generate and accept a P800 Kernel Call replay routed through an Agent-selected repaired boundary (invocation_target repair-kernel-call/v1:<module>:<callable>) that must live inside the pinned SGLang-Kunlun worktree at the fixed revision; a flow-code shortcut outside the worktree is rejected. The flow never presets the module or callable name, and this preparation modifies no SGLang-Kunlun source, so it is not counted as a repair attempt.",
+  "supersedes": "runs/repair-loop-tool-002/result.json",
+  "tests": {
+    "focused": {
+      "command": "python3 -m pytest tests/test_ticket14_repair_loop.py tests/test_ticket24_repair_replay_adapter.py -q",
+      "passed": 22
+    },
+    "full_suite": {
+      "command": "python3 -m pytest tests/ -q",
+      "passed": 136,
+      "skipped": 1
+    }
+  },
+  "tool": "migration-agent",
+  "validation": {
+    "attempt_history_bound_to_each_claim": true,
+    "baseline_assessment_paths_may_differ_from_attempt_paths": true,
+    "current_attempt_paths_are_explicit_and_safe": true,
+    "repair_replay_adapter": "BUILT",
+    "repair_entry_resolved_from_pinned_worktree": true,
+    "fixed_candidate_function_contract_removed": true,
+    "no_branch_commit_or_push": true,
+    "review": {
+      "spec": "PASS",
+      "standards": "PASS"
+    },
+    "working_state_parsed_by_tool": false
+  }
+}

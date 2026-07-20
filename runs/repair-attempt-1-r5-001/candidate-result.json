@@ -1,0 +1,30 @@
+{
+  "action": "record-candidate",
+  "allowed_paths": [
+    "sglang-kunlun/sglang_kunlun/hooks/layers/quantization/unquant.py"
+  ],
+  "attempt": 1,
+  "attempt_history": "/workspace/baidu/aicapx/sglang/.git/model-adaptation-repair/99998417e50bfcca579a64e229b295454fbd00a3a5633f9a656d374e557aaa50",
+  "baseline_revision": "546ad8c682392922792bbbfe53a8bf575545f118",
+  "evidence": [
+    "attempt.json",
+    "candidate.json",
+    "candidate.patch",
+    "workspace.log"
+  ],
+  "hypothesis": "unquant.py swiglu ignores gemm1 clamp; pass limit=layer.moe_runner_config.gemm1_clamp_limit into kunlun_ops.swiglu via a production callable to add the missing SiLU/linear clamp",
+  "modified_paths": [
+    "sglang-kunlun/sglang_kunlun/hooks/layers/quantization/unquant.py"
+  ],
+  "passed": true,
+  "patch_path": "candidate.patch",
+  "patch_sha256": "2b00c8becd619c36cfbab3dbf5537cbc897652efefc7b4662a72dd6a6e0aaf34",
+  "spec_binding": {
+    "contract_data_sha256": "f683ea62427279da3c899a3ef0afcfa1d16298b7424154664c7e3fac9b13d938",
+    "contract_revision": 5,
+    "spec_id": "step3p7-flash-p800-demo"
+  },
+  "tool": "workspace_guard.py",
+  "workspace_state": "CANDIDATE_RECORDED",
+  "worktree": "/workspace/baidu/aicapx/sglang"
+}

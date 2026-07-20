@@ -21,7 +21,7 @@ REPLAY_COMPARE = (
 MODEL_ADAPTATION_SKILL = ROOT / "model-adaptation" / "SKILL.md"
 CLAUDE_SKILL = ROOT / ".claude" / "skills" / "model-adaptation" / "SKILL.md"
 MIGRATION_SPEC = ROOT / "migration-spec.md"
-REPAIR_LOOP_RUN = ROOT / "runs" / "repair-loop-tool-002" / "result.json"
+REPAIR_LOOP_RUN = ROOT / "runs" / "repair-replay-adapter-r5-001" / "result.json"
 ALLOWED_PATHS = (
     "sglang-kunlun/sglang_kunlun/ops/swiglu.py",
     "tests/test_swiglu.py",
@@ -240,7 +240,7 @@ class Ticket14RepairLoopTest(unittest.TestCase):
         self.assertTrue(result["passed"])
         self.assertEqual(
             result["supersedes"],
-            "runs/repair-loop-tool-001/result.json",
+            "runs/repair-loop-tool-002/result.json",
         )
         self.assertTrue(result["behavior"]["agent_selects_hypothesis"])
         self.assertTrue(
@@ -254,6 +254,13 @@ class Ticket14RepairLoopTest(unittest.TestCase):
         self.assertEqual(
             result["runtime_validation"]["p800_operator_repair"],
             "NOT_RUN",
+        )
+        self.assertEqual(
+            result["validation"]["repair_replay_adapter"],
+            "BUILT",
+        )
+        self.assertTrue(
+            result["delegated_to_p800_agent"]["repair_replay_adapter"]
         )
         for source in result["source_files"]:
             self.assertEqual(

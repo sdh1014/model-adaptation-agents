@@ -33,6 +33,7 @@ from model_adaptation_capture.contracts import (
     STATE_SCHEMA,
     SWIGLU_CLAMP_OPERATOR_ID,
     checkpoint_metadata,
+    repair_invocation_target,
     shape_id_for,
 )
 
@@ -712,6 +713,7 @@ def run_kernel_replay(
     *,
     execution_site: str,
     sglang_worktree: Optional[Path] = None,
+    repair_entry: Optional[str] = None,
 ) -> None:
     binding = load_spec_binding(spec_path)
     contract = load_contract_data(spec_path)
@@ -728,6 +730,9 @@ def run_kernel_replay(
     )
     if execution_site not in {"cuda", "p800"}:
         raise ToolError("execution_site must be cuda or p800")
+    if repair_entry is not None and execution_site != "p800":
+        raise ToolError("--repair-entry is only valid for P800 repair replay")
+    kunlun_revision: Optional[str] = None
     if execution_site == "cuda":
         if sglang_worktree is None:
             raise ToolError("--sglang-worktree is required for CUDA self-replay")
@@ -737,6 +742,18 @@ def run_kernel_replay(
             raise ToolError(
                 "SGLang worktree revision does not match Contract Data: "
                 f"expected {expected_revision}, got {actual_revision}"
+            )
+    elif repair_entry is not None:
+        if sglang_worktree is None:
+            raise ToolError(
+                "--sglang-worktree is required for P800 repair replay"
+            )
+        actual_revision = resolve_git_revision(sglang_worktree)
+        kunlun_revision = contract["source"]["sglang_kunlun_revision"]
+        if actual_revision != kunlun_revision:
+            raise ToolError(
+                "SGLang-Kunlun worktree revision does not match Contract Data: "
+                f"expected {kunlun_revision}, got {actual_revision}"
             )
     elif sglang_worktree is not None:
         raise ToolError("--sglang-worktree is not valid for P800 baseline")
@@ -775,11 +792,12 @@ def run_kernel_replay(
             raise ToolError(
                 "Golden self-replay did not check every current sample"
             )
-    invocation_target = (
-        SWIGLU_CLAMP_OPERATOR_ID
-        if execution_site == "cuda"
-        else KUNLUN_SWIGLU_TARGET
-    )
+    if execution_site == "cuda":
+        invocation_target = SWIGLU_CLAMP_OPERATOR_ID
+    elif repair_entry is not None:
+        invocation_target = repair_invocation_target(repair_entry)
+    else:
+        invocation_target = KUNLUN_SWIGLU_TARGET
     create_run_dir(run_dir)
     config = {
         "schema": KERNEL_REPLAY_CONFIG_SCHEMA,
@@ -795,6 +813,10 @@ def run_kernel_replay(
         "sample_files_sha256": sample_files_digest,
         "allow_active_capture": execution_site == "cuda",
     }
+    if repair_entry is not None:
+        config["repair_entry"] = repair_entry
+        config["sglang_kunlun_worktree"] = str(sglang_worktree.resolve())
+        config["sglang_kunlun_revision"] = kunlun_revision
     config_path = run_dir / "replay-config.json"
     write_json(config_path, config)
     if execution_site == "cuda" and state["capture_closed"] is not True:
@@ -923,6 +945,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--operator-id")
     parser.add_argument("--execution-site", choices=("cuda", "p800"))
     parser.add_argument("--sglang-worktree", type=Path)
+    parser.add_argument("--repair-entry")
     return parser.parse_args()
 
 
@@ -939,6 +962,7 @@ def main() -> int:
                     args.operator_id,
                     args.execution_site,
                     args.sglang_worktree,
+                    args.repair_entry,
                 )
             ):
                 raise ToolError(
@@ -957,6 +981,7 @@ def main() -> int:
                     args.operator_id,
                     args.execution_site,
                     args.sglang_worktree,
+                    args.repair_entry,
                 )
             ):
                 raise ToolError(
@@ -977,6 +1002,7 @@ def main() -> int:
                     args.operator_id,
                     args.execution_site,
                     args.sglang_worktree,
+                    args.repair_entry,
                 )
             ):
                 raise ToolError(
@@ -995,6 +1021,7 @@ def main() -> int:
                     args.operator_id,
                     args.execution_site,
                     args.sglang_worktree,
+                    args.repair_entry,
                 )
             ):
                 raise ToolError(
@@ -1025,6 +1052,7 @@ def main() -> int:
                 args.golden_run,
                 execution_site=args.execution_site,
                 sglang_worktree=args.sglang_worktree,
+                repair_entry=args.repair_entry,
             )
     except (SpecContractError, ToolError, OSError) as error:
         print(f"replay_compare.py: {error}", file=sys.stderr)

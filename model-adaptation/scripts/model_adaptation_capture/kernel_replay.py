@@ -2,6 +2,7 @@
 
 import argparse
 import hashlib
+import importlib
 import json
 import math
 import os
@@ -20,6 +21,7 @@ from .contracts import (
     KUNLUN_SWIGLU_TARGET,
     SWIGLU_CLAMP_OPERATOR_ID,
     VALIDATION_TP_RANK,
+    parse_repair_invocation_target,
     shape_id_for,
 )
 
@@ -88,6 +90,67 @@ def _default_p800_call(x: torch.Tensor, gemm1_limit: float) -> torch.Tensor:
     return actual
 
 
+def _is_git_revision(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 40
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
+_REPAIR_CONFIG_FIELDS = (
+    "repair_entry",
+    "sglang_kunlun_worktree",
+    "sglang_kunlun_revision",
+)
+
+
+def _reject_repair_fields(config: Dict[str, Any]) -> None:
+    for field in _REPAIR_CONFIG_FIELDS:
+        if field in config:
+            raise KernelReplayError(
+                "baseline kernel replay config must not carry repair fields"
+            )
+
+
+def _resolve_repair_call(
+    config: Dict[str, Any],
+) -> Callable[[torch.Tensor, float], torch.Tensor]:
+    """Import the Agent-selected repaired Kernel Call from the fixed worktree.
+
+    The callable must live inside the pinned SGLang-Kunlun worktree so the
+    replay exercises the real repaired boundary rather than any flow-code
+    shortcut. The flow never presets the module or function name.
+    """
+
+    entry = parse_repair_invocation_target(config["invocation_target"])
+    if config.get("repair_entry") != entry:
+        raise KernelReplayError("repair entry does not match invocation target")
+    worktree_raw = config.get("sglang_kunlun_worktree")
+    if not isinstance(worktree_raw, str) or not worktree_raw:
+        raise KernelReplayError("repair replay is missing the SGLang-Kunlun worktree")
+    worktree = Path(worktree_raw).resolve()
+    module_name, _, attribute = entry.partition(":")
+    try:
+        module = importlib.import_module(module_name)
+    except ImportError as error:
+        raise KernelReplayError(
+            f"cannot import repair entry module {module_name!r}: {error}"
+        ) from error
+    module_file = getattr(module, "__file__", None)
+    if module_file is None:
+        raise KernelReplayError("repair entry module has no source file")
+    module_path = Path(module_file).resolve()
+    if not module_path.is_relative_to(worktree):
+        raise KernelReplayError(
+            "repair entry must live inside the SGLang-Kunlun worktree"
+        )
+    func = getattr(module, attribute, None)
+    if not callable(func):
+        raise KernelReplayError("repair entry callable is not importable")
+    return func
+
+
 def _validate_config(config: Dict[str, Any]) -> None:
     if config.get("schema") != KERNEL_REPLAY_CONFIG_SCHEMA:
         raise KernelReplayError("kernel replay config schema has drifted")
@@ -106,13 +169,33 @@ def _validate_config(config: Dict[str, Any]) -> None:
     execution_site = config.get("execution_site")
     if execution_site not in {"cuda", "p800"}:
         raise KernelReplayError("execution_site must be cuda or p800")
-    expected_target = (
-        SWIGLU_CLAMP_OPERATOR_ID
-        if execution_site == "cuda"
-        else KUNLUN_SWIGLU_TARGET
-    )
-    if config.get("invocation_target") != expected_target:
-        raise KernelReplayError("kernel replay invocation target has drifted")
+    invocation_target = config.get("invocation_target")
+    if execution_site == "cuda":
+        if invocation_target != SWIGLU_CLAMP_OPERATOR_ID:
+            raise KernelReplayError("kernel replay invocation target has drifted")
+        _reject_repair_fields(config)
+    elif invocation_target == KUNLUN_SWIGLU_TARGET:
+        _reject_repair_fields(config)
+    else:
+        try:
+            parse_repair_invocation_target(invocation_target)
+        except ValueError as error:
+            raise KernelReplayError(
+                "kernel replay invocation target has drifted"
+            ) from error
+        if config.get("allow_active_capture") is not False:
+            raise KernelReplayError(
+                "repair kernel replay must not allow active capture"
+            )
+        if not _is_git_revision(config.get("sglang_kunlun_revision")):
+            raise KernelReplayError(
+                "repair kernel replay requires a pinned SGLang-Kunlun revision"
+            )
+        worktree = config.get("sglang_kunlun_worktree")
+        if not isinstance(worktree, str) or not worktree:
+            raise KernelReplayError(
+                "repair kernel replay requires the SGLang-Kunlun worktree"
+            )
     if not isinstance(config.get("allow_active_capture"), bool):
         raise KernelReplayError("kernel replay active-capture policy has drifted")
     if not _is_sha256(config.get("sample_files_sha256")):
@@ -306,8 +389,10 @@ def run_kernel_replay_worker(
     )
     if config["execution_site"] == "cuda":
         invoke = cuda_call or _default_cuda_call
-    else:
+    elif config["invocation_target"] == KUNLUN_SWIGLU_TARGET:
         invoke = p800_call or _default_p800_call
+    else:
+        invoke = p800_call or _resolve_repair_call(config)
     precision = config["precision_gate"]
     checked_shapes = []
     errors = []

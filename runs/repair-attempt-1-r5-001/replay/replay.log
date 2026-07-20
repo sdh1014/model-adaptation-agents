@@ -1,0 +1,14 @@
+execution_site=p800
+invocation_target=repair-kernel-call/v1:sglang_kunlun.hooks.layers.quantization.unquant:apply_gemm1_swiglu_clamp
+returncode=0
+--- stdout ---
+
+--- stderr ---
+XCCL /root/miniconda/envs/python310_torch29_cuda/lib/python3.10/site-packages/torch_xmlir/libbkcl.so loaded
+[35mSYMBOL_REWRITE [0m[32mtorch success[0m
+[35mSYMBOL_REWRITE [0m[32mtransformers success[0m
+<frozen importlib._bootstrap_external>:1184: FutureWarning: The cuda.cudart module is deprecated and will be removed in a future release, please switch to use the cuda.bindings.runtime module instead.
+<frozen importlib._bootstrap_external>:1184: FutureWarning: The cuda.nvrtc module is deprecated and will be removed in a future release, please switch to use the cuda.bindings.nvrtc module instead.
+[2026-07-19 17:17:13] INFO __init__.py:34: Redirected sglang.srt.layers.attention.nsa_backend -> sglang_kunlun._nsa_backend_impl
+[2026-07-19 17:17:13] INFO attention_registry.py:27: Registered 'kunlun' attention backend factory
+[2026-07-19 17:17:13] INFO __init__.py:31: Kunlun: fla.utils.get_available_device -> 'cuda'

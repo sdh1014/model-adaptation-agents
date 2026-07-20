@@ -1,0 +1,27 @@
+{
+  "action": "attempt-outcome",
+  "allowed_paths": [
+    "sglang-kunlun/sglang_kunlun/hooks/layers/quantization/unquant.py"
+  ],
+  "attempt": 1,
+  "attempt_history": "/workspace/baidu/aicapx/sglang/.git/model-adaptation-repair/99998417e50bfcca579a64e229b295454fbd00a3a5633f9a656d374e557aaa50",
+  "baseline_revision": "546ad8c682392922792bbbfe53a8bf575545f118",
+  "candidate_result_sha256": "74262816dd69fd700d629c4cdac85b33eb91965ff7efa4eb3d7ab700b363d99b",
+  "hypothesis": "unquant.py swiglu ignores gemm1 clamp; pass limit=layer.moe_runner_config.gemm1_clamp_limit into kunlun_ops.swiglu via a production callable to add the missing SiLU/linear clamp",
+  "modified_paths": [
+    "sglang-kunlun/sglang_kunlun/hooks/layers/quantization/unquant.py"
+  ],
+  "passed": true,
+  "patch_sha256": "2b00c8becd619c36cfbab3dbf5537cbc897652efefc7b4662a72dd6a6e0aaf34",
+  "recovery_action": "RETAIN_PATCH",
+  "replay_evidence_sha256": "945e05dc442372cb2e0bd77451e920f70b1e2a69735df609758c9f2572874be7",
+  "replay_result_sha256": "a942332b6c0c1e4c6c2836225d84435fb2c02b51a7019139a13786714c35dc6d",
+  "schema": "repair-outcome/v1",
+  "spec_binding": {
+    "contract_data_sha256": "f683ea62427279da3c899a3ef0afcfa1d16298b7424154664c7e3fac9b13d938",
+    "contract_revision": 5,
+    "spec_id": "step3p7-flash-p800-demo"
+  },
+  "tool": "workspace_guard.py",
+  "worktree": "/workspace/baidu/aicapx/sglang"
+}

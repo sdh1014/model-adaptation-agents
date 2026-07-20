@@ -1,0 +1,42 @@
+{
+  "actual_tensors_saved": false,
+  "checked_shape_count": 3,
+  "checked_shapes": [
+    {
+      "passed": true,
+      "shape_id": "c470e627c339ba879391e5a73d580b8c01cbd3d9f73e21e22270dfdf7f5f3b90"
+    },
+    {
+      "passed": true,
+      "shape_id": "36d6b394385e539174b2c81dc84e34d2ad4df470b290c06143fea3ed49f41276"
+    },
+    {
+      "passed": true,
+      "shape_id": "0848f7a6fecb9eca717b50e179a283753eaa57095b30e01dd95f604e4b2c4cde"
+    }
+  ],
+  "errors": [],
+  "execution_site": "p800",
+  "failed_shape_count": 0,
+  "invocation_target": "repair-kernel-call/v1:sglang_kunlun.hooks.layers.quantization.unquant:apply_gemm1_swiglu_clamp",
+  "operator_id": "sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul",
+  "passed": true,
+  "precision_gate": {
+    "atol": 0.01,
+    "check_stride": false,
+    "comparator": "torch.testing.assert_close",
+    "require_exact_structure": true,
+    "require_finite": true,
+    "require_same_dtype": true,
+    "rtol": 0.02
+  },
+  "sample_files_sha256": "38e332423445ad4b4f1b0be934501a0f02ab4751d3f9948ce7916334e779d8ff",
+  "schema": "kernel-call-replay-result/v1",
+  "spec_binding": {
+    "contract_data_sha256": "f683ea62427279da3c899a3ef0afcfa1d16298b7424154664c7e3fac9b13d938",
+    "contract_revision": 5,
+    "spec_id": "step3p7-flash-p800-demo"
+  },
+  "tensor_parallel_size": 8,
+  "tp_rank": 0
+}

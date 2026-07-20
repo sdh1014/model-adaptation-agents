@@ -31,6 +31,7 @@ FORWARD_HOOK_TARGET = "sglang.srt.models.step3p5.Step3p5ForCausalLM.forward"
 MLP_HOOK_TARGET = "sglang.srt.models.step3p5.Step3p5MLP.forward"
 SWIGLU_CLAMP_HOOK_TARGET = SWIGLU_CLAMP_OPERATOR_ID
 KUNLUN_SWIGLU_TARGET = "kunlun_ops.swiglu"
+REPAIR_KERNEL_CALL_TARGET_PREFIX = "repair-kernel-call/v1"
 MODEL_RELATIVE_PATH = "python/sglang/srt/models/step3p5.py"
 SWIGLU_CLAMP_SOURCE_RELATIVE_PATH = (
     "python/sglang/srt/layers/moe/moe_runner/triton_utils/fused_moe.py"
@@ -60,6 +61,41 @@ def checkpoint_metadata(checkpoint_id: str, config_digest: str) -> dict[str, str
         "revision": revision,
         "config_digest": config_digest,
     }
+
+
+def normalize_repair_entry(entry: Any) -> str:
+    """Validate an Agent-selected ``module:callable`` repair Kernel Call entry.
+
+    The flow does not preset the module, function name or signature. The Agent
+    picks the production callable inside the fixed-revision SGLang-Kunlun
+    worktree that carries the repaired original Kernel Call; this only checks the
+    reference is a well-formed dotted ``module:callable`` string.
+    """
+
+    if not isinstance(entry, str) or entry.count(":") != 1:
+        raise ValueError("repair entry must use '<module>:<callable>'")
+    module_name, _, attribute = entry.partition(":")
+    parts = module_name.split(".")
+    if not module_name or any(not segment.isidentifier() for segment in parts):
+        raise ValueError("repair entry module must be a dotted import path")
+    if not attribute.isidentifier():
+        raise ValueError("repair entry callable must be a valid identifier")
+    return entry
+
+
+def repair_invocation_target(entry: str) -> str:
+    """Return the invocation_target string for an Agent-selected repair entry."""
+
+    return f"{REPAIR_KERNEL_CALL_TARGET_PREFIX}:{normalize_repair_entry(entry)}"
+
+
+def parse_repair_invocation_target(target: Any) -> str:
+    """Return the ``module:callable`` entry from a repair invocation_target."""
+
+    prefix = f"{REPAIR_KERNEL_CALL_TARGET_PREFIX}:"
+    if not isinstance(target, str) or not target.startswith(prefix):
+        raise ValueError("invocation_target is not a repair Kernel Call target")
+    return normalize_repair_entry(target[len(prefix):])
 
 
 def shape_id_for(shape: Any) -> str:
