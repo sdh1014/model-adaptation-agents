@@ -229,7 +229,7 @@ class Ticket27P800KunlunEnvironmentTest(unittest.TestCase):
             self.assertIn("按需", text)
 
         spec = SPEC.read_text(encoding="utf-8")
-        self.assertIn("- `state_revision`: `48`", spec)
+        self.assertIn("- `state_revision`: `49`", spec)
         self.assertIn(
             "| `41` | 固定 P800 Kunlun 启动基线",
             spec,

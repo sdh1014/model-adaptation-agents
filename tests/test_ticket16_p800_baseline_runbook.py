@@ -84,12 +84,12 @@ class Ticket16P800BaselineRunbookTest(unittest.TestCase):
     def test_current_state_reopens_under_revision_6_queue_contract(self) -> None:
         spec = SPEC.read_text(encoding="utf-8")
 
-        self.assertIn("- `state_revision`: `48`", spec)
+        self.assertIn("- `state_revision`: `49`", spec)
         self.assertIn("- `status`: `ACTIVE`", spec)
         self.assertIn("- `phase`: `CUDA_CAPTURE`", spec)
-        self.assertIn("- `execution_site`: `CUDA`", spec)
+        self.assertIn("- `execution_site`: `SOURCE`", spec)
         self.assertIn(
-            "- `last_run`: `runs/formal-cuda-runbook-r6-001`",
+            "- `last_run`: `runs/formal-cuda-runbook-r6-002`",
             spec,
         )
         self.assertIn(

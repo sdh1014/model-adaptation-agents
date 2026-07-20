@@ -217,13 +217,13 @@ Agent 每次动作前完整读取 Contract 与本区；每次动作结束后立�
 ### Current
 
 - `observed_contract_revision`: `6`
-- `state_revision`: `48`
+- `state_revision`: `49`
 - `status`: `ACTIVE`
 - `phase`: `CUDA_CAPTURE`
-- `execution_site`: `CUDA`
+- `execution_site`: `SOURCE`
 - `active_operator`: `sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul`
-- `last_completed_action`: `revision_6_formal_cuda_capture_runbook_generated_and_reviewed`
-- `last_run`: `runs/formal-cuda-runbook-r6-001`
+- `last_completed_action`: `revision_6_formal_cuda_capture_runbook_review_corrected`
+- `last_run`: `runs/formal-cuda-runbook-r6-002`
 - `next_action`: `在 CUDA 机器严格执行 model-adaptation/references/formal-cuda-capture-r6.md；先完成环境 preflight，通过后在同一 reservation 内完成唯一正式 Session、全部 Golden self-replay 和 Handoff Bundle build/verify`
 
 规则：`ACTIVE` 时 `next_action` 必须恰好一条；`WAITING` 时必须是一条人工动作；`PASS`、`BLOCKED`、`NEEDS_HUMAN` 时必须为 `none`。
@@ -318,7 +318,7 @@ replay。`finish-attempt` 只有收到完整列表且全部通过才保留新 pa
 | P800 Kunlun required launch environment and Agent-selected optional policy implemented at SOURCE | `PASS` | `runs/p800-launch-environment-tool-001/result.json` |
 | gap-driven multi-Golden bundle build and verification implemented and reviewed at SOURCE | `PASS` | `runs/gap-driven-handoff-tool-001/result.json`; `runs/gap-driven-handoff-tool-002/result.json`; `runs/gap-driven-handoff-tool-003/result.json` |
 | revision 6 CUDA collector integration validated without consuming the formal Session | `PASS` | `runs/cuda-preflight-r6-002/result.json` |
-| revision 6 formal CUDA runbook generated and reviewed at SOURCE | `PASS` | `runs/formal-cuda-runbook-r6-001/result.json` |
+| revision 6 formal CUDA runbook generated and corrected after SOURCE review | `PASS` | `runs/formal-cuda-runbook-r6-002/result.json` |
 | P800 replay adapter resolved from the original Kunlun call site for each active operator | `PENDING` | `null` |
 | revision 6 CUDA environment preflight passed without reading Scan or operators | `PENDING` | `null` |
 | one revision 6 CUDA Session and at most three samples per operator | `PENDING` | `null` |
@@ -390,5 +390,6 @@ replay。`finish-attempt` 只有收到完整列表且全部通过才保留新 pa
 | `46` | 用户纠正 preflight 职责：preflight 只验证环境可用性，不应依赖具体算子。`runs/cuda-preflight-r6-001/002` 保留并重新归类为历史采集集成验证；前者暴露 seam 源解析工具问题，后者证明五个 collector、shape 去重、rank 过滤与 CUDA self-replay 集成通过，均不代表 Operator Gap。当前 `preflight-session` 改为不接收 Scan/operator，只检查 CUDA Torch、TP8 设备数、BF16、固定 SGLang worktree、插件入口和 P800 环境变量污染。正式 runbook 在 Session 占位前运行该环境检查，通过后由同一 CUDA Agent 继续正式采集，不增加中途回传 | `runs/preflight-responsibility-correction-001/result.json`、`runs/cuda-preflight-r6-002/result.json`、`runs/cuda-preflight-r6-001/result.json` |
 | `47` | 正式代码与 Spec 复审收口：公开 `--mode preflight` 只运行独立的环境检查模块，不接收 Scan/operator；旧算子 Hook、shape、rank 过滤和 self-replay 入口改名为 `--mode capture-adapter-validation`，且只允许历史 Contract revision 1 至 5，revision 6 会在创建 Run 前拒绝。当前还没有 revision 6 正式 runbook，因此唯一下一步先在 SOURCE 生成并审查它，再交给 CUDA 机器执行 | `runs/preflight-responsibility-review-001/result.json` |
 | `48` | revision 6 正式 CUDA runbook 已在 SOURCE 生成并审查：先执行与算子无关的环境 preflight，再从 `scan-007` 动态准备唯一 Session；远端 reservation 成功后，同一 CUDA Agent 启动一次 TP8/BF16/eager 模型，发送固定文本与单图请求，逐项记录并 self-replay 全部 Golden，最后动态构建和验证 Handoff Bundle。SOURCE 未执行 preflight、模型 Session 或 Bundle | `runs/formal-cuda-runbook-r6-001/result.json` |
+| `49` | SOURCE 双轴审查整改完成：CUDA self-replay 从每个 Golden 的 capture config 读取五个 Scan 驱动 adapter；环境 preflight、reservation 和 Session 失败都会推进 Working State；每次模型启动使用独立 launch 证据目录；失败判定同时检查严格绑定当前 capture config 的完整 state 与 samples 目录全部文件，只有可信零样本 state 才归档并允许同一 reservation 重试，其余情况进入 BLOCKED；最终回传动态引用实际 ENV Run。当前动作仍在 SOURCE，未执行 CUDA preflight、模型 Session 或 Bundle | `runs/formal-cuda-runbook-r6-002/result.json` |
 
 <!-- AGENT-WRITABLE WORKING STATE: END -->

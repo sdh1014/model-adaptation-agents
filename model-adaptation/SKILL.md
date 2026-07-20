@@ -211,9 +211,10 @@ adapter 完成后，为当前 Contract revision 生成并审查新的正式 Capt
 和 [references/formal-cuda-capture.md](references/formal-cuda-capture.md)
 只绑定 revision 5，当前 revision 不得直接执行。revision 6 当前正式入口是
 [references/formal-cuda-capture-r6.md](references/formal-cuda-capture-r6.md)；
-当 Working State 为 `execution_site: CUDA` 时，必须严格按该页执行，不自行重排
-preflight、reservation、正式 Session、self-replay、Bundle build/verify 或最终
-回传的顺序。
+当 Working State 的唯一 `next_action` 指向该页并要求转到 CUDA 机器时，必须严格
+按该页执行，不自行重排 preflight、reservation、正式 Session、self-replay、
+Bundle build/verify 或最终回传的顺序。`execution_site` 记录最近完成动作所在位置，
+不能用它表示下一动作将在哪台机器执行。
 
 preflight 只验证正式采集所需的环境是否可用，不验证任何具体算子。它只检查：
 
@@ -227,7 +228,7 @@ preflight 只验证正式采集所需的环境是否可用，不验证任何具�
 revision 6 的环境 preflight 入口是：
 
 ```text
-python3 model-adaptation/scripts/capture_golden.py \
+python model-adaptation/scripts/capture_golden.py \
   --spec migration-spec.md \
   --run-dir runs/cuda-environment-preflight-r6-001 \
   --mode preflight \
@@ -254,13 +255,14 @@ self-replay，不能再称为环境 preflight，也不要求重复执行。前�
 baseline/candidate 参数装配。adapter 缺失必须报告为流程能力待补齐，不能记成
 Operator Gap。
 
-如果 Working State 的 `execution_site` 是 `CUDA`，但当前会话不在用户指定的 CUDA
-机器，不创建 preflight Run，也不运行合成替代品。只报告 runbook 中的命令和
-GitHub evidence 分支回传要求，保持 Working State 不变并停止本次执行。
+如果 Working State 的唯一 `next_action` 要求在 CUDA 机器执行，但当前会话不在
+用户指定的 CUDA 机器，不创建 preflight Run，也不运行合成替代品。只报告
+runbook 中的命令和 GitHub evidence 分支回传要求，保持 Working State 不变并停止
+本次执行。
 
 环境 preflight 通过后，继续执行当前 revision 新生成且绑定新 Scan Run、全部
-adapter Run 和全部 capture plan 的正式 runbook。revision 6 runbook 已生成并完成
-SOURCE 审查；此时不再返回 SOURCE 重新设计。正式
+adapter Run 和全部 capture plan 的正式 runbook。revision 6 runbook 已完成
+SOURCE 修正复审；此时不再返回 SOURCE 重新设计。正式
 Session 启动前仍先通过 GitHub 提交占位；模型停止后不再为了审查样本做一次中途
 回传。同一个 CUDA Agent 继续在本地完成样本审查、临时 Spec、bundle build 和
 verify，全部通过后再一次性回传 Session、Golden、record-samples、bundle 和审查

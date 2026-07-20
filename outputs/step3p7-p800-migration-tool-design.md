@@ -2,12 +2,12 @@
 
 > 当前版本：Contract revision 6
 >
-> 当前状态：`ACTIVE / CUDA_CAPTURE`，`execution_site: CUDA`，当前扫描为
+> 当前状态：`ACTIVE / CUDA_CAPTURE`，`execution_site: SOURCE`，当前扫描为
 > `runs/scan-007`
 >
 > 当前采集准备：`runs/capture-session-tool-001` 已生成一个五算子、文本加单图的
 > session config；`runs/cuda-preflight-r6-002` 已证明采集器集成，独立的环境
-> preflight 尚未执行；revision 6 正式 runbook 已生成并完成 SOURCE 审查，下一步
+> preflight 尚未执行；revision 6 正式 runbook 已完成 SOURCE 修正复审，下一步
 > 转到 CUDA 机器并在正式 Session 占位前运行该环境检查
 >
 > 证据边界：revision 5 的单算子 CUDA/P800 数值证据保留为历史；`35aa72e`
@@ -540,8 +540,8 @@ P800 PASS；需要设备验证时仍应形成新 Run。
 
 ## 14. revision 6 当前状态与自动续行
 
-当前 Working State 为 revision 48 `ACTIVE / CUDA_CAPTURE`，执行位置已转到
-`CUDA`。`runs/scan-007`
+当前 Working State 为 revision 49 `ACTIVE / CUDA_CAPTURE`，最近完成动作仍在
+`SOURCE`；唯一下一步要求转到 CUDA。`runs/scan-007`
 已固定五个缺口及同一 capture plan；`runs/multimodal-capture-tool-001` 已在
 SOURCE 实现一个 session config、五个原调用 Hook、逐算子 rank-0 collector 和
 CUDA self-replay 编排；`runs/p800-launch-environment-tool-001` 又固定了 P800
@@ -551,7 +551,7 @@ Manifest v2；`runs/gap-driven-handoff-tool-002` 补齐同一 Session/进程、�
 元数据和 revision 6 禁止回退 v1；`runs/gap-driven-handoff-tool-003` 再补齐
 正式 Session 结果和固定请求绑定。CUDA 回传的 `runs/cuda-preflight-r6-001` 与
 `runs/cuda-preflight-r6-002` 已重新归类为历史采集集成验证，不再充当环境
-preflight。revision 6 正式 runbook 已生成并完成 SOURCE 审查，见
+preflight。revision 6 正式 runbook 已完成 SOURCE 修正复审，见
 `model-adaptation/references/formal-cuda-capture-r6.md`；下一步转到 CUDA 机器，
 先做不读取算子的环境检查，通过后再准备并提交同一 reservation 的 Session 占位，
 随后启动一次真实 TP8 Capture。正式一次性 Session 和真实

@@ -11,7 +11,13 @@ import subprocess
 import sys
 from typing import Any, Dict, Iterable, Optional
 
-from capture_golden import resolve_git_revision, validate_scan_candidate
+from capture_golden import (
+    ADAPTER_NAMES,
+    SUPPORTED_HOOK_TARGETS,
+    find_capture_plan,
+    resolve_git_revision,
+    validate_scan_candidate,
+)
 from _lib.kernel_evidence import (
     KernelEvidenceError,
     validate_kernel_worker_result,
@@ -24,6 +30,8 @@ from _lib.spec_contract import (
     uses_kernel_scan_contract,
 )
 from model_adaptation_capture.contracts import (
+    CONFIG_SCHEMA,
+    KERNEL_CALL_SERIALIZATION,
     KERNEL_CALL_STATE_SCHEMA,
     KERNEL_REPLAY_CONFIG_SCHEMA,
     KUNLUN_SWIGLU_TARGET,
@@ -1054,11 +1062,95 @@ def run_finalize_model_replay(spec_path: Path, run_dir: Path) -> None:
         atomic_write_json(result_path, result)
 
 
+def _load_kernel_capture_config(
+    golden_run: Path,
+    binding: Dict[str, Any],
+    contract: Dict[str, Any],
+    scan_result: Dict[str, Any],
+    operator: Dict[str, Any],
+    operator_id: str,
+    checkpoint: Dict[str, str],
+) -> Optional[Dict[str, Any]]:
+    if contract["contract_revision"] < 6:
+        return None
+    if (
+        operator_id not in SUPPORTED_HOOK_TARGETS
+        or operator_id not in ADAPTER_NAMES
+    ):
+        raise ToolError(
+            f"CUDA replay adapter is not implemented for {operator_id!r}"
+        )
+
+    config = read_json_object(
+        golden_run / "capture-config.json",
+        "Kernel Call capture config",
+    )
+    plan = find_capture_plan(scan_result, operator_id)
+    sample_fields = {
+        "inputs": plan["saved_inputs"],
+        "parameters": plan["saved_parameters"],
+        "non_tensor_args": plan["saved_non_tensor_args"],
+        "outputs": plan["saved_outputs"],
+    }
+    checks = {
+        "schema": CONFIG_SCHEMA,
+        "adapter": ADAPTER_NAMES[operator_id],
+        "spec_binding": binding,
+        "operator_id": operator_id,
+        "activation_guard": operator["activation_guard"],
+        "model_path": "target",
+        "max_shapes": contract["limits"]["max_shapes_per_operator"],
+        "tensor_parallel_size": contract["runtime"]["tensor_parallel_size"],
+        "tp_rank": contract["sample_policy"]["capture_tp_rank"],
+        "serialization": KERNEL_CALL_SERIALIZATION,
+        "capture_device_type": "cuda",
+        "dtype": contract["runtime"]["dtype"],
+        "checkpoint": checkpoint,
+        "precision_gate": contract["precision_gate"],
+        "hook_target": SUPPORTED_HOOK_TARGETS[operator_id],
+        "boundary": operator["boundary"],
+        "sample_fields": sample_fields,
+        "replay": {
+            "mode": "standalone-kernel-call",
+            "cuda_target": plan["hook_target"],
+            "p800_target": (
+                KUNLUN_SWIGLU_TARGET
+                if operator_id == SWIGLU_CLAMP_OPERATOR_ID
+                else None
+            ),
+            "weights_in_golden_sample": False,
+        },
+    }
+    for field, expected in checks.items():
+        if config.get(field) != expected:
+            raise ToolError(
+                f"Kernel Call capture config {field} has drifted"
+            )
+    if plan["hook_target"] != SUPPORTED_HOOK_TARGETS[operator_id]:
+        raise ToolError("Kernel Call capture target has drifted from Scan")
+    try:
+        configured_run = Path(config["run_dir"]).resolve()
+        session_config = Path(config["session_config"])
+    except (KeyError, TypeError) as error:
+        raise ToolError("Kernel Call capture paths are invalid") from error
+    if configured_run != golden_run:
+        raise ToolError("Kernel Call capture config run_dir has drifted")
+    if not session_config.is_absolute() or session_config.name != "capture-config.json":
+        raise ToolError("Kernel Call capture session path is invalid")
+    return config
+
+
 def _load_kernel_capture_state(
     golden_run: Path,
     binding: Dict[str, Any],
     checkpoint: Dict[str, str],
+    operator_id: str,
     *,
+    tensor_parallel_size: int,
+    tp_rank: int,
+    max_shapes: int,
+    sample_fields: Dict[str, list[str]],
+    capture_session_config: Optional[str],
     execution_site: str,
 ) -> Dict[str, Any]:
     state = read_json_object(
@@ -1068,20 +1160,22 @@ def _load_kernel_capture_state(
     checks = {
         "schema": KERNEL_CALL_STATE_SCHEMA,
         "spec_binding": binding,
-        "operator_id": SWIGLU_CLAMP_OPERATOR_ID,
-        "tp_rank": 0,
-        "tensor_parallel_size": 8,
+        "operator_id": operator_id,
+        "tp_rank": tp_rank,
+        "tensor_parallel_size": tensor_parallel_size,
         "checkpoint": checkpoint,
         "loaded_checkpoint": {
             "model_path": checkpoint["model_path"],
             "revision": checkpoint["revision"],
         },
     }
+    if capture_session_config is not None:
+        checks["capture_session_config"] = capture_session_config
     for field, expected in checks.items():
         if state.get(field) != expected:
             raise ToolError(f"Kernel Call capture state {field} has drifted")
     samples = state.get("samples")
-    if not isinstance(samples, list) or not 1 <= len(samples) <= 3:
+    if not isinstance(samples, list) or not 1 <= len(samples) <= max_shapes:
         raise ToolError("Kernel Call capture state requires one to three shapes")
     if state.get("saved_shape_count") != len(samples):
         raise ToolError("Kernel Call saved_shape_count has drifted")
@@ -1097,8 +1191,38 @@ def _load_kernel_capture_state(
             or not isinstance(signature, dict)
         ):
             raise ToolError("Kernel Call sample shape metadata is invalid")
+        signature_checks = {
+            "operator_id": operator_id,
+            "model_path": "target",
+            "tensor_parallel_size": tensor_parallel_size,
+            "tp_rank": tp_rank,
+        }
+        for field, expected in signature_checks.items():
+            if signature.get(field) != expected:
+                raise ToolError(
+                    f"Kernel Call sample signature {field} has drifted"
+                )
+        signature_fields = (
+            ("inputs", "parameters", "non_tensor_args", "outputs")
+            if capture_session_config is not None
+            else ("inputs", "parameters", "non_tensor_args")
+        )
+        for field in signature_fields:
+            values = signature.get(field)
+            if (
+                not isinstance(values, dict)
+                or list(values) != sample_fields[field]
+            ):
+                raise ToolError(
+                    f"Kernel Call sample signature {field} has drifted"
+                )
         try:
-            expected_shape_id = shape_id_for(signature["inputs"]["x"]["shape"])
+            expected_shape_id = shape_id_for(
+                {
+                    name: signature["inputs"][name]["shape"]
+                    for name in sample_fields["inputs"]
+                }
+            )
         except (KeyError, TypeError, ValueError) as error:
             raise ToolError("Kernel Call sample shape metadata has drifted") from error
         if shape_id != expected_shape_id or shape_id in seen_shape_ids:
@@ -1252,10 +1376,8 @@ def run_kernel_replay(
         raise ToolError(
             "standalone Kernel Call replay requires a kernel-scan Contract"
         )
-    if operator_id != SWIGLU_CLAMP_OPERATOR_ID:
-        raise ToolError(f"kernel replay adapter is not implemented for {operator_id!r}")
     scan_result = read_json_object(scan_result_path, "Scan Run result")
-    validate_scan_candidate(
+    operator = validate_scan_candidate(
         contract,
         scan_result,
         operator_id,
@@ -1266,6 +1388,13 @@ def run_kernel_replay(
     if candidate_result is not None and execution_site != "p800":
         raise ToolError(
             "--candidate-result is only valid for P800 candidate replay"
+        )
+    if (
+        execution_site == "p800"
+        and operator_id != SWIGLU_CLAMP_OPERATOR_ID
+    ):
+        raise ToolError(
+            f"P800 replay adapter is not implemented for {operator_id!r}"
         )
     kunlun_revision: Optional[str] = None
     candidate: Optional[Dict[str, Any]] = None
@@ -1307,10 +1436,36 @@ def run_kernel_replay(
     except ValueError as error:
         raise ToolError(str(error)) from error
     golden_run = golden_run.resolve()
+    capture_config = _load_kernel_capture_config(
+        golden_run,
+        binding.as_result_dict(),
+        contract,
+        scan_result,
+        operator,
+        operator_id,
+        checkpoint,
+    )
+    if capture_config is None:
+        sample_fields = {
+            "inputs": ["x"],
+            "parameters": [],
+            "non_tensor_args": ["gemm1_limit"],
+            "outputs": [],
+        }
+        capture_session_config = None
+    else:
+        sample_fields = capture_config["sample_fields"]
+        capture_session_config = capture_config["session_config"]
     state = _load_kernel_capture_state(
         golden_run,
         binding.as_result_dict(),
         checkpoint,
+        operator_id,
+        tensor_parallel_size=contract["runtime"]["tensor_parallel_size"],
+        tp_rank=contract["sample_policy"]["capture_tp_rank"],
+        max_shapes=contract["limits"]["max_shapes_per_operator"],
+        sample_fields=sample_fields,
+        capture_session_config=capture_session_config,
         execution_site=execution_site,
     )
     sample_files_digest = _kernel_sample_files_sha256(
@@ -1334,7 +1489,11 @@ def run_kernel_replay(
                 "Golden self-replay did not check every current sample"
             )
     if execution_site == "cuda":
-        invocation_target = SWIGLU_CLAMP_OPERATOR_ID
+        invocation_target = (
+            capture_config["hook_target"]
+            if capture_config is not None
+            else SWIGLU_CLAMP_OPERATOR_ID
+        )
     else:
         invocation_target = KUNLUN_SWIGLU_TARGET
     worker_environment, launch_environment = _kernel_worker_environment(
@@ -1357,6 +1516,9 @@ def run_kernel_replay(
         "sample_files_sha256": sample_files_digest,
         "allow_active_capture": execution_site == "cuda",
     }
+    if capture_config is not None:
+        config["adapter"] = capture_config["adapter"]
+        config["sample_fields"] = capture_config["sample_fields"]
     if execution_site == "p800":
         config["launch_environment"] = launch_environment
     if candidate is not None:

@@ -19,7 +19,7 @@ unset WORKTREE_STATUS
 
 export SGLANG_CUDA_WORKTREE=/替换为已有的/sglang-0.5.14路径
 export SCAN_RESULT=runs/scan-007/result.json
-export ENV_RUN=runs/cuda-environment-preflight-r6-001
+export ENV_RUN="${ENV_RUN:-runs/cuda-environment-preflight-r6-001}"
 export SESSION_RUN=runs/cuda-formal-session-r6-001
 export RECORD_ROOT=runs/cuda-golden-record-r6-001
 export PLAN_RUN=runs/handoff-plan-r6-001
@@ -51,7 +51,8 @@ test -z "$REMOTE_EVIDENCE"
 unset REMOTE_EVIDENCE
 ```
 
-任何检查失败都停止，不换 Run 名或 evidence 分支绕过。
+任何检查失败都停止。只有文末环境失败恢复流程可以从 Working State 指定一个新的
+不可变 `$ENV_RUN`；正式 `SESSION_RUN` 和 evidence 分支不得换名绕过。
 
 ## 2. 只做环境 preflight
 
@@ -91,7 +92,8 @@ print("revision 6 CUDA environment preflight: PASS")
 PY
 ```
 
-失败时不要准备或占位正式 Session，按文末“失败边界”回传环境证据。
+失败时不要准备或占位正式 Session，必须执行文末“环境失败”处理，不能让
+`set -e` 退出后仍把 Spec 留在旧状态。
 
 ## 3. 从 Scan 准备唯一 Session
 
@@ -233,8 +235,88 @@ value = {
     json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
 )
 PY
+```
 
-git add "$ENV_RUN" "$SESSION_RUN"
+`session-start.json` 已形成后，先把 Working State 同步到这个 reservation。
+`execution_site` 在这里记录为 CUDA；此前若已有环境失败证据，revision 会在其基础上
+继续递增：
+
+```bash
+SESSION_RUN="$SESSION_RUN" python - <<'PY'
+import os
+import re
+from pathlib import Path
+
+
+def field_value(text, name):
+    matches = re.findall(
+        rf"^- `{re.escape(name)}`: `([^`]*)`$",
+        text,
+        flags=re.MULTILINE,
+    )
+    assert len(matches) == 1, name
+    return matches[0]
+
+
+def set_field(text, name, value):
+    pattern = rf"^- `{re.escape(name)}`: `[^`]*`$"
+    replacement = f"- `{name}`: `{value}`"
+    updated, count = re.subn(
+        pattern,
+        replacement,
+        text,
+        count=1,
+        flags=re.MULTILINE,
+    )
+    assert count == 1, name
+    return updated
+
+
+spec_path = Path("migration-spec.md")
+source = spec_path.read_text()
+session_run = os.environ["SESSION_RUN"]
+assert (Path(session_run) / "session-start.json").is_file()
+current_revision = int(field_value(source, "state_revision"))
+assert current_revision >= 49
+assert field_value(source, "status") == "ACTIVE"
+assert field_value(source, "phase") == "CUDA_CAPTURE"
+assert field_value(source, "execution_site") in {"SOURCE", "CUDA"}
+assert field_value(source, "capture_session_id") == "null"
+assert field_value(source, "session_status") == "NOT_STARTED"
+
+target_revision = current_revision + 1
+updates = {
+    "state_revision": str(target_revision),
+    "execution_site": "CUDA",
+    "last_completed_action": "revision_6_cuda_capture_session_reserved",
+    "last_run": session_run,
+    "next_action": (
+        "在同一个 reservation、SESSION_RUN 和 evidence 分支启动一次 "
+        "TP8/BF16/eager 模型，完成全部 Golden、self-replay 和 Handoff "
+        "Bundle build/verify"
+    ),
+    "capture_session_id": session_run,
+    "session_status": "ACTIVE",
+}
+for name, value in updates.items():
+    source = set_field(source, name, value)
+
+decision = (
+    f"| `{target_revision}` | revision 6 正式 CUDA Session 已在 GitHub "
+    "evidence 分支占位；尚未产生 Golden Sample，只允许在同一个 "
+    "reservation 内继续 | "
+    f"`{session_run}/session-start.json` |"
+)
+marker = "\n<!-- AGENT-WRITABLE WORKING STATE: END -->"
+assert marker in source
+source = source.replace(marker, "\n" + decision + "\n" + marker, 1)
+temporary = spec_path.with_suffix(".md.next")
+temporary.write_text(source)
+os.replace(temporary, spec_path)
+print("reserve_revision_6_working_state=", target_revision)
+PY
+
+git add migration-spec.md "$ENV_RUN" "$SESSION_RUN"
 git diff --cached --check
 git commit -m "evidence: reserve revision 6 CUDA capture session"
 RESERVATION_PUSH_OUTPUT="$(
@@ -256,7 +338,30 @@ unset RESERVATION_PUSH_OUTPUT
 
 ## 5. 启动真实 TP8/BF16/eager 服务
 
+每次启动都用当前 Working State revision 创建新目录。零样本失败后的同
+reservation 重试会先递增 revision，因此不会覆盖之前已经提交的日志或请求证据：
+
 ```bash
+LAUNCH_STATE_REVISION="$(
+python - <<'PY'
+import re
+from pathlib import Path
+
+source = Path("migration-spec.md").read_text()
+matches = re.findall(
+    r"^- `state_revision`: `([0-9]+)`$",
+    source,
+    flags=re.MULTILINE,
+)
+assert len(matches) == 1
+print(matches[0])
+PY
+)"
+export LAUNCH_STATE_REVISION
+export LAUNCH_EVIDENCE_DIR="$SESSION_RUN/launch-$LAUNCH_STATE_REVISION"
+test ! -e "$LAUNCH_EVIDENCE_DIR"
+mkdir "$LAUNCH_EVIDENCE_DIR"
+
 export MODEL_ADAPTATION_CAPTURE_CONFIG="$PWD/$SESSION_RUN/capture-config.json"
 export SGLANG_PLUGINS=model_adaptation_capture
 export PYTHONPATH="$PWD/model-adaptation/scripts:$SGLANG_CUDA_WORKTREE/python${PYTHONPATH:+:$PYTHONPATH}"
@@ -271,7 +376,7 @@ python -m sglang.launch_server \
   --cuda-graph-backend-prefill disabled \
   --host 127.0.0.1 \
   --port 30000 \
-  >"$SESSION_RUN/server.log" 2>&1 &
+  >"$LAUNCH_EVIDENCE_DIR/server.log" 2>&1 &
 export SERVER_PID=$!
 ```
 
@@ -298,16 +403,17 @@ unset SERVER_READY
 服务健康后，只保存本流程需要的运行信息：
 
 ```bash
-curl -fsS "$BASE_URL/server_info" >"$SESSION_RUN/server-info.raw.json"
+curl -fsS "$BASE_URL/server_info" \
+  >"$LAUNCH_EVIDENCE_DIR/server-info.raw.json"
 
-SESSION_RUN="$SESSION_RUN" MODEL_ID="$MODEL_ID" \
+LAUNCH_EVIDENCE_DIR="$LAUNCH_EVIDENCE_DIR" MODEL_ID="$MODEL_ID" \
 MODEL_REVISION="$MODEL_REVISION" python - <<'PY'
 import json
 import os
 from pathlib import Path
 
-session = Path(os.environ["SESSION_RUN"])
-raw = json.loads((session / "server-info.raw.json").read_text())
+launch = Path(os.environ["LAUNCH_EVIDENCE_DIR"])
+raw = json.loads((launch / "server-info.raw.json").read_text())
 checks = {
     "model_path": os.environ["MODEL_ID"],
     "revision": os.environ["MODEL_REVISION"],
@@ -331,12 +437,12 @@ profile = {
     "moe_runner_backend_argument": raw["moe_runner_backend"],
     "sglang_version": raw.get("version"),
 }
-(session / "runtime-profile.json").write_text(
+(launch / "runtime-profile.json").write_text(
     json.dumps(profile, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
 )
 PY
 
-rm "$SESSION_RUN/server-info.raw.json"
+rm "$LAUNCH_EVIDENCE_DIR/server-info.raw.json"
 ```
 
 ## 6. 发送 Session 配置中的固定文本和单图请求
@@ -345,12 +451,14 @@ rm "$SESSION_RUN/server-info.raw.json"
 `request-01.json` 和 `request-02.json`：
 
 ```bash
-SESSION_RUN="$SESSION_RUN" python - <<'PY'
+SESSION_RUN="$SESSION_RUN" \
+LAUNCH_EVIDENCE_DIR="$LAUNCH_EVIDENCE_DIR" python - <<'PY'
 import json
 import os
 from pathlib import Path
 
 session = Path(os.environ["SESSION_RUN"])
+launch = Path(os.environ["LAUNCH_EVIDENCE_DIR"])
 config = json.loads((session / "capture-config.json").read_text())
 requests = config["requests"]
 assert [item["input_mode"] for item in requests] == [
@@ -358,7 +466,7 @@ assert [item["input_mode"] for item in requests] == [
     "single-image",
 ]
 for index, item in enumerate(requests, start=1):
-    (session / f"request-{index:02d}.json").write_text(
+    (launch / f"request-{index:02d}.json").write_text(
         json.dumps(
             item["request"],
             ensure_ascii=False,
@@ -370,8 +478,8 @@ for index, item in enumerate(requests, start=1):
 PY
 
 for request in \
-  "$SESSION_RUN/request-01.json" \
-  "$SESSION_RUN/request-02.json"
+  "$LAUNCH_EVIDENCE_DIR/request-01.json" \
+  "$LAUNCH_EVIDENCE_DIR/request-02.json"
 do
   response="${request/request-/response-}"
   curl -fsS \
@@ -427,7 +535,8 @@ unset ordinal operator_id golden_run record_run
 
 ```bash
 SESSION_RUN="$SESSION_RUN" RECORD_ROOT="$RECORD_ROOT" \
-SCAN_RESULT="$SCAN_RESULT" python - <<'PY'
+SCAN_RESULT="$SCAN_RESULT" \
+LAUNCH_EVIDENCE_DIR="$LAUNCH_EVIDENCE_DIR" python - <<'PY'
 import hashlib
 import json
 import os
@@ -445,7 +554,12 @@ config_path = session / "capture-config.json"
 config = json.loads(config_path.read_text())
 scan = json.loads(scan_path.read_text())
 start = json.loads((session / "session-start.json").read_text())
-runtime = json.loads((session / "runtime-profile.json").read_text())
+launch = Path(os.environ["LAUNCH_EVIDENCE_DIR"]).resolve()
+assert launch.parent == session
+runtime = json.loads((launch / "runtime-profile.json").read_text())
+for index in (1, 2):
+    assert (launch / f"request-{index:02d}.json").is_file()
+    assert (launch / f"response-{index:02d}.json").is_file()
 
 expected_ids = [
     item["operator_id"]
@@ -519,6 +633,7 @@ formal = {
     ],
     "capture_process_id": capture_process_id,
     "goldens": goldens,
+    "launch_evidence_dir": os.environ["LAUNCH_EVIDENCE_DIR"],
     "runtime_profile": runtime,
     "bundle_status": "NOT_BUILT",
 }
@@ -532,8 +647,9 @@ PY
 
 ## 8. 生成只供 Bundle 使用的 WAITING Spec
 
-当前 `migration-spec.md` 仍保持 state revision 48。下面只生成候选 Spec，不提前
-改写当前 Working State；候选只有在 Bundle build 和 verify 都通过后才会替换它：
+当前 `migration-spec.md` 已记录 reservation，revision 至少为 50。下面基于当前
+revision 动态生成下一版候选 Spec；候选只有在 Bundle build 和 verify 都通过后才会
+替换当前文件：
 
 ```bash
 SESSION_RUN="$SESSION_RUN" ENV_RUN="$ENV_RUN" PLAN_RUN="$PLAN_RUN" \
@@ -542,12 +658,37 @@ VERIFY_RUN="$VERIFY_RUN" python - <<'PY'
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 
 
 def replace_once(text, old, new):
     assert text.count(old) == 1, old
     return text.replace(old, new, 1)
+
+
+def field_value(text, name):
+    matches = re.findall(
+        rf"^- `{re.escape(name)}`: `([^`]*)`$",
+        text,
+        flags=re.MULTILINE,
+    )
+    assert len(matches) == 1, name
+    return matches[0]
+
+
+def set_field(text, name, value):
+    pattern = rf"^- `{re.escape(name)}`: `[^`]*`$"
+    replacement = f"- `{name}`: `{value}`"
+    updated, count = re.subn(
+        pattern,
+        replacement,
+        text,
+        count=1,
+        flags=re.MULTILINE,
+    )
+    assert count == 1, name
+    return updated
 
 
 repo = Path.cwd().resolve()
@@ -557,6 +698,14 @@ formal = json.loads(formal_path.read_text())
 source = Path("migration-spec.md").read_text()
 assert formal["passed"] is True
 assert formal["capture_status"] == "SEALED"
+current_revision = int(field_value(source, "state_revision"))
+assert current_revision >= 50
+assert field_value(source, "status") == "ACTIVE"
+assert field_value(source, "phase") == "CUDA_CAPTURE"
+assert field_value(source, "execution_site") == "CUDA"
+assert field_value(source, "capture_session_id") == os.environ["SESSION_RUN"]
+assert field_value(source, "session_status") == "ACTIVE"
+target_revision = current_revision + 1
 
 relative_goldens = {
     item["operator_id"]: str(
@@ -571,92 +720,37 @@ for item in formal["goldens"]:
     )
     captured_counts[item["operator_id"]] = state["saved_shape_count"]
 
-source = replace_once(
-    source,
-    "- `state_revision`: `48`",
-    "- `state_revision`: `49`",
-)
-source = replace_once(
-    source,
-    "- `status`: `ACTIVE`",
-    "- `status`: `WAITING`",
-)
-source = replace_once(
-    source,
-    "- `phase`: `CUDA_CAPTURE`",
-    "- `phase`: `HANDOFF`",
-)
-source = replace_once(
-    source,
-    "- `last_completed_action`: "
-    "`revision_6_formal_cuda_capture_runbook_generated_and_reviewed`",
-    "- `last_completed_action`: "
-    "`revision_6_cuda_capture_and_bundle_verified`",
-)
-source = replace_once(
-    source,
-    "- `last_run`: `runs/formal-cuda-runbook-r6-001`",
-    f"- `last_run`: `{os.environ['VERIFY_RUN']}`",
-)
-source = replace_once(
-    source,
-    "- `next_action`: `在 CUDA 机器严格执行 "
-    "model-adaptation/references/formal-cuda-capture-r6.md；先完成环境 "
-    "preflight，通过后在同一 reservation 内完成唯一正式 Session、全部 "
-    "Golden self-replay 和 Handoff Bundle build/verify`",
-    "- `next_action`: `人工复制 runs/handoff-build-r6-001/bundle 到 "
-    "P800，先执行 manifest verify；通过后调用模型适配 Skill 进入 gap "
-    "queue baseline`",
-)
-source = replace_once(
-    source,
-    "- `capture_session_id`: `null`",
-    f"- `capture_session_id`: `{os.environ['SESSION_RUN']}`",
-)
-source = replace_once(
-    source,
-    "- `session_status`: `NOT_STARTED`",
-    "- `session_status`: `SEALED`",
-)
-source = replace_once(
-    source,
-    "- `golden_runs`: `{}`",
-    "- `golden_runs`: `"
-    + json.dumps(
+updates = {
+    "state_revision": str(target_revision),
+    "status": "WAITING",
+    "phase": "HANDOFF",
+    "execution_site": "CUDA",
+    "last_completed_action": "revision_6_cuda_capture_and_bundle_verified",
+    "last_run": os.environ["VERIFY_RUN"],
+    "next_action": (
+        "人工复制 runs/handoff-build-r6-001/bundle 到 P800，先执行 "
+        "manifest verify；通过后调用模型适配 Skill 进入 gap queue baseline"
+    ),
+    "session_status": "SEALED",
+    "golden_runs": json.dumps(
         relative_goldens,
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),
-    )
-    + "`",
-)
-source = replace_once(
-    source,
-    "- `captured_sample_counts`: `{}`",
-    "- `captured_sample_counts`: `"
-    + json.dumps(
+    ),
+    "captured_sample_counts": json.dumps(
         captured_counts,
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),
-    )
-    + "`",
-)
-source = replace_once(
-    source,
-    "- `bundle_status`: `NOT_BUILT`",
-    "- `bundle_status`: `VALID`",
-)
-source = replace_once(
-    source,
-    "- `bundle_path`: `null`",
-    f"- `bundle_path`: `{os.environ['BUILD_RUN']}/bundle`",
-)
-source = replace_once(
-    source,
-    "- `manifest_path`: `null`",
-    f"- `manifest_path`: `{os.environ['BUILD_RUN']}/bundle/manifest.json`",
-)
+    ),
+    "bundle_status": "VALID",
+    "bundle_path": f"{os.environ['BUILD_RUN']}/bundle",
+    "manifest_path": f"{os.environ['BUILD_RUN']}/bundle/manifest.json",
+}
+for name, value in updates.items():
+    source = set_field(source, name, value)
+
 for operator_id, golden_run in relative_goldens.items():
     source = replace_once(
         source,
@@ -685,7 +779,8 @@ source = replace_once(
     f"`{os.environ['SESSION_RUN']}/formal-result.json` |",
 )
 decision = (
-    "| `49` | revision 6 唯一正式 CUDA Session 完成文本与单图请求，"
+    f"| `{target_revision}` | revision 6 唯一正式 CUDA Session 完成"
+    "文本与单图请求，"
     "全部 Scan 驱动 Golden 在共同 rank-0 采集进程中封存并 self-replay "
     "通过；同一 CUDA Agent 随后构建并验证动态 Handoff Bundle，进入人工"
     "复制 | "
@@ -709,9 +804,10 @@ result = {
         formal_path.read_bytes()
     ).hexdigest(),
     "target_working_state": {
-        "state_revision": 49,
+        "target_revision": target_revision,
         "status": "WAITING",
         "phase": "HANDOFF",
+        "execution_site": "CUDA",
         "bundle_status": "VALID",
     },
 }
@@ -805,9 +901,23 @@ find \
 cp "$BUNDLE_SPEC" migration-spec.md.next
 cmp -s migration-spec.md.next "$BUILD_RUN/bundle/migration-spec.md"
 mv migration-spec.md.next migration-spec.md
-grep -F -- '- `state_revision`: `49`' migration-spec.md
 grep -F -- '- `status`: `WAITING`' migration-spec.md
 grep -F -- '- `phase`: `HANDOFF`' migration-spec.md
+
+PLAN_RUN="$PLAN_RUN" python - <<'PY'
+import json
+import os
+from pathlib import Path
+
+result = json.loads(
+    (Path(os.environ["PLAN_RUN"]) / "result.json").read_text()
+)
+target = result["target_working_state"]["target_revision"]
+assert f"- `state_revision`: `{target}`" in Path(
+    "migration-spec.md"
+).read_text()
+print("installed Working State revision=", target)
+PY
 ```
 
 将 reservation 之后的全部证据一次性追加到原分支：
@@ -826,12 +936,12 @@ git push origin "$EVIDENCE_BRANCH"
 
 回传下面五项后停止，不在 CUDA 机器开始 P800 replay：
 
-```text
-evidence branch: evidence/cuda-formal-capture-r6-001
-environment run: runs/cuda-environment-preflight-r6-001
-session run: runs/cuda-formal-session-r6-001
-bundle: runs/handoff-build-r6-001/bundle
-result: PASS
+```bash
+printf 'evidence branch: %s\n' "$EVIDENCE_BRANCH"
+printf 'environment run: %s\n' "$ENV_RUN"
+printf 'session run: %s\n' "$SESSION_RUN"
+printf 'bundle: %s/bundle\n' "$BUILD_RUN"
+printf 'result: PASS\n'
 ```
 
 ## 失败边界
@@ -839,30 +949,392 @@ result: PASS
 ### 环境失败
 
 环境 preflight 失败时不创建正式 Session、不生成 Session 配置，也不占位正式
-evidence 分支。保留 `$ENV_RUN`；若需要 GitHub 回传，只为环境证据创建
-`evidence/cuda-environment-preflight-r6-001`，随后停止。环境失败不能记作
-Operator Gap。
+Session evidence 分支。保留不可变 `$ENV_RUN`，把失败动作和下一个新 ENV Run
+写入 Working State，再只为环境证据创建或续用
+`evidence/cuda-environment-preflight-r6-001`。环境失败不能记作 Operator Gap。
+
+```bash
+ENV_RUN="$ENV_RUN" python - <<'PY'
+import json
+import os
+import re
+from pathlib import Path
+
+
+def field_value(text, name):
+    matches = re.findall(
+        rf"^- `{re.escape(name)}`: `([^`]*)`$",
+        text,
+        flags=re.MULTILINE,
+    )
+    assert len(matches) == 1, name
+    return matches[0]
+
+
+def set_field(text, name, value):
+    pattern = rf"^- `{re.escape(name)}`: `[^`]*`$"
+    replacement = f"- `{name}`: `{value}`"
+    updated, count = re.subn(
+        pattern,
+        replacement,
+        text,
+        count=1,
+        flags=re.MULTILINE,
+    )
+    assert count == 1, name
+    return updated
+
+
+environment_run = Path(os.environ["ENV_RUN"])
+result_path = environment_run / "result.json"
+result = json.loads(result_path.read_text())
+assert result["action"] == "environment-preflight"
+assert result["passed"] is False
+assert result["preflight_status"] == "PREFLIGHT_FAILED"
+assert result["consumes_capture_session"] is False
+assert "operator_id" not in result
+
+pattern = re.compile(r"cuda-environment-preflight-r6-([0-9]{3})")
+ordinals = []
+for path in Path("runs").glob("cuda-environment-preflight-r6-[0-9][0-9][0-9]"):
+    match = pattern.fullmatch(path.name)
+    if match:
+        ordinals.append(int(match.group(1)))
+current_match = pattern.fullmatch(environment_run.name)
+assert current_match is not None
+assert int(current_match.group(1)) in ordinals
+next_environment_run = (
+    f"runs/cuda-environment-preflight-r6-{max(ordinals) + 1:03d}"
+)
+assert not Path(next_environment_run).exists()
+
+spec_path = Path("migration-spec.md")
+source = spec_path.read_text()
+current_revision = int(field_value(source, "state_revision"))
+assert current_revision >= 49
+assert field_value(source, "status") == "ACTIVE"
+assert field_value(source, "phase") == "CUDA_CAPTURE"
+assert field_value(source, "execution_site") in {"SOURCE", "CUDA"}
+assert field_value(source, "capture_session_id") == "null"
+assert field_value(source, "session_status") == "NOT_STARTED"
+target_revision = current_revision + 1
+updates = {
+    "state_revision": str(target_revision),
+    "execution_site": "CUDA",
+    "last_completed_action": (
+        "revision_6_cuda_environment_preflight_failed"
+    ),
+    "last_run": os.environ["ENV_RUN"],
+    "next_action": (
+        "在当前 environment evidence 分支修正 CUDA 环境，设置 "
+        f"ENV_RUN={next_environment_run}，从正式 runbook 第 2 节重跑；"
+        "通过后继续第 3 节"
+    ),
+}
+for name, value in updates.items():
+    source = set_field(source, name, value)
+
+decision = (
+    f"| `{target_revision}` | revision 6 CUDA 环境 preflight 失败；"
+    "未读取算子、未生成 Session、未保存 Tensor。保留本 Run，并只允许"
+    f"使用新 ENV Run `{next_environment_run}` 重试 | "
+    f"`{result_path}` |"
+)
+marker = "\n<!-- AGENT-WRITABLE WORKING STATE: END -->"
+assert marker in source
+source = source.replace(marker, "\n" + decision + "\n" + marker, 1)
+temporary = spec_path.with_suffix(".md.next")
+temporary.write_text(source)
+os.replace(temporary, spec_path)
+print("record_revision_6_environment_failure=", target_revision)
+print("next_environment_run=", next_environment_run)
+PY
+
+export ENV_EVIDENCE_BRANCH=evidence/cuda-environment-preflight-r6-001
+CURRENT_BRANCH="$(git branch --show-current)"
+if [ "$CURRENT_BRANCH" != "$ENV_EVIDENCE_BRANCH" ]; then
+  test -z "$(git branch --list "$ENV_EVIDENCE_BRANCH")"
+  git switch -c "$ENV_EVIDENCE_BRANCH"
+fi
+unset CURRENT_BRANCH
+
+git add migration-spec.md "$ENV_RUN"
+git diff --cached --check
+git commit -m "evidence: record revision 6 CUDA environment failure"
+git push -u origin "$ENV_EVIDENCE_BRANCH"
+```
+
+提交后停止。修正环境时保持在这个分支，按 Working State 指定的新 `ENV_RUN` 只重复
+第 2 节；通过后继续第 3 节。不要回到第 1 节把已存在的环境 Run 当作新 Run，也
+不要创建正式 Session evidence 分支，直到第 4 节 reservation。
 
 ### reservation 成功后的失败
 
-先停止仍存活的服务进程，再检查是否已经存在 Golden Sample：
+先停止仍存活的服务进程。记录实际失败命令、退出码和一行错误摘要，然后同时检查
+`capture-state.json` 与已经落盘的 `.pt`；任何一处证明样本存在，都视为正式
+Session 已消耗：
 
 ```bash
-SESSION_RUN="$SESSION_RUN" python - <<'PY'
+export FAILED_COMMAND='替换为实际失败命令'
+export FAILED_EXIT_CODE='替换为实际退出码'
+export FAILURE_SUMMARY='替换为单行错误摘要'
+
+SESSION_RUN="$SESSION_RUN" \
+LAUNCH_EVIDENCE_DIR="$LAUNCH_EVIDENCE_DIR" \
+FAILED_COMMAND="$FAILED_COMMAND" \
+FAILED_EXIT_CODE="$FAILED_EXIT_CODE" \
+FAILURE_SUMMARY="$FAILURE_SUMMARY" python - <<'PY'
 import json
 import os
+import re
 from pathlib import Path
 
-states = list(Path(os.environ["SESSION_RUN"]).glob(
-    "operators/*/capture-state.json"
-))
-sample_count = sum(
-    json.loads(path.read_text()).get("saved_shape_count", 0)
-    for path in states
+
+def field_value(text, name):
+    matches = re.findall(
+        rf"^- `{re.escape(name)}`: `([^`]*)`$",
+        text,
+        flags=re.MULTILINE,
+    )
+    assert len(matches) == 1, name
+    return matches[0]
+
+
+def set_field(text, name, value):
+    pattern = rf"^- `{re.escape(name)}`: `[^`]*`$"
+    replacement = f"- `{name}`: `{value}`"
+    updated, count = re.subn(
+        pattern,
+        replacement,
+        text,
+        count=1,
+        flags=re.MULTILINE,
+    )
+    assert count == 1, name
+    return updated
+
+
+session = Path(os.environ["SESSION_RUN"])
+launch = Path(os.environ["LAUNCH_EVIDENCE_DIR"])
+assert launch.parent == session
+assert launch.is_dir()
+states = sorted(session.glob("operators/*/capture-state.json"))
+sample_files = sorted(session.glob("operators/*/samples/*.pt"))
+sample_artifacts = sorted(
+    path
+    for samples_dir in session.glob("operators/*/samples")
+    for path in samples_dir.rglob("*")
+    if path.is_file()
 )
-print("captured_sample_count=", sample_count)
-print("formal_session_consumed=", sample_count > 0)
+saved_shape_count = 0
+state_errors = []
+state_records = []
+state_fields = {
+    "schema",
+    "spec_binding",
+    "operator_id",
+    "tp_rank",
+    "tensor_parallel_size",
+    "checkpoint",
+    "loaded_checkpoint",
+    "capture_session_config",
+    "capture_process_id",
+    "status",
+    "capture_closed",
+    "saved_shape_count",
+    "repeated_call_count",
+    "skipped_call_count",
+    "samples",
+    "skipped_signatures",
+}
+for path in states:
+    try:
+        value = json.loads(path.read_text())
+        config = json.loads(
+            (path.parent / "capture-config.json").read_text()
+        )
+        assert isinstance(value, dict)
+        assert isinstance(config, dict)
+        assert set(value) == state_fields
+        assert config.get("schema") == "golden-capture-config/v1"
+        assert Path(config["run_dir"]).resolve() == path.parent.resolve()
+        checkpoint = config["checkpoint"]
+        assert isinstance(checkpoint, dict)
+        assert set(checkpoint) == {
+            "id",
+            "model_path",
+            "revision",
+            "config_digest",
+        }
+        expected_state = {
+            "schema": "kernel-call-capture-state/v1",
+            "spec_binding": config["spec_binding"],
+            "operator_id": config["operator_id"],
+            "tp_rank": config["tp_rank"],
+            "tensor_parallel_size": config["tensor_parallel_size"],
+            "checkpoint": checkpoint,
+            "loaded_checkpoint": {
+                "model_path": checkpoint["model_path"],
+                "revision": checkpoint["revision"],
+            },
+            "capture_session_config": config["session_config"],
+        }
+        for field, expected in expected_state.items():
+            assert value[field] == expected
+        process_id = value["capture_process_id"]
+        assert isinstance(process_id, int) and not isinstance(
+            process_id, bool
+        )
+        assert process_id > 0
+        count = value["saved_shape_count"]
+        assert isinstance(count, int) and not isinstance(count, bool)
+        assert count >= 0
+        if count == 0:
+            assert value["status"] == "ACTIVE"
+            assert value["capture_closed"] is False
+            assert value["repeated_call_count"] == 0
+            assert value["skipped_call_count"] == 0
+            assert value["samples"] == []
+            assert value["skipped_signatures"] == []
+        saved_shape_count += count
+        state_records.append((path, value))
+    except (
+        AssertionError,
+        KeyError,
+        OSError,
+        TypeError,
+        ValueError,
+        json.JSONDecodeError,
+    ) as error:
+        state_errors.append(
+            {"path": str(path), "error": f"{type(error).__name__}: {error}"}
+        )
+
+formal_session_consumed = bool(
+    saved_shape_count or sample_artifacts or state_errors
+)
+archived_zero_sample_states = []
+if not formal_session_consumed and state_records:
+    archive_root = launch / "zero-sample-capture-states"
+    archive_root.mkdir(parents=True, exist_ok=False)
+    for path, _ in state_records:
+        target = archive_root / path.parent.name / path.name
+        target.parent.mkdir()
+        assert not target.exists()
+        os.replace(path, target)
+        archived_zero_sample_states.append(str(target))
+spec_path = Path("migration-spec.md")
+source = spec_path.read_text()
+current_revision = int(field_value(source, "state_revision"))
+assert current_revision >= 50
+assert field_value(source, "status") == "ACTIVE"
+assert field_value(source, "phase") == "CUDA_CAPTURE"
+assert field_value(source, "execution_site") == "CUDA"
+assert field_value(source, "capture_session_id") == os.environ["SESSION_RUN"]
+assert field_value(source, "session_status") == "ACTIVE"
+target_revision = current_revision + 1
+failure_path = session / f"failure-{target_revision}.json"
+assert not failure_path.exists()
+command = os.environ["FAILED_COMMAND"].strip()
+summary = os.environ["FAILURE_SUMMARY"].strip()
+assert command and summary and "\n" not in command and "\n" not in summary
+exit_code = int(os.environ["FAILED_EXIT_CODE"])
+start = json.loads((session / "session-start.json").read_text())
+
+failure = {
+    "tool": "migration-agent",
+    "action": "record_revision_6_cuda_failure",
+    "spec_binding": start["spec_binding"],
+    "session_id": start["session_id"],
+    "reservation_id": start["reservation_id"],
+    "failed_command": command,
+    "exit_code": exit_code,
+    "error_summary": summary,
+    "launch_evidence_dir": os.environ["LAUNCH_EVIDENCE_DIR"],
+    "saved_shape_count": saved_shape_count,
+    "sample_files_on_disk": len(sample_files),
+    "sample_paths": [str(path) for path in sample_files],
+    "sample_artifacts_on_disk": len(sample_artifacts),
+    "sample_artifact_paths": [str(path) for path in sample_artifacts],
+    "capture_state_errors": state_errors,
+    "archived_zero_sample_states": archived_zero_sample_states,
+    "formal_session_consumed": formal_session_consumed,
+    "state_revision_before": current_revision,
+    "state_revision_after": target_revision,
+}
+failure_path.write_text(
+    json.dumps(failure, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+)
+
+if formal_session_consumed:
+    updates = {
+        "state_revision": str(target_revision),
+        "status": "BLOCKED",
+        "phase": "CUDA_CAPTURE",
+        "execution_site": "CUDA",
+        "last_completed_action": (
+            "revision_6_cuda_capture_failed_after_sample"
+        ),
+        "last_run": os.environ["SESSION_RUN"],
+        "next_action": "none",
+        "session_status": "FAILED",
+        "stop_reason": (
+            "revision 6 正式 Session 已有 Golden Sample 或无法可靠读取"
+            "采集状态，禁止重启或创建第二个 Session"
+        ),
+        "resume_requires_contract_revision": "true",
+    }
+    decision_text = (
+        "revision 6 正式 CUDA Session 失败且已有样本证据，进入 "
+        "BLOCKED / CUDA_CAPTURE，禁止重开 Session"
+    )
+else:
+    updates = {
+        "state_revision": str(target_revision),
+        "status": "ACTIVE",
+        "phase": "CUDA_CAPTURE",
+        "execution_site": "CUDA",
+        "last_completed_action": (
+            "revision_6_cuda_capture_failed_before_sample"
+        ),
+        "last_run": os.environ["SESSION_RUN"],
+        "next_action": (
+            "修正模型加载或服务环境后，只在同一个 reservation、"
+            "SESSION_RUN 和 evidence 分支继续正式 CUDA Capture；下一次"
+            "启动必须使用新 state revision 对应的 launch 证据目录"
+        ),
+        "session_status": "ACTIVE",
+        "stop_reason": "null",
+        "resume_requires_contract_revision": "false",
+    }
+    decision_text = (
+        "revision 6 CUDA 启动失败但 state 与磁盘均无 Golden Sample；"
+        "保留证据并只允许同一 reservation 内重试"
+    )
+for name, value in updates.items():
+    source = set_field(source, name, value)
+
+decision = (
+    f"| `{target_revision}` | {decision_text} | "
+    f"`{failure_path}` |"
+)
+marker = "\n<!-- AGENT-WRITABLE WORKING STATE: END -->"
+assert marker in source
+source = source.replace(marker, "\n" + decision + "\n" + marker, 1)
+temporary = spec_path.with_suffix(".md.next")
+temporary.write_text(source)
+os.replace(temporary, spec_path)
+print("saved_shape_count=", saved_shape_count)
+print("sample_files_on_disk=", len(sample_files))
+print("sample_artifacts_on_disk=", len(sample_artifacts))
+print("formal_session_consumed=", formal_session_consumed)
+print("failure_result=", failure_path)
 PY
+
+git add migration-spec.md "$SESSION_RUN"
+git diff --cached --check
+git commit -m "evidence: record revision 6 CUDA capture failure"
+git push origin "$EVIDENCE_BRANCH"
 ```
 
 - 尚未产生任何 Golden Sample：模型加载或服务环境失败不算新的 Capture Session。
@@ -870,6 +1342,8 @@ PY
 - 已有 Golden Sample：唯一 Session 已消耗。保留全部状态和日志，不得重启模型、
   不得补 shape，也不得创建第二个 Session。
 
-两种情况都把失败命令、退出码、是否已有样本和错误摘要写入
-`$SESSION_RUN/failure.json`，提交到当前 `$EVIDENCE_BRANCH`。禁止删除失败证据后
-重新占位。
+零样本路径把 Working State 保持为 `ACTIVE / CUDA_CAPTURE`；已有样本或采集状态
+无法可靠读取时，Working State 必须写成 `- status: BLOCKED`、
+`- phase: CUDA_CAPTURE` 并停止。每次失败使用新的
+`$SESSION_RUN/failure-<state_revision>.json`，提交到当前 `$EVIDENCE_BRANCH`；
+禁止覆盖或删除失败证据后重新占位。
