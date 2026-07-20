@@ -1,0 +1,9 @@
+execution_site=SOURCE
+baseline_revision=546ad8c682392922792bbbfe53a8bf575545f118
+git_apply_check=PASS
+candidate_worktree_patch=PASS
+original_call_x=y
+original_call_y=out1
+original_call_limit=float(layer.moe_runner_config.gemm1_clamp_limit)
+original_call_none_fallback=true
+p800_replay=NOT_RUN

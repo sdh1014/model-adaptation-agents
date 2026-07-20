@@ -81,47 +81,46 @@ class Ticket16P800BaselineRunbookTest(unittest.TestCase):
         self.assertFalse(review["replay"]["actual_tensors_saved"])
         self.assertFalse(review["tensor_payloads_deserialized"])
 
-    def test_current_state_records_the_passing_p800_repair(self) -> None:
+    def test_current_state_reopens_under_revision_6_queue_contract(self) -> None:
         spec = SPEC.read_text(encoding="utf-8")
 
-        self.assertIn("- `state_revision`: `34`", spec)
-        self.assertIn("- `status`: `PASS`", spec)
-        self.assertIn("- `phase`: `P800_REPAIR`", spec)
+        self.assertIn("- `state_revision`: `39`", spec)
+        self.assertIn("- `status`: `ACTIVE`", spec)
+        self.assertIn("- `phase`: `SCAN`", spec)
         self.assertIn("- `execution_site`: `SOURCE`", spec)
         self.assertIn(
-            "- `last_run`: `runs/repair-attempt-1-r5-001`",
+            "- `last_run`: `runs/operator-queue-tool-002`",
             spec,
         )
-        self.assertIn("- `next_action`: `none`", spec)
+        self.assertIn("- `active_operator`: `null`", spec)
         self.assertIn(
-            "- `p800_verification_run`: "
-            "`runs/handoff-verify-p800-r5-001`",
-            spec,
-        )
-        self.assertIn(
-            "- `bundle_status`: `VERIFIED_ON_P800`",
+            "- `scan_run`: `null`",
             spec,
         )
         self.assertIn(
-            "- `baseline_run`: "
-            "`runs/p800-baseline-assessment-r5-001`",
+            "- `bundle_status`: `NOT_BUILT`",
             spec,
         )
-        self.assertIn("- `attempts_used`: `1`", spec)
         self.assertIn(
-            "- `passing_run`: `runs/repair-attempt-1-r5-001`",
+            "- `baseline_run`: `null`",
             spec,
         )
-        self.assertNotIn("- `active_hypothesis`: `null`", spec)
-        self.assertIn("repair-kernel-call/v1", spec)
+        self.assertIn("- `attempts_used`: `0`", spec)
+        self.assertIn("- `passing_run`: `null`", spec)
+        self.assertIn("- `active_hypothesis`: `null`", spec)
+        self.assertIn("旧 revision 5 Scan 与 Golden 只作历史线索", spec)
+        self.assertIn("任意 callable replay 协议", spec)
+        self.assertIn("不符合 Kernel Call Contract", spec)
 
     def test_claude_runbook_only_launches_the_migration_agent(self) -> None:
         runbook = CLAUDE_RUNBOOK.read_text(encoding="utf-8")
 
         self.assertIn("SGLANG_KUNLUN_WORKTREE", runbook)
         self.assertIn("/model-adaptation Step-3.7-Flash", runbook)
-        self.assertIn("migration-spec.md` revision 32", runbook)
+        self.assertIn("当前 `migration-spec.md`", runbook)
         self.assertIn("不提供 attempt 1 假设或补丁", runbook)
+        self.assertIn("自动进入 gap queue 下一项", runbook)
+        self.assertIn("不新增生产 helper", runbook)
         self.assertNotIn("git apply", runbook)
         self.assertNotIn("torch.clamp", runbook)
         self.assertNotIn("gemm1_limit =", runbook)

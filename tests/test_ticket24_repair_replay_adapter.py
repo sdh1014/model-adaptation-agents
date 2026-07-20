@@ -1,19 +1,14 @@
-"""Repair replay adapter: route P800 replay through the repaired boundary.
-
-These tests prove the model-adaptation flow can generate and accept a P800
-Kernel Call replay that runs through an Agent-selected repaired boundary living
-inside the pinned SGLang-Kunlun worktree, without presetting the module or
-function name and without letting a flow-code shortcut stand in for the real
-repair. They exercise the deterministic tools only; the actual source repair is
-claimed as a bounded attempt on hardware.
-"""
+"""Keep candidate replay on the original Kunlun Kernel Call boundary."""
 
 import hashlib
 import json
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
+import types
 import unittest
+from unittest.mock import patch
 
 import torch
 
@@ -24,15 +19,13 @@ sys.path.insert(0, str(SCRIPTS))
 
 from model_adaptation_capture.contracts import (
     KUNLUN_SWIGLU_TARGET,
-    normalize_repair_entry,
-    parse_repair_invocation_target,
-    repair_invocation_target,
+    SWIGLU_KUNLUN_SOURCE_RELATIVE_PATH,
 )
 from model_adaptation_capture.kernel_replay import (
     KernelReplayError,
-    _resolve_repair_call,
     run_kernel_replay_worker,
 )
+import replay_compare
 from test_ticket23_kernel_replay import (
     BINDING,
     OPERATOR_ID,
@@ -41,9 +34,8 @@ from test_ticket23_kernel_replay import (
 )
 
 
-REPAIR_ENTRY = "repaired_boundary:apply_swiglu_clamp"
-REPAIR_TARGET = f"repair-kernel-call/v1:{REPAIR_ENTRY}"
-KUNLUN_REVISION = "546ad8c682392922792bbbfe53a8bf575545f118"
+CORRECTION_RUN = ROOT / "runs" / "inline-repair-correction-r5-001"
+OLD_ATTEMPT = ROOT / "runs" / "repair-attempt-1-r5-001"
 
 
 def _clamped(x: torch.Tensor, limit: float) -> torch.Tensor:
@@ -54,10 +46,14 @@ def _clamped(x: torch.Tensor, limit: float) -> torch.Tensor:
 
 
 def write_clamp_golden_run(path: Path, *, limit: float = 7.0) -> None:
-    """A SEALED, self-replayed Golden Run whose output is the true clamp."""
-
     from model_adaptation_capture.contracts import shape_id_for
 
+    checkpoint = {
+        "id": "stepfun-ai/Step-3.7-Flash@fixture",
+        "model_path": "stepfun-ai/Step-3.7-Flash",
+        "revision": "fixture",
+        "config_digest": "config-digest",
+    }
     samples = path / "samples"
     samples.mkdir(parents=True)
     x = torch.tensor([[1.0, 2.0, 9.0, 4.0]], dtype=torch.bfloat16)
@@ -96,29 +92,25 @@ def write_clamp_golden_run(path: Path, *, limit: float = 7.0) -> None:
         },
         sample_path,
     )
-    (path / "sample-files.json").write_text(
-        json.dumps(
+    sidecar = {
+        "schema": "golden-sample-files/v1",
+        "spec_binding": BINDING,
+        "operator_id": OPERATOR_ID,
+        "files": [
             {
-                "schema": "golden-sample-files/v1",
-                "spec_binding": BINDING,
-                "operator_id": OPERATOR_ID,
-                "files": [
-                    {
-                        "shape_id": shape_id,
-                        "path": f"samples/{shape_id}.pt",
-                        "size": sample_path.stat().st_size,
-                        "sha256": hashlib.sha256(
-                            sample_path.read_bytes()
-                        ).hexdigest(),
-                    }
-                ],
-            },
-            indent=2,
-            sort_keys=True,
-        )
-        + "\n",
+                "shape_id": shape_id,
+                "path": f"samples/{shape_id}.pt",
+                "size": sample_path.stat().st_size,
+                "sha256": hashlib.sha256(sample_path.read_bytes()).hexdigest(),
+            }
+        ],
+    }
+    sidecar_path = path / "sample-files.json"
+    sidecar_path.write_text(
+        json.dumps(sidecar, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+    sidecar_sha = hashlib.sha256(sidecar_path.read_bytes()).hexdigest()
     (path / "capture-state.json").write_text(
         json.dumps(
             {
@@ -127,9 +119,16 @@ def write_clamp_golden_run(path: Path, *, limit: float = 7.0) -> None:
                 "operator_id": OPERATOR_ID,
                 "tp_rank": 0,
                 "tensor_parallel_size": 8,
+                "checkpoint": checkpoint,
+                "loaded_checkpoint": {
+                    "model_path": checkpoint["model_path"],
+                    "revision": checkpoint["revision"],
+                },
                 "status": "SEALED",
                 "capture_closed": True,
                 "saved_shape_count": 1,
+                "repeated_call_count": 0,
+                "skipped_call_count": 0,
                 "samples": [
                     {
                         "shape_id": shape_id,
@@ -138,6 +137,13 @@ def write_clamp_golden_run(path: Path, *, limit: float = 7.0) -> None:
                         "repeat_count": 0,
                     }
                 ],
+                "skipped_signatures": [],
+                "self_replay": {
+                    "passed": True,
+                    "checked_shape_count": 1,
+                    "sample_files_sha256": sidecar_sha,
+                    "worker_result_sha256": "0" * 64,
+                },
             },
             indent=2,
         )
@@ -146,39 +152,138 @@ def write_clamp_golden_run(path: Path, *, limit: float = 7.0) -> None:
     )
 
 
-def make_worktree(root: Path) -> Path:
-    """A stand-in for the fixed SGLang-Kunlun worktree with a repaired entry."""
-
-    worktree = root / "sglang-kunlun"
-    package = worktree / "python"
-    package.mkdir(parents=True)
-    module = package / "repaired_boundary.py"
-    module.write_text(
-        "import torch\n"
-        "\n"
-        "\n"
-        "def apply_swiglu_clamp(x, gemm1_limit):\n"
-        "    d = x.shape[-1] // 2\n"
-        "    gate = torch.nn.functional.silu(x[..., :d].float())"
-        ".clamp(max=gemm1_limit)\n"
-        "    linear = x[..., d:].float().clamp(min=-gemm1_limit, "
-        "max=gemm1_limit)\n"
-        "    return (gate * linear).to(x.dtype)\n",
+def candidate_metadata(root: Path, *, relevant: bool = True) -> dict:
+    root.mkdir(parents=True)
+    worktree = root / "sglang-kunlun-worktree"
+    source_path = worktree / SWIGLU_KUNLUN_SOURCE_RELATIVE_PATH
+    source_path.parent.mkdir(parents=True)
+    baseline_source = (
+        "def unquantized_fused_moe_apply_kunlun(layer, y):\n"
+        "    out1 = y\n"
+        "    kunlun_ops.swiglu(x=y, y=out1)\n"
+        "    return out1\n"
+    )
+    source_path.write_text(baseline_source, encoding="utf-8")
+    (worktree / "README.md").write_text("fixture\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-q"], cwd=worktree, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "candidate@example.com"],
+        cwd=worktree,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Candidate Test"],
+        cwd=worktree,
+        check=True,
+    )
+    subprocess.run(["git", "add", "."], cwd=worktree, check=True)
+    subprocess.run(
+        ["git", "commit", "-qm", "baseline"],
+        cwd=worktree,
+        check=True,
+    )
+    revision = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"],
+        cwd=worktree,
+        text=True,
+    ).strip()
+    if relevant:
+        source_path.write_text(
+            (
+                "def unquantized_fused_moe_apply_kunlun(layer, y):\n"
+                "    out1 = y\n"
+                "    limit = layer.moe_runner_config.gemm1_clamp_limit\n"
+                "    if limit is None:\n"
+                "        kunlun_ops.swiglu(x=y, y=out1)\n"
+                "    else:\n"
+                "        kunlun_ops.swiglu(\n"
+                "            x=y, y=out1, limit=float(limit)\n"
+                "        )\n"
+                "    return out1\n"
+            ),
+            encoding="utf-8",
+        )
+        modified_paths = [SWIGLU_KUNLUN_SOURCE_RELATIVE_PATH]
+    else:
+        (worktree / "README.md").write_text(
+            "unrelated candidate\n",
+            encoding="utf-8",
+        )
+        modified_paths = ["README.md"]
+    patch = subprocess.check_output(
+        [
+            "git",
+            "diff",
+            "--binary",
+            "--no-ext-diff",
+            revision,
+            "--",
+            *modified_paths,
+        ],
+        cwd=worktree,
+    )
+    result_path = root / "candidate-result.json"
+    patch_path = root / "candidate.patch"
+    patch_path.write_bytes(patch)
+    result = {
+        "tool": "workspace_guard.py",
+        "action": "record-candidate",
+        "spec_binding": BINDING,
+        "baseline_revision": revision,
+        "worktree": str(worktree.resolve()),
+        "operator_id": OPERATOR_ID,
+        "allowed_paths": modified_paths,
+        "modified_paths": modified_paths,
+        "passed": True,
+        "workspace_state": "CANDIDATE_RECORDED",
+        "patch_path": "candidate.patch",
+        "patch_sha256": hashlib.sha256(patch_path.read_bytes()).hexdigest(),
+    }
+    result_path.write_text(
+        json.dumps(result, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
-    return worktree
+    metadata = {
+        "candidate_operator_id": OPERATOR_ID,
+        "modified_paths": modified_paths,
+        "result": str(result_path.resolve()),
+        "result_sha256": hashlib.sha256(result_path.read_bytes()).hexdigest(),
+        "patch_sha256": result["patch_sha256"],
+        "sglang_kunlun_worktree": result["worktree"],
+        "sglang_kunlun_revision": revision,
+    }
+    if relevant:
+        metadata.update(
+            {
+                "original_call_source": SWIGLU_KUNLUN_SOURCE_RELATIVE_PATH,
+                "original_call_source_sha256": hashlib.sha256(
+                    source_path.read_bytes()
+                ).hexdigest(),
+                "original_call_arguments": {
+                    "x": "y",
+                    "y": "out1",
+                    "limit": (
+                        "float(layer.moe_runner_config.gemm1_clamp_limit)"
+                    ),
+                },
+                "original_call_none_fallback": True,
+            }
+        )
+    return metadata
 
 
-def repair_config(golden_run: Path, run_dir: Path, worktree: Path) -> dict:
-    return {
+def replay_config(
+    golden_run: Path,
+    run_dir: Path,
+    *,
+    candidate: dict = None,
+) -> dict:
+    config = {
         "schema": "kernel-call-replay-config/v1",
         "spec_binding": BINDING,
         "operator_id": OPERATOR_ID,
         "execution_site": "p800",
-        "invocation_target": REPAIR_TARGET,
-        "repair_entry": REPAIR_ENTRY,
-        "sglang_kunlun_worktree": str(worktree.resolve()),
-        "sglang_kunlun_revision": KUNLUN_REVISION,
+        "invocation_target": KUNLUN_SWIGLU_TARGET,
         "golden_run": str(golden_run),
         "run_dir": str(run_dir),
         "tensor_parallel_size": 8,
@@ -189,124 +294,216 @@ def repair_config(golden_run: Path, run_dir: Path, worktree: Path) -> dict:
         ).hexdigest(),
         "allow_active_capture": False,
     }
+    if candidate is not None:
+        config["candidate"] = candidate
+    return config
 
 
-class ContractHelperTest(unittest.TestCase):
-    def test_repair_target_round_trips(self) -> None:
-        target = repair_invocation_target(REPAIR_ENTRY)
-        self.assertEqual(target, REPAIR_TARGET)
-        self.assertEqual(parse_repair_invocation_target(target), REPAIR_ENTRY)
-
-    def test_repair_entry_must_be_module_and_callable(self) -> None:
-        for bad in ("nocolon", "a:b:c", "1bad:apply", "mod:1apply", "", ":x"):
-            with self.assertRaises(ValueError):
-                normalize_repair_entry(bad)
-
-    def test_baseline_target_is_not_a_repair_target(self) -> None:
-        with self.assertRaises(ValueError):
-            parse_repair_invocation_target(KUNLUN_SWIGLU_TARGET)
-
-
-class ResolveRepairCallTest(unittest.TestCase):
-    def test_resolves_callable_inside_worktree(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            worktree = make_worktree(Path(temp_dir))
-            sys.path.insert(0, str((worktree / "python").resolve()))
-            try:
-                call = _resolve_repair_call(
-                    {
-                        "invocation_target": REPAIR_TARGET,
-                        "repair_entry": REPAIR_ENTRY,
-                        "sglang_kunlun_worktree": str(worktree.resolve()),
-                    }
-                )
-                x = torch.tensor([[1.0, 2.0, 3.0, 4.0]], dtype=torch.bfloat16)
-                out = call(x, 7.0)
-                torch.testing.assert_close(out, _clamped(x, 7.0))
-            finally:
-                sys.path.remove(str((worktree / "python").resolve()))
-                sys.modules.pop("repaired_boundary", None)
-
-    def test_rejects_entry_outside_worktree(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            worktree = make_worktree(root)
-            outside = root / "outside"
-            outside.mkdir()
-            (outside / "flow_shortcut.py").write_text(
-                "def apply(x, gemm1_limit):\n    return x[..., : x.shape[-1] // 2]\n",
-                encoding="utf-8",
-            )
-            sys.path.insert(0, str(outside.resolve()))
-            try:
-                with self.assertRaises(KernelReplayError):
-                    _resolve_repair_call(
-                        {
-                            "invocation_target": "repair-kernel-call/v1:flow_shortcut:apply",
-                            "repair_entry": "flow_shortcut:apply",
-                            "sglang_kunlun_worktree": str(worktree.resolve()),
-                        }
-                    )
-            finally:
-                sys.path.remove(str(outside.resolve()))
-                sys.modules.pop("flow_shortcut", None)
-
-
-class RepairWorkerTest(unittest.TestCase):
-    def test_repaired_boundary_clears_the_clamp_gap(self) -> None:
+class OriginalBoundaryReplayTest(unittest.TestCase):
+    def test_candidate_passes_limit_to_existing_kunlun_call(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = Path(temp_dir)
-            golden_run = workspace / "golden-001"
+            golden_run = workspace / "golden"
             write_clamp_golden_run(golden_run)
-            worktree = make_worktree(workspace)
-            run_dir = workspace / "repair-replay"
+            candidate = candidate_metadata(workspace / "attempt")
+            calls = []
+            module = types.ModuleType("kunlun_ops")
 
-            python_path = str((worktree / "python").resolve())
-            sys.path.insert(0, python_path)
-            try:
-                result = run_kernel_replay_worker(
-                    repair_config(golden_run, run_dir, worktree),
+            def swiglu(*, x, y, limit=None):
+                calls.append(limit)
+                if limit is None:
+                    d = x.shape[-1] // 2
+                    y.copy_(
+                        (
+                            torch.nn.functional.silu(x[..., :d].float())
+                            * x[..., d:].float()
+                        ).to(x.dtype)
+                    )
+                else:
+                    y.copy_(_clamped(x, float(limit)))
+
+            module.swiglu = swiglu
+            with patch.dict(sys.modules, {"kunlun_ops": module}):
+                baseline = run_kernel_replay_worker(
+                    replay_config(
+                        golden_run,
+                        workspace / "baseline",
+                    ),
                     device=torch.device("cpu"),
                 )
-            finally:
-                sys.path.remove(python_path)
-                sys.modules.pop("repaired_boundary", None)
+                repaired = run_kernel_replay_worker(
+                    replay_config(
+                        golden_run,
+                        workspace / "candidate-replay",
+                        candidate=candidate,
+                    ),
+                    device=torch.device("cpu"),
+                )
 
-            self.assertTrue(result["passed"])
-            self.assertEqual(result["invocation_target"], REPAIR_TARGET)
-            self.assertFalse(list(workspace.rglob("*actual*.pt")))
+            self.assertFalse(baseline["passed"])
+            self.assertTrue(repaired["passed"])
+            self.assertEqual(calls, [None, 7.0])
+            self.assertEqual(
+                repaired["invocation_target"],
+                KUNLUN_SWIGLU_TARGET,
+            )
 
-    def test_baseline_config_must_not_carry_repair_fields(self) -> None:
+    def test_arbitrary_callable_protocol_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = Path(temp_dir)
-            golden_run = workspace / "golden-001"
+            golden_run = workspace / "golden"
             write_golden_run(golden_run)
-            worktree = make_worktree(workspace)
-            run_dir = workspace / "replay"
-            config = repair_config(golden_run, run_dir, worktree)
-            config["invocation_target"] = KUNLUN_SWIGLU_TARGET
-            with self.assertRaises(KernelReplayError):
+            config = replay_config(golden_run, workspace / "replay")
+            config["invocation_target"] = (
+                "repair-kernel-call/v1:module:callable"
+            )
+            with self.assertRaisesRegex(
+                KernelReplayError,
+                "invocation target",
+            ):
                 run_kernel_replay_worker(
                     config,
-                    p800_call=lambda x, limit: _clamped(x, limit),
+                    p800_call=lambda x, limit: x[..., :2],
                     device=torch.device("cpu"),
                 )
 
-    def test_repair_config_requires_pinned_revision_and_worktree(self) -> None:
+    def test_candidate_metadata_is_all_or_nothing(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = Path(temp_dir)
-            golden_run = workspace / "golden-001"
+            golden_run = workspace / "golden"
             write_golden_run(golden_run)
-            worktree = make_worktree(workspace)
-            for field in ("sglang_kunlun_revision", "sglang_kunlun_worktree"):
-                config = repair_config(golden_run, workspace / "r", worktree)
-                del config[field]
-                with self.assertRaises(KernelReplayError):
-                    run_kernel_replay_worker(
-                        config,
-                        p800_call=lambda x, limit: _clamped(x, limit),
-                        device=torch.device("cpu"),
-                    )
+            candidate = candidate_metadata(workspace / "attempt")
+            del candidate["patch_sha256"]
+            with self.assertRaisesRegex(
+                KernelReplayError,
+                "metadata has drifted",
+            ):
+                run_kernel_replay_worker(
+                    replay_config(
+                        golden_run,
+                        workspace / "replay",
+                        candidate=candidate,
+                    ),
+                    p800_call=lambda x, limit: x[..., :2],
+                    device=torch.device("cpu"),
+                )
+
+    def test_retired_repair_callable_fields_are_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            golden_run = workspace / "golden"
+            write_golden_run(golden_run)
+            config = replay_config(golden_run, workspace / "replay")
+            config["repair_entry"] = "module:callable"
+            with self.assertRaisesRegex(
+                KernelReplayError,
+                "retired repair callable protocol",
+            ):
+                run_kernel_replay_worker(
+                    config,
+                    p800_call=lambda x, limit: x[..., :2],
+                    device=torch.device("cpu"),
+                )
+
+
+class CandidateBindingTest(unittest.TestCase):
+    def test_replay_tool_binds_the_recorded_candidate_patch(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            attempt = workspace / "attempt"
+            candidate = candidate_metadata(attempt)
+            loaded = replay_compare.load_candidate_replay_metadata(
+                Path(candidate["result"]),
+                binding=BINDING,
+                worktree=Path(candidate["sglang_kunlun_worktree"]),
+                baseline_revision=candidate["sglang_kunlun_revision"],
+            )
+            self.assertEqual(loaded, candidate)
+
+            (attempt / "candidate.patch").write_text(
+                "changed after recording\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                replay_compare.ToolError,
+                "SHA-256",
+            ):
+                replay_compare.load_candidate_replay_metadata(
+                    Path(candidate["result"]),
+                    binding=BINDING,
+                    worktree=Path(candidate["sglang_kunlun_worktree"]),
+                    baseline_revision=candidate["sglang_kunlun_revision"],
+                )
+
+    def test_unrelated_patch_cannot_enable_candidate_replay(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            candidate = candidate_metadata(
+                Path(temp_dir) / "attempt",
+                relevant=False,
+            )
+            with self.assertRaisesRegex(
+                replay_compare.ToolError,
+                "original SwiGLU production call site",
+            ):
+                replay_compare.load_candidate_replay_metadata(
+                    Path(candidate["result"]),
+                    binding=BINDING,
+                    worktree=Path(candidate["sglang_kunlun_worktree"]),
+                    baseline_revision=candidate["sglang_kunlun_revision"],
+                )
+
+    def test_live_worktree_must_still_match_candidate_patch(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            candidate = candidate_metadata(Path(temp_dir) / "attempt")
+            source_path = (
+                Path(candidate["sglang_kunlun_worktree"])
+                / SWIGLU_KUNLUN_SOURCE_RELATIVE_PATH
+            )
+            source_path.write_text(
+                source_path.read_text(encoding="utf-8")
+                + "# changed after candidate recording\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                replay_compare.ToolError,
+                "worktree bytes",
+            ):
+                replay_compare.load_candidate_replay_metadata(
+                    Path(candidate["result"]),
+                    binding=BINDING,
+                    worktree=Path(candidate["sglang_kunlun_worktree"]),
+                    baseline_revision=candidate["sglang_kunlun_revision"],
+                )
+
+    def test_corrected_patch_is_inline_and_old_run_is_immutable(self) -> None:
+        corrected = (CORRECTION_RUN / "candidate.patch").read_text(
+            encoding="utf-8"
+        )
+        historical = (OLD_ATTEMPT / "candidate.patch").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("def unquantized_fused_moe_apply_kunlun(", corrected)
+        self.assertIn(
+            "kunlun_ops.swiglu(x=y, y=out1, limit=float(gemm1_limit))",
+            corrected,
+        )
+        self.assertNotIn("def apply_gemm1_swiglu_clamp", corrected)
+        self.assertIn("def apply_gemm1_swiglu_clamp", historical)
+
+    def test_flow_has_no_arbitrary_repair_callable_protocol(self) -> None:
+        source_paths = (
+            SCRIPTS / "model_adaptation_capture" / "contracts.py",
+            SCRIPTS / "model_adaptation_capture" / "kernel_replay.py",
+            SCRIPTS / "replay_compare.py",
+            SCRIPTS / "workspace_guard.py",
+        )
+        source = "\n".join(
+            path.read_text(encoding="utf-8") for path in source_paths
+        )
+        self.assertNotIn("repair-kernel-call/v1", source)
+        self.assertNotIn("def normalize_repair_entry", source)
+        self.assertNotIn("_resolve_repair_call", source)
+        self.assertIn("retired repair callable protocol", source)
 
 
 if __name__ == "__main__":

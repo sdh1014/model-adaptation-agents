@@ -1,0 +1,26 @@
+{
+  "action": "prepare-inline-repair-correction",
+  "candidate_patch": "candidate.patch",
+  "candidate_patch_sha256": "184c33dd223561446aa9674e6db37ee01191c7a3924a76765326e64f81b3901d",
+  "evidence": [
+    "candidate.patch",
+    "validation.log"
+  ],
+  "execution_site": "SOURCE",
+  "passed": false,
+  "requires": "P800 candidate replay against all three revision 5 Golden Samples",
+  "reviewed_commit": "35aa72ee8cfb3c87851f9ca2771c2738023890c2",
+  "status": "READY_FOR_P800_VALIDATION",
+  "source_validation": {
+    "baseline_revision": "546ad8c682392922792bbbfe53a8bf575545f118",
+    "git_apply_check": true,
+    "original_call_arguments": {
+      "limit": "float(layer.moe_runner_config.gemm1_clamp_limit)",
+      "x": "y",
+      "y": "out1"
+    },
+    "original_call_none_fallback": true
+  },
+  "supersedes_implementation_shape": "runs/repair-attempt-1-r5-001/candidate.patch",
+  "summary": "The suggested patch keeps the existing unquantized_fused_moe_apply_kunlun call site and passes gemm1_clamp_limit directly to kunlun_ops.swiglu without adding a production helper."
+}

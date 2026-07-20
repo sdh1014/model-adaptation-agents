@@ -90,8 +90,8 @@ A Working State indicating that progress requires work outside the Contract or R
 _Avoid_: Failed attempt, silent fallback
 
 **Demo Closure**:
-The minimum proof that scans the complete Step-3.7-Flash operator path, records every discovered Operator Gap, and closes one real gap for no more than three observed shapes through the P800 Repair Loop. Closing every gap or covering every shape belongs to the tool's later operating goal, not the demo gate.
-_Avoid_: Full Step-3.7 migration, single-op-only scan
+The revision 6 proof that scans the complete Step-3.7-Flash target path, records every discovered Operator Gap, captures no more than three observed shapes per planned Kernel Call in one CUDA Session, and closes the complete gap queue through the P800 Repair Loop. Revision 5's one-gap closure remains historical evidence, not the current stop condition.
+_Avoid_: Full model bring-up, stopping after the first passing gap
 
 **Solution Design Document**:
 The deliverable of this wayfinding effort, describing the minimal tool, its runtime flow, artifact contracts, boundaries, and implementation plan.

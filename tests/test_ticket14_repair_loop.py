@@ -21,7 +21,7 @@ REPLAY_COMPARE = (
 MODEL_ADAPTATION_SKILL = ROOT / "model-adaptation" / "SKILL.md"
 CLAUDE_SKILL = ROOT / ".claude" / "skills" / "model-adaptation" / "SKILL.md"
 MIGRATION_SPEC = ROOT / "migration-spec.md"
-REPAIR_LOOP_RUN = ROOT / "runs" / "repair-replay-adapter-r5-001" / "result.json"
+REPAIR_LOOP_RUN = ROOT / "runs" / "operator-queue-tool-002" / "result.json"
 ALLOWED_PATHS = (
     "sglang-kunlun/sglang_kunlun/ops/swiglu.py",
     "tests/test_swiglu.py",
@@ -146,6 +146,10 @@ def replay(
     run_dir: Path,
     *,
     passed: bool,
+    operator_id: str = (
+        "sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe."
+        "_swiglu_silu_clamp_mul"
+    ),
 ) -> subprocess.CompletedProcess:
     case_path = run_dir.parent / f"{run_dir.name}-case.json"
     case_path.parent.mkdir(parents=True, exist_ok=True)
@@ -169,6 +173,8 @@ def replay(
         str(run_dir),
         "--case",
         str(case_path),
+        "--operator-id",
+        operator_id,
     )
 
 
@@ -218,7 +224,14 @@ def finish_candidate(
     spec: Path,
     run_dir: Path,
     worktree: Path,
+    *,
+    regression_results: tuple[Path, ...] = (),
 ) -> subprocess.CompletedProcess:
+    extra = [
+        item
+        for result in regression_results
+        for item in ("--regression-result", str(result))
+    ]
     return guard_command(
         "finish-attempt",
         spec,
@@ -226,6 +239,7 @@ def finish_candidate(
         worktree,
         "--replay-result",
         str(run_dir / "replay" / "result.json"),
+        *extra,
         include_allowed_paths=False,
         allow_synthetic_replay=True,
     )
@@ -240,7 +254,7 @@ class Ticket14RepairLoopTest(unittest.TestCase):
         self.assertTrue(result["passed"])
         self.assertEqual(
             result["supersedes"],
-            "runs/repair-loop-tool-002/result.json",
+            "runs/operator-queue-tool-001/result.json",
         )
         self.assertTrue(result["behavior"]["agent_selects_hypothesis"])
         self.assertTrue(
@@ -257,7 +271,7 @@ class Ticket14RepairLoopTest(unittest.TestCase):
         )
         self.assertEqual(
             result["validation"]["repair_replay_adapter"],
-            "BUILT",
+            "SOURCE_BOUND_SWIGLU_ONLY_P800_NOT_RUN",
         )
         self.assertTrue(
             result["delegated_to_p800_agent"]["repair_replay_adapter"]
@@ -288,7 +302,7 @@ class Ticket14RepairLoopTest(unittest.TestCase):
             "`active_hypothesis: null` 是人工确认",
             skill,
         )
-        self.assertIn("等待人选择补丁", skill)
+        self.assertNotIn("等待人选择补丁", skill)
         self.assertNotIn("p800-repair-attempt-r5-001.patch", skill)
         self.assertIn("主 Skill", claude_skill)
         self.assertIn("唯一 `next_action`", claude_skill)
@@ -926,6 +940,10 @@ class Ticket14RepairLoopTest(unittest.TestCase):
                         "tool": "replay_compare.py",
                         "action": "kernel-replay",
                         "spec_binding": binding,
+                        "operator_id": (
+                            "sglang.srt.layers.moe.moe_runner.triton_utils."
+                            "fused_moe._swiglu_silu_clamp_mul"
+                        ),
                         "passed": True,
                         "execution_site": "p800",
                         "invocation_target": "kunlun_ops.swiglu",

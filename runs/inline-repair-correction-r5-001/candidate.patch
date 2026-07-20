@@ -1,0 +1,19 @@
+diff --git a/sglang-kunlun/sglang_kunlun/hooks/layers/quantization/unquant.py b/sglang-kunlun/sglang_kunlun/hooks/layers/quantization/unquant.py
+index a2054be4c..f6f32ca9d 100644
+--- a/sglang-kunlun/sglang_kunlun/hooks/layers/quantization/unquant.py
++++ b/sglang-kunlun/sglang_kunlun/hooks/layers/quantization/unquant.py
+@@ -119,9 +119,13 @@ def unquantized_fused_moe_apply_kunlun(
+         act=None,
+     )
+ 
+     d = y.shape[-1] // 2
+     out1 = torch.empty(y.shape[:-1] + (d,), dtype=y.dtype, device=y.device)
+-    kunlun_ops.swiglu(x=y, y=out1)
++    gemm1_limit = layer.moe_runner_config.gemm1_clamp_limit
++    if gemm1_limit is None:
++        kunlun_ops.swiglu(x=y, y=out1)
++    else:
++        kunlun_ops.swiglu(x=y, y=out1, limit=float(gemm1_limit))
+     out1 = out1.reshape(-1, out1.shape[-1])
+ 
+     out = cache[: M * top_k * layer.w2_weight.shape[1]].view(

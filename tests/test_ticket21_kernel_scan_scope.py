@@ -87,11 +87,14 @@ class Ticket21KernelScanScopeTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.spec_text = SPEC.read_text(encoding="utf-8")
-        cls.contract = contract_from_text(cls.spec_text)
+        cls.current_contract = contract_from_text(cls.spec_text)
+        cls.contract = json.loads(json.dumps(cls.current_contract))
+        cls.contract["contract_revision"] = 5
         cls.scan = json.loads(SCAN_006.read_text(encoding="utf-8"))
 
     def test_revision_5_contract_fixes_scope_without_preselecting_operator(self) -> None:
         self.assertEqual(self.contract["contract_revision"], 5)
+        self.assertEqual(self.current_contract["contract_revision"], 6)
         self.assertNotIn("operator_boundary", self.contract)
         self.assertNotIn("demo_input_mode", self.contract)
         self.assertNotIn("active_operator", self.contract)
@@ -358,10 +361,11 @@ class Ticket21KernelScanScopeTest(unittest.TestCase):
             [active_operator],
         )
         self.assertIn(
-            f"- `active_operator`: `{SWIGLU_CLAMP}`",
+            "- `active_operator`: `null`",
             self.spec_text,
         )
-        self.assertIn("- `scan_run`: `runs/scan-006`", self.spec_text)
+        self.assertIn("- `scan_run`: `null`", self.spec_text)
+        self.assertIn("`scan-006` 和 revision 5", self.spec_text)
 
     def test_selected_capture_plan_obeys_parameter_policy(self) -> None:
         plan = self.scan["capture_plan"][0]
@@ -402,12 +406,14 @@ class Ticket21KernelScanScopeTest(unittest.TestCase):
                 json.dumps(malicious_scan, ensure_ascii=False),
                 encoding="utf-8",
             )
+            historical_spec = workspace / "migration-spec.md"
+            write_contract(historical_spec, self.contract)
             completed = subprocess.run(
                 [
                     sys.executable,
                     str(CAPTURE_GOLDEN),
                     "--spec",
-                    str(SPEC),
+                    str(historical_spec),
                     "--run-dir",
                     str(workspace / "capture"),
                     "--mode",
@@ -442,13 +448,16 @@ class Ticket21KernelScanScopeTest(unittest.TestCase):
 
     def test_revision_5_cannot_fall_back_to_the_historical_mlp_operator(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            run_dir = Path(temp_dir) / "capture"
+            workspace = Path(temp_dir)
+            run_dir = workspace / "capture"
+            historical_spec = workspace / "migration-spec.md"
+            write_contract(historical_spec, self.contract)
             completed = subprocess.run(
                 [
                     sys.executable,
                     str(CAPTURE_GOLDEN),
                     "--spec",
-                    str(SPEC),
+                    str(historical_spec),
                     "--run-dir",
                     str(run_dir),
                     "--mode",
@@ -473,12 +482,14 @@ class Ticket21KernelScanScopeTest(unittest.TestCase):
     def test_revision_5_cannot_use_the_historical_loaded_model_replay(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = Path(temp_dir)
+            historical_spec = workspace / "migration-spec.md"
+            write_contract(historical_spec, self.contract)
             completed = subprocess.run(
                 [
                     sys.executable,
                     str(REPLAY_COMPARE),
                     "--spec",
-                    str(SPEC),
+                    str(historical_spec),
                     "--run-dir",
                     str(workspace / "replay"),
                     "--mode",
@@ -493,7 +504,7 @@ class Ticket21KernelScanScopeTest(unittest.TestCase):
             )
             self.assertEqual(completed.returncode, 2)
             self.assertIn(
-                "loaded-model MLP replay is not valid for revision 5",
+                "loaded-model MLP replay is not valid for a kernel-scan Contract",
                 completed.stderr,
             )
             self.assertIn("--mode kernel-replay", completed.stderr)

@@ -1,14 +1,15 @@
 # Step-3.7-Flash 到 KLX P800 的最小自动适配方案
 
-> 当前版本：Contract revision 5
+> 当前版本：Contract revision 6
 >
-> 当前扫描：`runs/scan-006`
+> 当前状态：`ACTIVE / SCAN`，最近绑定为 `runs/spec-binding-005`
 >
-> 当前选择：`sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul`
+> 当前扫描输入：`runs/scan-006` 只作 revision 5 历史线索；revision 6 Scan Run
+> 尚未生成
 >
-> 证据边界：唯一实际采集 Session 和 Handoff Bundle 已封存，manifest 已在
-> CUDA/P800 两端通过；P800 baseline 的三个 shape 中两个精度失败，Working State
-> 为 `ACTIVE / P800_REPAIR`，尚未领取 attempt 1
+> 证据边界：revision 5 的单算子 CUDA/P800 数值证据保留为历史；`35aa72e`
+> 的自定义 repair helper 未通过正式审查。revision 6 不复用旧 Golden 冒充全队列
+> 证据。
 
 ## 1. 目标
 
@@ -16,8 +17,8 @@
 
 1. 沿 Step-3.7-Flash 的实际输入路径扫描 CUDA/Kunlun 实现差异；
 2. 把缺口定位到源码中已经存在的 Kernel Call；
-3. 扫描完成后，从真实缺口队列选择最小 Demo；
-4. 在 CUDA 机器一次采集最多三个真实 shape；
+3. 扫描完成后，把真实缺口按最小可重放边界排成队列；
+4. 在 CUDA 机器的一次模型 Session 中，为每个计划修复项采集最多三个真实 shape；
 5. 人工把交接包复制到 P800；
 6. P800 只依赖 Golden Sample 反复重放、修复和比较；
 7. 上下文被压缩或换 Agent 后，仍能从 `migration-spec.md` 恢复唯一下一步。
@@ -45,6 +46,13 @@ revision 5 改成：
 旧 `scan-004`、`spec-binding-003` 和 MLP adapter 保留为历史，不改写，也不能消费
 revision 5。
 
+revision 6 继续收紧两个问题：
+
+- 简单修复必须直接写在原生产调用位置；candidate replay 仍调用原有 P800
+  Kernel Call，不允许新增生产 helper 或通用 `<module>:<callable>` 协议；
+- 一个算子通过后不能结束 Skill。唯一 CUDA Session 要先收齐本轮 gap queue 的
+  Golden，P800 再按队列连续修复，直到全部通过或出现明确停止条件。
+
 ## 3. 为什么必须由 Spec 驱动
 
 `migration-spec.md` 分成两个部分：
@@ -69,7 +77,7 @@ revision 5。
 
 ## 4. 固定 Contract
 
-revision 5 固定：
+revision 6 固定：
 
 - 模型：`Step-3.7-Flash`；
 - CUDA SGLang：`49e384ce9d304648e9959666ecb8ce8cd98d0deb`；
@@ -152,12 +160,12 @@ Step3p7ForConditionalGeneration.forward
 - Kunlun 上层替换：
   `sglang_kunlun/hooks/layers/quantization/unquant.py:32-155`。
 
-## 6. scan-006 结果
+## 6. revision 5 的 scan-006 结果
 
 `scan-005` 已封存并保持字节不变。复核发现它漏掉了 clamp SwiGLU，并把视觉路径
 识别错了；因此按 Run 不可变规则新建 `scan-006`，没有原地改写旧证据。
 
-`scan-006` 记录 11 个当前输入路径上的 CUDA 专用 Kernel Call：
+`scan-006` 记录 11 个固定输入路径上的 CUDA 专用 Kernel Call：
 
 - `READY=6`
 - `CAPTURE_REQUIRED=5`
@@ -172,17 +180,19 @@ Step3p7ForConditionalGeneration.forward
 5. `sglang.srt.layers.attention.triton_ops.prefill_attention._fwd_kernel`
 
 这里的 `CAPTURE_REQUIRED` 只表示固定源码下缺少 Kunlun 等价调用，需要 CUDA Golden
-和 P800 baseline。它不表示已经在 P800 实机失败。
+和 P800 baseline。它不表示已经在 P800 实机失败。revision 6 可以复用这份源码
+分析作为线索，但必须形成绑定新 Contract 的不可变 Scan Run，并把五项全部写入
+capture plan。
 
 ## 7. 候选比较
 
 | 候选 | 固定输入可达性 | 需要保存的直接参数 | 输出与状态 | 修复面 | 结论 |
 |---|---|---|---|---|---|
-| `_swiglu_silu_clamp_mul` | 文本 MoE 第 43、44 层可达 | 无 | 单 Tensor、无 TP 通信 | 让 Kunlun SwiGLU 保留已有 limit 语义 | 首选 |
-| `gemma_rmsnorm` | 文本路径每层 q/k norm 必达 | 一个 1-D `weight` | 单 Tensor、无 TP 通信 | 可复用已有 Kunlun RMSNorm | 延后 |
-| `gemma_fused_add_rmsnorm` | 文本路径必达 | 一个 1-D `weight` | 两个 in-place Tensor | 可复用 fused RMSNorm，但验证更复杂 | 延后 |
-| `topk_sigmoid` | MoE 文本路径必达 | `correction_bias[288]` | FP32 weights + INT32 ids | 需要保证 biased top-k、归一化和 id 顺序 | 延后 |
-| 视觉 `_fwd_kernel` | 需要单图且 CUDA mm backend 为 Triton | 无 | q/k/v、序列 metadata、布局较多 | 需要映射到 Kunlun attention | 延后 |
+| `_swiglu_silu_clamp_mul` | 文本 MoE 第 43、44 层可达 | 无 | 单 Tensor、无 TP 通信 | 让 Kunlun SwiGLU 保留已有 limit 语义 | 队列第 1 项 |
+| `gemma_rmsnorm` | 文本路径每层 q/k norm 必达 | 一个 1-D `weight` | 单 Tensor、无 TP 通信 | 可复用已有 Kunlun RMSNorm | 后续队列项 |
+| `gemma_fused_add_rmsnorm` | 文本路径必达 | 一个 1-D `weight` | 两个 in-place Tensor | 可复用 fused RMSNorm，但验证更复杂 | 后续队列项 |
+| `topk_sigmoid` | MoE 文本路径必达 | `correction_bias[288]` | FP32 weights + INT32 ids | 需要保证 biased top-k、归一化和 id 顺序 | 后续队列项 |
+| 视觉 `_fwd_kernel` | 需要单图且 CUDA mm backend 为 Triton | 无 | q/k/v、序列 metadata、布局较多 | 需要映射到 Kunlun attention | 后续队列项 |
 
 ### 7.1 为什么不是 topk_sigmoid
 
@@ -339,7 +349,7 @@ P800 actual output 只在内存中参与比较，不落盘。
 | 采集插件 | Hook 现有调用、保存允许的输入/参数/输出 | 新增 helper 或自定义算子 |
 | `replay_compare.py` | self-replay、当前活动边界的 P800 replay、结构与精度比较 | 放宽容差、决定修复位置或假设函数签名 |
 | `handoff_bundle.py` | self-replay 前记录样本文件摘要，生成与校验 manifest | 自动跨机器复制 |
-| `workspace_guard.py` | 固定基线、按每轮 Agent 声明的文件保护修改、保存 patch | 选择修复假设、生成代码、自动 commit/push |
+| `workspace_guard.py` | 固定基线、保护每轮文件、保存累计 patch、把活动 replay 与全部历史回归作为同一门槛、失败时恢复上一份通过 patch | 选择修复假设、生成代码、自动 commit/push |
 
 当前代码中的 MLP adapter 是 revision 4 历史实现。revision 5 的
 `_swiglu_silu_clamp_mul` adapter 已实现：采集插件 Hook 原调用，rank 0 collector
@@ -356,14 +366,16 @@ P800 actual output 只在内存中参与比较，不落盘。
 
 attempt replay 不能因为 standalone baseline adapter 容易调用，就默认候选补丁已经
 生效。固定 Kunlun 源码的真实入口接收模型层和 dispatch 数据，SwiGLU 是其内部
-调用，因此流程不假设存在统一的 `<module>:<function>(x, limit)` 接口。Agent 每轮
-根据源码决定修复位置与原始 Kernel Call 重放方式。当前控制器只接受 baseline
-adapter；P800 Agent 在领取 attempt 前先补齐并测试 repair replay adapter，让
-`replay_compare.py` 和 `workspace_guard.py` 能封存该原始边界的结果，并把源码
-位置、命令和日志写入新的 adapter Run。这个准备动作不修改 SGLang-Kunlun、不计
-repair attempt。重放代码只负责参数装配，不能在 SGLang-Kunlun 中新增 helper、
-自定义算子或另一份修复逻辑。`workspace_guard.py` 随后继续负责本轮声明的文件、
-完整 `candidate.patch`、replay 顺序与失败恢复。
+调用，因此流程不提供统一的 `<module>:<function>` 导入协议。Agent 每轮根据源码
+决定修复位置与原始 Kernel Call 的参数装配。候选 replay 启动前和结束后都把实际
+worktree 的完整 diff 与 `candidate.patch` 逐字节比较；当前 SwiGLU adapter 还从
+`unquantized_fused_moe_apply_kunlun` 的现有 `kunlun_ops.swiglu` 调用确认
+`x/y` 沿用基线、`limit` 来自 `layer.moe_runner_config.gemm1_clamp_limit`，且
+`None` 分支保持原调用；常量、错接输入或不可达伪调用都不能打开候选 replay。
+`candidate.patch` 与 replay 配置必须互相绑定，
+但 `invocation_target` 仍是 Scan 记录的原调用，例如
+`kunlun_ops.swiglu`。重放代码只能装配真实输入和参数，不能复制修复算法或在生产
+源码新增 helper。`workspace_guard.py` 负责累计 patch、replay 顺序与失败恢复。
 
 `scan-006` 是不可变证据，所以其中的 `adapter_status=NOT_IMPLEMENTED` 不会被原地
 更新。初始实现证据保存在 `runs/adapter-001`；交接包 code review 后的当前源码
@@ -374,22 +386,21 @@ preflight，且没有消耗正式 Session。
 ## 11. 运行流程
 
 ```text
-Contract revision 5
-  -> spec-binding-004
-  -> scan-005（历史初稿）
-  -> scan-006（纠正后当前证据）
-  -> 扫描后选择 _swiglu_silu_clamp_mul
-  -> 实现并测试该 kernel 的 adapter
+Contract revision 6
+  -> spec-binding-005
+  -> 新 Scan Run（scan-006 只作历史线索）
+  -> 排好完整 gap queue，第一项成为 active_operator
+  -> 为全部计划项实现并测试 adapter
   -> CUDA preflight（不消耗正式 Session）
-  -> 一次 CUDA Golden Capture，最多三个 shape
-  -> 记录 Golden Sample 文件大小与 SHA-256
-  -> CUDA self-replay
-  -> 构建并校验 Handoff Bundle
+  -> 一次 CUDA 模型 Session 收齐全部计划项
+     每个算子最多三个 shape
+  -> 逐算子记录样本摘要并完成 CUDA self-replay
+  -> 一次构建并校验包含全部 Golden 的 Handoff Bundle
   -> 人工复制
   -> P800 manifest 校验
-  -> baseline replay
-  -> 最多五轮修复
-  -> PASS 或有证据的 BLOCKED
+  -> 按队列 baseline / 最多五轮修复
+  -> 当前项通过后回归旧项并自动进入下一项
+  -> 全部通过才 PASS / DONE
 ```
 
 ## 12. 停止规则
@@ -400,14 +411,14 @@ Contract revision 5
 - 实际 hook 不是 Scan Run 记录的现有调用；
 - 需要保存完整 checkpoint 或 module state；
 - 唯一 CUDA Session 已消耗但 Golden 不可信；
-- P800 baseline 全部通过，说明首选不是实机 correctness gap；
+- 某项 P800 baseline 全部通过时，该行直接记 PASS 并进入下一项，不伪造缺口；
 - 修复需要新 C++、自定义 kernel、底层注册或完整模型改动；
 - 第五轮仍失败；
 - 工作区存在无法解释的已有修改。
 
-性能不属于本 Demo 门槛。首个 Demo 只要求最多三个真实 shape 的正确性通过。
+性能不属于本 Demo 门槛。每个算子只要求最多三个真实 shape 的正确性通过。
 
-## 13. 当前下一步
+## 13. revision 5 历史执行证据
 
 `runs/p800-portability-r5-001` 已证明三个 CUDA BF16 样本可由 P800 修改版 Torch
 读回，固定比较器正常 PASS 并能拒绝有意数值偏差，且没有保存 P800 actual Tensor。
@@ -450,14 +461,52 @@ baseline 检查三个 Golden shape：一个通过，两个仅出现
 `runs/p800-baseline-review-r5-001`，没有反序列化 Tensor，且 baseline 不计修复
 轮数。
 
-当前 Working State 为 revision 32 `ACTIVE / P800_REPAIR`，`attempts_used: 0`、
-`active_hypothesis: null`。下一步不是由 Codex 或人工指定 attempt1，而是在 P800
-的 Claude Code 中调用项目 `model-adaptation` Skill。Migration Agent 自主读取
-失败证据与 Kunlun 源码，选择每轮假设、最小文件、修复实现和原始 Kernel Call
-重放方式，先补齐并封存 repair replay adapter，再生成修改、封存 patch 并比较
-全部三个 shape，直到 `PASS`、`BLOCKED` 或 `NEEDS_HUMAN`。baseline 的
-`kunlun_ops.swiglu` 直接调用只证明当前缺口，不能单独证明任意候选补丁已经生效。
-启动步骤见
-`model-adaptation/references/claude-p800-repair.md`。
+旧 Claude 执行随后形成 `runs/repair-attempt-1-r5-001`：三个 shape 数值通过，但
+补丁新增 `apply_gemm1_swiglu_clamp`，replay 又引入通用
+`repair-kernel-call/v1:<module>:<callable>`。正式双轴审查
+`runs/code-review-35aa72e-001` 因其改变原始 Kernel Call 边界而拒绝实现形态。
+数值证据保留，旧 Run 不改写。
 
-完整机器可读扫描证据见 `runs/scan-006/result.json`；原始 `scan-005` 保留为历史。
+修正后的建议补丁保存在 `runs/inline-repair-correction-r5-001`：它只在
+`unquantized_fused_moe_apply_kunlun` 原调用位置读取
+`gemm1_clamp_limit`，并直接传给已有 `kunlun_ops.swiglu`。SOURCE 侧没有把它标成
+P800 PASS；需要设备验证时仍应形成新 Run。
+
+## 14. revision 6 当前状态与自动续行
+
+当前 Working State 为 revision 39 `ACTIVE / SCAN`。`runs/spec-binding-005`
+已证明 revision 6 Contract Data 可执行，`runs/operator-queue-tool-002` 封存了
+原调用边界和累计补丁流转的 SOURCE 证据；唯一下一步是生成新的完整 Scan Run。
+revision 6 的实际 operator 尚未由新 Scan Run 决定，因此逐算子 adapter、一个进程
+加载多个 collector 和包含多个 Golden Run 的 bundle 仍是明确的 `PENDING`；旧
+revision 5 单算子 runbook 不可直接执行。
+
+gap queue 每行直接保存：
+
+```text
+operator_id
+scan_verdict
+golden_run
+repair_status
+attempts_used
+passing_run
+```
+
+P800 阶段不增加新的编排器。Skill 自身按表格顺序工作：
+
+1. 领取 attempt 时封存此前所有已通过且有 Golden 的 operator id；
+2. 当前项 replay 通过后，用同一累计 patch 回放上述全部 operator；
+3. `finish-attempt` 只有在活动项和全部回归均通过时才封存 PASS 并保留 patch；
+4. 当前行改为 `PASS`；
+5. 自动把下一行改为 `ACTIVE` 并立即执行 baseline；
+6. `workspace_guard.py --accepted-result` 确认下一项确实从此前最近一份非空
+   `passing_run` 的累计 patch 开始；baseline 直接 PASS 的行只沿用该指针，不会
+   伪造一份空 patch；
+7. 活动项或任一历史回归失败都只恢复到该累计 patch，不会抹掉已通过修复；
+8. accepted Run 会携带此前完整回归列表，第三个及以后算子不能删掉较早的通过项；
+9. 只有全部行都是 `PASS` 才写 `PASS / DONE`。发生过修复时保留最后一份完整累计
+   patch；若全部 baseline 直接 PASS，则以固定 revision 的干净工作区和全空
+   `passing_run` 合法闭环。
+
+如果下一项没有 SEALED Golden，说明唯一 CUDA Session 或交接包不完整，流程进入
+有证据的 `BLOCKED`，不会临时回 CUDA 再开一次采集。

@@ -182,7 +182,8 @@ class Ticket11ScanArtifactTest(unittest.TestCase):
         current_scan = json.loads(
             (ROOT / "runs" / "scan-006" / "result.json").read_text()
         )
-        self.assertIn("- `scan_run`: `runs/scan-006`", spec)
+        self.assertIn("- `scan_run`: `null`", spec)
+        self.assertIn("`scan-006` 和 revision 5", spec)
         self.assertEqual(self.result["supersedes"], "runs/scan-001")
         self.assertEqual(target_only_scan["supersedes"], "runs/scan-002")
         self.assertEqual(mlp_scan["supersedes"], "runs/scan-003")

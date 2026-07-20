@@ -1,0 +1,11 @@
+{
+  "action": "code-and-spec-review",
+  "execution_site": "SOURCE",
+  "fixed_point": "03cb3a1451e6d34ce6ec4342954ebd2d8e4aa947",
+  "passed": false,
+  "review_sha256": "887198d3c39e9e0566f84a4a96b8d9e65666511c4ff1eeac22ec3d14b7e5bede",
+  "reviewed_commit": "35aa72ee8cfb3c87851f9ca2771c2738023890c2",
+  "standards_findings": 2,
+  "spec_findings": 4,
+  "summary": "Numerical evidence is retained, but the production helper, arbitrary callable replay protocol, and terminal state do not satisfy the original Kernel Call boundary or queue-continuation requirement."
+}

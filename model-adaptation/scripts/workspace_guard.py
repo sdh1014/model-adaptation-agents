@@ -20,13 +20,13 @@ from model_adaptation_capture.contracts import (
     KUNLUN_SWIGLU_TARGET,
     SWIGLU_CLAMP_OPERATOR_ID,
     checkpoint_metadata,
-    parse_repair_invocation_target,
 )
 from replay_compare import (
     ToolError as ReplayToolError,
     _kernel_sample_files_sha256,
     _load_kernel_capture_state,
     _validate_kernel_worker_result,
+    load_candidate_replay_metadata,
 )
 
 
@@ -263,6 +263,106 @@ def require_clean_baseline(
         )
 
 
+def load_accepted_result(
+    result_path: Optional[Path],
+    *,
+    binding: Dict[str, Any],
+    baseline: str,
+    worktree: Path,
+) -> Dict[str, Any]:
+    if result_path is None:
+        return {
+            "result": None,
+            "result_sha256": None,
+            "patch_path": None,
+            "patch_sha256": None,
+            "modified_paths": [],
+            "operator_id": None,
+            "regression_operator_ids": [],
+        }
+    if result_path.is_symlink():
+        raise ToolError("accepted passing result must not be a symbolic link")
+    result_path = result_path.resolve()
+    result = read_json_object(result_path, "accepted passing result")
+    checks = {
+        "tool": "workspace_guard.py",
+        "action": "finish-attempt",
+        "spec_binding": binding,
+        "baseline_revision": baseline,
+        "worktree": str(worktree),
+        "passed": True,
+        "workspace_state": "PATCH_RETAINED",
+        "patch_path": "candidate.patch",
+    }
+    for field, expected in checks.items():
+        if result.get(field) != expected:
+            raise ToolError(f"accepted passing result {field} has drifted")
+    modified_paths = validate_allowed_paths(
+        worktree,
+        result.get("modified_paths", []),
+    )
+    if result.get("modified_paths") != modified_paths:
+        raise ToolError("accepted passing result modified_paths have drifted")
+    patch_path = result_path.parent / "candidate.patch"
+    if patch_path.is_symlink() or not patch_path.is_file():
+        raise ToolError("accepted candidate.patch is missing")
+    patch_sha256 = file_sha256(patch_path)
+    if result.get("patch_sha256") != patch_sha256:
+        raise ToolError("accepted candidate.patch SHA-256 has drifted")
+    operator_id = result.get("operator_id")
+    if not isinstance(operator_id, str) or not operator_id:
+        raise ToolError("accepted passing result operator_id is invalid")
+    regression_operator_ids = result.get("regression_operator_ids")
+    if (
+        not isinstance(regression_operator_ids, list)
+        or any(
+            not isinstance(item, str)
+            or not item
+            or item.strip() != item
+            or "\n" in item
+            for item in regression_operator_ids
+        )
+        or len(regression_operator_ids) != len(set(regression_operator_ids))
+        or operator_id in regression_operator_ids
+    ):
+        raise ToolError(
+            "accepted passing result regression operator list has drifted"
+        )
+    return {
+        "result": str(result_path),
+        "result_sha256": file_sha256(result_path),
+        "patch_path": str(patch_path.resolve()),
+        "patch_sha256": patch_sha256,
+        "modified_paths": modified_paths,
+        "operator_id": operator_id,
+        "regression_operator_ids": regression_operator_ids,
+    }
+
+
+def require_accepted_baseline(
+    worktree: Path,
+    baseline: str,
+    accepted: Dict[str, Any],
+) -> None:
+    changes = changed_paths(worktree)
+    expected_paths = set(accepted["modified_paths"])
+    if changes != expected_paths:
+        if not expected_paths:
+            raise ToolError(
+                "unknown workspace changes: " + ", ".join(sorted(changes))
+            )
+        raise ToolError(
+            "workspace does not match accepted passing patch: "
+            + ", ".join(sorted(changes ^ expected_paths))
+        )
+    if not changes:
+        return
+    actual_patch = build_candidate_patch(worktree, baseline, changes)
+    expected_patch = Path(accepted["patch_path"]).read_bytes()
+    if actual_patch != expected_patch:
+        raise ToolError("workspace bytes do not match accepted passing patch")
+
+
 def replay_evidence_sha256(
     result_path: Path,
     evidence_names: list[str],
@@ -296,7 +396,14 @@ def validate_p800_replay_evidence(
     contract: Dict[str, Any],
     *,
     repair_target: Optional[bool] = None,
+    expected_operator_id: str = SWIGLU_CLAMP_OPERATOR_ID,
+    expected_candidate_operator_id: Optional[str] = None,
+    expected_candidate_result_path: Optional[Path] = None,
 ) -> str:
+    if expected_operator_id != SWIGLU_CLAMP_OPERATOR_ID:
+        raise ToolError(
+            f"P800 replay adapter is not implemented for {expected_operator_id!r}"
+        )
     evidence_names = [
         "replay-config.json",
         "worker-result.json",
@@ -335,7 +442,7 @@ def validate_p800_replay_evidence(
         sample_files_digest = _kernel_sample_files_sha256(
             golden_run,
             binding,
-            SWIGLU_CLAMP_OPERATOR_ID,
+            expected_operator_id,
             state,
         )
     except (KeyError, TypeError, ValueError, ReplayToolError) as error:
@@ -344,38 +451,62 @@ def validate_p800_replay_evidence(
         ) from error
 
     invocation_target = config.get("invocation_target")
-    repair_fields: Dict[str, Any] = {}
-    if invocation_target == KUNLUN_SWIGLU_TARGET:
-        if repair_target is True:
+    if invocation_target != KUNLUN_SWIGLU_TARGET:
+        raise ToolError(
+            "P800 replay must keep the original kunlun_ops.swiglu boundary"
+        )
+    candidate = config.get("candidate")
+    candidate_fields: Dict[str, Any] = {}
+    if repair_target is True and not isinstance(candidate, dict):
+        raise ToolError("attempt replay is missing candidate.patch binding")
+    if repair_target is False and candidate is not None:
+        raise ToolError("baseline replay must not carry candidate.patch binding")
+    if candidate is not None:
+        candidate_result_raw = candidate.get("result")
+        if (
+            not isinstance(candidate_result_raw, str)
+            or not candidate_result_raw
+        ):
+            raise ToolError("candidate replay result path is invalid")
+        candidate_result_path = Path(candidate_result_raw)
+        if (
+            expected_candidate_result_path is not None
+            and candidate_result_raw
+            != str(expected_candidate_result_path.resolve())
+        ):
             raise ToolError(
-                "attempt replay must route through the repaired Kernel Call "
-                "boundary, not the baseline adapter"
+                "candidate replay belongs to another attempt result"
             )
-    else:
-        if repair_target is False:
-            raise ToolError(
-                "baseline replay must use the plain Kunlun adapter"
-            )
+        candidate_worktree = candidate.get("sglang_kunlun_worktree")
+        if not isinstance(candidate_worktree, str) or not candidate_worktree:
+            raise ToolError("candidate replay worktree is invalid")
         try:
-            repair_entry = parse_repair_invocation_target(invocation_target)
-        except ValueError as error:
+            expected_candidate = load_candidate_replay_metadata(
+                candidate_result_path,
+                binding=binding,
+                worktree=Path(candidate_worktree),
+                baseline_revision=contract["source"][
+                    "sglang_kunlun_revision"
+                ],
+            )
+        except ReplayToolError as error:
             raise ToolError(
-                f"P800 replay invocation target has drifted: {error}"
+                f"candidate replay worktree evidence is invalid: {error}"
             ) from error
-        expected_revision = contract["source"]["sglang_kunlun_revision"]
-        worktree = config.get("sglang_kunlun_worktree")
-        if not isinstance(worktree, str) or not worktree:
-            raise ToolError("P800 repair replay is missing the SGLang-Kunlun worktree")
-        repair_fields = {
-            "repair_entry": repair_entry,
-            "sglang_kunlun_worktree": worktree,
-            "sglang_kunlun_revision": expected_revision,
-        }
+        if candidate != expected_candidate:
+            raise ToolError("candidate replay metadata has drifted")
+        if (
+            expected_candidate_operator_id is not None
+            and candidate.get("candidate_operator_id")
+            != expected_candidate_operator_id
+        ):
+            raise ToolError("candidate replay belongs to another repair attempt")
+        candidate_fields = {"candidate": expected_candidate}
 
     expected_config = {
         "schema": KERNEL_REPLAY_CONFIG_SCHEMA,
         "spec_binding": binding,
-        "operator_id": SWIGLU_CLAMP_OPERATOR_ID,
+        "operator_id": expected_operator_id,
         "execution_site": "p800",
         "invocation_target": invocation_target,
         "golden_run": str(golden_run),
@@ -387,7 +518,7 @@ def validate_p800_replay_evidence(
         "precision_gate": contract["precision_gate"],
         "sample_files_sha256": sample_files_digest,
         "allow_active_capture": False,
-        **repair_fields,
+        **candidate_fields,
     }
     if config != expected_config:
         raise ToolError("P800 replay config has drifted")
@@ -406,7 +537,7 @@ def validate_p800_replay_evidence(
         "tool": "replay_compare.py",
         "action": "kernel-replay",
         "spec_binding": binding,
-        "operator_id": SWIGLU_CLAMP_OPERATOR_ID,
+        "operator_id": expected_operator_id,
         "execution_site": "p800",
         "invocation_target": invocation_target,
         "passed": worker["passed"],
@@ -417,6 +548,8 @@ def validate_p800_replay_evidence(
         "actual_tensors_saved": False,
         "evidence": evidence_names,
     }
+    if candidate is not None:
+        wrapper_checks["candidate_patch_sha256"] = candidate["patch_sha256"]
     for field, expected in wrapper_checks.items():
         if result.get(field) != expected:
             raise ToolError(f"P800 replay result {field} has drifted")
@@ -432,6 +565,12 @@ def validate_p800_replay_evidence(
     ]
     if log_lines[:3] != expected_prefix:
         raise ToolError("P800 replay process result has drifted")
+    if candidate is not None and (
+        len(log_lines) < 4
+        or log_lines[3]
+        != f"candidate_patch_sha256={candidate['patch_sha256']}"
+    ):
+        raise ToolError("P800 replay log lost its candidate.patch binding")
     return replay_evidence_sha256(result_path, evidence_names)
 
 
@@ -442,6 +581,9 @@ def validate_replay_result(
     *,
     allow_synthetic_replay: bool,
     repair_target: Optional[bool] = None,
+    expected_operator_id: str = SWIGLU_CLAMP_OPERATOR_ID,
+    expected_candidate_operator_id: Optional[str] = None,
+    expected_candidate_result_path: Optional[Path] = None,
 ) -> tuple[Dict[str, Any], str, str]:
     result = read_json_object(result_path, "replay result")
     checks = {
@@ -453,6 +595,8 @@ def validate_replay_result(
             raise ToolError(f"replay result {field} has drifted")
     if not isinstance(result.get("passed"), bool):
         raise ToolError("replay result passed must be a boolean")
+    if result.get("operator_id") != expected_operator_id:
+        raise ToolError("replay result operator_id has drifted")
     action = result.get("action")
     if action == "synthetic":
         if binding.get("spec_id") != TEST_SPEC_ID:
@@ -494,6 +638,9 @@ def validate_replay_result(
             binding,
             contract,
             repair_target=repair_target,
+            expected_operator_id=expected_operator_id,
+            expected_candidate_operator_id=expected_candidate_operator_id,
+            expected_candidate_result_path=expected_candidate_result_path,
         )
     return result, file_sha256(result_path), evidence_digest
 
@@ -505,7 +652,14 @@ def common_result(
     baseline: str,
     worktree: Path,
     allowed_paths: list[str],
+    operator_id: str = SWIGLU_CLAMP_OPERATOR_ID,
+    accepted: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
+    accepted = accepted or {
+        "result": None,
+        "result_sha256": None,
+        "patch_sha256": None,
+    }
     return {
         "tool": "workspace_guard.py",
         "action": action,
@@ -513,6 +667,11 @@ def common_result(
         "baseline_revision": baseline,
         "worktree": str(worktree),
         "allowed_paths": allowed_paths,
+        "operator_id": operator_id,
+        "accepted_passing_run": accepted["result"],
+        "accepted_passing_run_sha256": accepted["result_sha256"],
+        "accepted_patch_sha256": accepted["patch_sha256"],
+        "accepted_modified_paths": accepted.get("modified_paths", []),
     }
 
 
@@ -521,11 +680,23 @@ def run_check_baseline(
     run_dir: Path,
     worktree: Path,
     raw_allowed_paths: list[str],
+    operator_id: str = SWIGLU_CLAMP_OPERATOR_ID,
+    accepted_result_path: Optional[Path] = None,
 ) -> None:
     binding, _contract, baseline, _ = contract_context(spec_path)
     worktree = validate_worktree(worktree, baseline)
     allowed_paths = validate_allowed_paths(worktree, raw_allowed_paths)
-    require_clean_baseline(worktree, allowed_paths)
+    accepted = load_accepted_result(
+        accepted_result_path,
+        binding=binding,
+        baseline=baseline,
+        worktree=worktree,
+    )
+    if not set(accepted["modified_paths"]).issubset(set(allowed_paths)):
+        raise ToolError(
+            "allowed paths must include every previously accepted modified path"
+        )
+    require_accepted_baseline(worktree, baseline, accepted)
     create_run_dir(run_dir)
     result = {
         **common_result(
@@ -534,16 +705,20 @@ def run_check_baseline(
             baseline=baseline,
             worktree=worktree,
             allowed_paths=allowed_paths,
+            operator_id=operator_id,
+            accepted=accepted,
         ),
         "passed": True,
-        "workspace_clean": True,
+        "workspace_clean": not accepted["modified_paths"],
+        "workspace_ready": True,
         "evidence": ["workspace.log"],
     }
     write_json(run_dir / "result.json", result)
     (run_dir / "workspace.log").write_text(
         "action=check-baseline\n"
         "passed=true\n"
-        "workspace_clean=true\n",
+        f"workspace_clean={str(not accepted['modified_paths']).lower()}\n"
+        "workspace_ready=true\n",
         encoding="utf-8",
     )
 
@@ -555,11 +730,23 @@ def run_assess_baseline(
     raw_allowed_paths: list[str],
     replay_result_path: Path,
     allow_synthetic_replay: bool,
+    operator_id: str = SWIGLU_CLAMP_OPERATOR_ID,
+    accepted_result_path: Optional[Path] = None,
 ) -> None:
     binding, contract, baseline, _ = contract_context(spec_path)
     worktree = validate_worktree(worktree, baseline)
     allowed_paths = validate_allowed_paths(worktree, raw_allowed_paths)
-    require_clean_baseline(worktree, allowed_paths)
+    accepted = load_accepted_result(
+        accepted_result_path,
+        binding=binding,
+        baseline=baseline,
+        worktree=worktree,
+    )
+    if not set(accepted["modified_paths"]).issubset(set(allowed_paths)):
+        raise ToolError(
+            "allowed paths must include every previously accepted modified path"
+        )
+    require_accepted_baseline(worktree, baseline, accepted)
     (
         replay_result,
         replay_digest,
@@ -570,6 +757,7 @@ def run_assess_baseline(
         contract,
         allow_synthetic_replay=allow_synthetic_replay,
         repair_target=False,
+        expected_operator_id=operator_id,
     )
     create_run_dir(run_dir)
     passed = replay_result["passed"]
@@ -580,11 +768,14 @@ def run_assess_baseline(
             baseline=baseline,
             worktree=worktree,
             allowed_paths=allowed_paths,
+            operator_id=operator_id,
+            accepted=accepted,
         ),
         "passed": passed,
         "gap_observed": not passed,
         "attempts_used": 0,
-        "workspace_clean": True,
+        "workspace_clean": not accepted["modified_paths"],
+        "workspace_ready": True,
         "replay_result": str(replay_result_path.resolve()),
         "replay_result_sha256": replay_digest,
         "replay_evidence_sha256": replay_evidence_digest,
@@ -596,7 +787,8 @@ def run_assess_baseline(
         f"replay_passed={str(passed).lower()}\n"
         f"gap_observed={str(not passed).lower()}\n"
         "attempts_used=0\n"
-        "workspace_clean=true\n",
+        f"workspace_clean={str(not accepted['modified_paths']).lower()}\n"
+        "workspace_ready=true\n",
         encoding="utf-8",
     )
 
@@ -630,11 +822,15 @@ def attempt_history_directory(
     *,
     binding: Dict[str, Any],
     baseline: str,
+    operator_id: str,
+    accepted_patch_sha256: Optional[str],
 ) -> Path:
     identity = {
         "spec_binding": binding,
         "baseline_revision": baseline,
         "worktree": str(worktree),
+        "operator_id": operator_id,
+        "accepted_patch_sha256": accepted_patch_sha256,
     }
     digest = hashlib.sha256(
         json.dumps(
@@ -665,6 +861,9 @@ def validate_previous_result(
     binding: Dict[str, Any],
     baseline: str,
     worktree: Path,
+    operator_id: str,
+    accepted: Dict[str, Any],
+    regression_operator_ids: list[str],
 ) -> tuple[Path, str, Path]:
     if result_path.is_symlink():
         raise ToolError("previous repair result must not be a symlink")
@@ -675,6 +874,11 @@ def validate_previous_result(
         "spec_binding": binding,
         "baseline_revision": baseline,
         "worktree": str(worktree),
+        "operator_id": operator_id,
+        "accepted_passing_run": accepted["result"],
+        "accepted_passing_run_sha256": accepted["result_sha256"],
+        "accepted_patch_sha256": accepted["patch_sha256"],
+        "accepted_modified_paths": accepted["modified_paths"],
     }
     for field, expected in checks.items():
         if previous.get(field) != expected:
@@ -695,7 +899,7 @@ def validate_previous_result(
             "passed": False,
             "gap_observed": True,
             "attempts_used": 0,
-            "workspace_clean": True,
+            "workspace_ready": True,
         }
         for field, expected in baseline_checks.items():
             if previous.get(field) != expected:
@@ -706,6 +910,8 @@ def validate_previous_result(
             worktree,
             binding=binding,
             baseline=baseline,
+            operator_id=operator_id,
+            accepted_patch_sha256=accepted["patch_sha256"],
         )
     else:
         attempt_checks = {
@@ -762,7 +968,13 @@ def validate_previous_result(
             "spec_binding": binding,
             "baseline_revision": baseline,
             "worktree": str(worktree),
+            "operator_id": operator_id,
+            "accepted_passing_run": accepted["result"],
+            "accepted_passing_run_sha256": accepted["result_sha256"],
+            "accepted_patch_sha256": accepted["patch_sha256"],
+            "accepted_modified_paths": accepted["modified_paths"],
             "attempt": number,
+            "regression_operator_ids": regression_operator_ids,
         }
         for field, expected in claim_checks.items():
             if claim.get(field) != expected:
@@ -787,7 +999,53 @@ def validate_previous_result(
             raise ToolError(
                 "previous result allowed_paths do not match its attempt claim"
             )
+        if (
+            previous.get("regression_operator_ids")
+            != regression_operator_ids
+            or previous_claim.get("regression_operator_ids")
+            != regression_operator_ids
+        ):
+            raise ToolError(
+                "previous attempt regression operator list has drifted"
+            )
     return result_path, previous_digest, history_dir
+
+
+def validate_regression_operator_ids(
+    operator_id: str,
+    raw_operator_ids: list[str],
+    accepted: Dict[str, Any],
+) -> list[str]:
+    if any(
+        not isinstance(item, str)
+        or not item
+        or item.strip() != item
+        or "\n" in item
+        for item in raw_operator_ids
+    ):
+        raise ToolError("regression operator ids must be non-empty lines")
+    if len(raw_operator_ids) != len(set(raw_operator_ids)):
+        raise ToolError("regression operator ids must be unique")
+    if operator_id in raw_operator_ids:
+        raise ToolError("active operator must not be listed as a regression")
+    accepted_operator_id = accepted.get("operator_id")
+    required_operator_ids = [
+        *accepted.get("regression_operator_ids", []),
+        *(
+            [accepted_operator_id]
+            if accepted_operator_id is not None
+            else []
+        ),
+    ]
+    missing_operator_ids = [
+        item for item in required_operator_ids if item not in raw_operator_ids
+    ]
+    if missing_operator_ids:
+        raise ToolError(
+            "regression operators must include the accepted patch history: "
+            + ", ".join(missing_operator_ids)
+        )
+    return raw_operator_ids
 
 
 def run_start_attempt(
@@ -798,6 +1056,9 @@ def run_start_attempt(
     attempt: int,
     hypothesis: str,
     previous_result_path: Path,
+    operator_id: str = SWIGLU_CLAMP_OPERATOR_ID,
+    accepted_result_path: Optional[Path] = None,
+    raw_regression_operator_ids: Optional[list[str]] = None,
 ) -> None:
     binding, _contract, baseline, max_attempts = contract_context(spec_path)
     if (
@@ -818,7 +1079,22 @@ def run_start_attempt(
         raise ToolError("hypothesis must be one non-empty line")
     worktree = validate_worktree(worktree, baseline)
     allowed_paths = validate_allowed_paths(worktree, raw_allowed_paths)
-    require_clean_baseline(worktree, allowed_paths)
+    accepted = load_accepted_result(
+        accepted_result_path,
+        binding=binding,
+        baseline=baseline,
+        worktree=worktree,
+    )
+    regression_operator_ids = validate_regression_operator_ids(
+        operator_id,
+        raw_regression_operator_ids or [],
+        accepted,
+    )
+    if not set(accepted["modified_paths"]).issubset(set(allowed_paths)):
+        raise ToolError(
+            "allowed paths must include every previously accepted modified path"
+        )
+    require_accepted_baseline(worktree, baseline, accepted)
     (
         previous_result_path,
         previous_result_digest,
@@ -829,6 +1105,9 @@ def run_start_attempt(
         binding=binding,
         baseline=baseline,
         worktree=worktree,
+        operator_id=operator_id,
+        accepted=accepted,
+        regression_operator_ids=regression_operator_ids,
     )
     create_run_dir(run_dir)
     try:
@@ -845,6 +1124,8 @@ def run_start_attempt(
             baseline=baseline,
             worktree=worktree,
             allowed_paths=allowed_paths,
+            operator_id=operator_id,
+            accepted=accepted,
         ),
         "attempt": attempt,
         "max_repair_attempts": max_attempts,
@@ -852,7 +1133,9 @@ def run_start_attempt(
         "previous_result": str(previous_result_path),
         "previous_result_sha256": previous_result_digest,
         "attempt_history": str(history_dir),
-        "workspace_clean": True,
+        "workspace_clean": not accepted["modified_paths"],
+        "workspace_ready": True,
+        "regression_operator_ids": regression_operator_ids,
     }
     write_json(run_dir / "attempt.json", attempt_record)
     claim = {
@@ -861,11 +1144,17 @@ def run_start_attempt(
         "baseline_revision": baseline,
         "worktree": str(worktree),
         "allowed_paths": allowed_paths,
+        "operator_id": operator_id,
+        "accepted_passing_run": accepted["result"],
+        "accepted_passing_run_sha256": accepted["result_sha256"],
+        "accepted_patch_sha256": accepted["patch_sha256"],
+        "accepted_modified_paths": accepted["modified_paths"],
         "attempt": attempt,
         "run_dir": str(run_dir.resolve()),
         "result_path": str((run_dir / "result.json").resolve()),
         "previous_result": str(previous_result_path),
         "previous_result_sha256": previous_result_digest,
+        "regression_operator_ids": regression_operator_ids,
     }
     write_exclusive_json(
         history_dir / f"attempt-{attempt:03d}.json",
@@ -877,7 +1166,8 @@ def run_start_attempt(
         f"max_repair_attempts={max_attempts}\n"
         f"hypothesis={hypothesis}\n"
         f"previous_result_sha256={previous_result_digest}\n"
-        "workspace_clean=true\n",
+        f"workspace_clean={str(not accepted['modified_paths']).lower()}\n"
+        "workspace_ready=true\n",
         encoding="utf-8",
     )
 
@@ -983,6 +1273,7 @@ def restore_candidate(
     worktree: Path,
     baseline: str,
     modified_paths: list[str],
+    accepted: Optional[Dict[str, Any]] = None,
 ) -> None:
     tracked = [
         path
@@ -1010,6 +1301,12 @@ def restore_candidate(
             raise ToolError(
                 f"refusing to remove non-file candidate path: {relative}"
             )
+    if accepted and accepted["patch_path"] is not None:
+        run_git(
+            worktree,
+            ["apply", "--binary", accepted["patch_path"]],
+        )
+        require_accepted_baseline(worktree, baseline, accepted)
 
 
 def load_attempt(
@@ -1029,7 +1326,7 @@ def load_attempt(
         "baseline_revision": baseline,
         "worktree": str(worktree),
         "max_repair_attempts": max_attempts,
-        "workspace_clean": True,
+        "workspace_ready": True,
     }
     for field, expected in checks.items():
         if attempt.get(field) != expected:
@@ -1050,6 +1347,35 @@ def load_attempt(
     )
     if attempt["allowed_paths"] != allowed_paths:
         raise ToolError("repair attempt allowed_paths have drifted")
+    operator_id = attempt.get("operator_id")
+    if not isinstance(operator_id, str) or not operator_id:
+        raise ToolError("repair attempt operator_id is invalid")
+    accepted_raw = attempt.get("accepted_passing_run")
+    if accepted_raw is not None and (
+        not isinstance(accepted_raw, str) or not accepted_raw
+    ):
+        raise ToolError("repair attempt accepted passing Run is invalid")
+    accepted = load_accepted_result(
+        Path(accepted_raw) if accepted_raw is not None else None,
+        binding=binding,
+        baseline=baseline,
+        worktree=worktree,
+    )
+    accepted_checks = {
+        "accepted_passing_run": accepted["result"],
+        "accepted_passing_run_sha256": accepted["result_sha256"],
+        "accepted_patch_sha256": accepted["patch_sha256"],
+        "accepted_modified_paths": accepted["modified_paths"],
+        "workspace_clean": not accepted["modified_paths"],
+    }
+    for field, expected in accepted_checks.items():
+        if attempt.get(field) != expected:
+            raise ToolError(f"repair attempt {field} has drifted")
+    regression_operator_ids = validate_regression_operator_ids(
+        operator_id,
+        attempt.get("regression_operator_ids", []),
+        accepted,
+    )
     previous_raw = attempt.get("previous_result")
     previous_digest = attempt.get("previous_result_sha256")
     history_raw = attempt.get("attempt_history")
@@ -1080,15 +1406,23 @@ def load_attempt(
         "baseline_revision": baseline,
         "worktree": str(worktree),
         "allowed_paths": allowed_paths,
+        "operator_id": operator_id,
+        "accepted_passing_run": accepted["result"],
+        "accepted_passing_run_sha256": accepted["result_sha256"],
+        "accepted_patch_sha256": accepted["patch_sha256"],
+        "accepted_modified_paths": accepted["modified_paths"],
         "attempt": number,
         "run_dir": str(run_dir.resolve()),
         "result_path": str((run_dir / "result.json").resolve()),
         "previous_result": previous_raw,
         "previous_result_sha256": previous_digest,
+        "regression_operator_ids": regression_operator_ids,
     }
     for field, expected in claim_checks.items():
         if claim.get(field) != expected:
             raise ToolError(f"repair attempt claim {field} has drifted")
+    attempt["_accepted"] = accepted
+    attempt["_regression_operator_ids"] = regression_operator_ids
     return attempt
 
 
@@ -1134,6 +1468,13 @@ def run_record_candidate(
         baseline,
         changes,
     )
+    accepted = attempt["_accepted"]
+    if accepted["patch_path"] is not None and (
+        patch == Path(accepted["patch_path"]).read_bytes()
+    ):
+        (run_dir / "candidate.patch").unlink()
+        (run_dir / "candidate.json").unlink()
+        raise ToolError("candidate patch does not add a new repair")
     patch_digest = hashlib.sha256(patch).hexdigest()
     result = {
         **common_result(
@@ -1142,11 +1483,14 @@ def run_record_candidate(
             baseline=baseline,
             worktree=worktree,
             allowed_paths=attempt["allowed_paths"],
+            operator_id=attempt["operator_id"],
+            accepted=accepted,
         ),
         "passed": True,
         "attempt": attempt["attempt"],
         "attempt_history": attempt["attempt_history"],
         "hypothesis": attempt["hypothesis"],
+        "regression_operator_ids": attempt["_regression_operator_ids"],
         "modified_paths": modified_paths,
         "patch_path": "candidate.patch",
         "patch_sha256": patch_digest,
@@ -1211,10 +1555,18 @@ def load_recorded_candidate(
         "baseline_revision": baseline,
         "worktree": str(worktree),
         "allowed_paths": attempt["allowed_paths"],
+        "operator_id": attempt["operator_id"],
+        "accepted_passing_run": attempt["accepted_passing_run"],
+        "accepted_passing_run_sha256": attempt[
+            "accepted_passing_run_sha256"
+        ],
+        "accepted_patch_sha256": attempt["accepted_patch_sha256"],
+        "accepted_modified_paths": attempt["accepted_modified_paths"],
         "passed": True,
         "attempt": attempt["attempt"],
         "attempt_history": attempt["attempt_history"],
         "hypothesis": attempt["hypothesis"],
+        "regression_operator_ids": attempt["_regression_operator_ids"],
         "modified_paths": modified_paths,
         "patch_path": "candidate.patch",
         "patch_sha256": patch_digest,
@@ -1246,6 +1598,7 @@ def run_finish_attempt(
     worktree: Path,
     replay_result_path: Path,
     allow_synthetic_replay: bool,
+    regression_result_paths: Optional[list[Path]] = None,
 ) -> None:
     binding, contract, baseline, max_attempts = contract_context(spec_path)
     worktree = validate_worktree(worktree, baseline)
@@ -1278,6 +1631,9 @@ def run_finish_attempt(
         contract,
         allow_synthetic_replay=allow_synthetic_replay,
         repair_target=True,
+        expected_operator_id=attempt["operator_id"],
+        expected_candidate_operator_id=attempt["operator_id"],
+        expected_candidate_result_path=run_dir / "candidate-result.json",
     )
     changes = require_known_changes(
         worktree,
@@ -1304,11 +1660,86 @@ def run_finish_attempt(
             "replay result predates the recorded candidate.patch"
         )
 
+    regression_records = []
+    expected_regressions = attempt["_regression_operator_ids"]
+    supplied_regressions = regression_result_paths or []
+    if replay_result["passed"]:
+        regressions_root = (run_dir / "regressions").resolve()
+        seen_operators = set()
+        for regression_path in supplied_regressions:
+            resolved = regression_path.resolve()
+            if (
+                resolved.name != "result.json"
+                or resolved.parent.parent != regressions_root
+            ):
+                raise ToolError(
+                    "regression result must be "
+                    "<run-dir>/regressions/<operator>/result.json"
+                )
+            raw_result = read_json_object(
+                resolved,
+                "regression replay result",
+            )
+            if resolved.stat().st_mtime_ns < candidate_mtime:
+                raise ToolError(
+                    "regression replay predates the recorded candidate.patch"
+                )
+            regression_operator = raw_result.get("operator_id")
+            if (
+                regression_operator not in expected_regressions
+                or regression_operator in seen_operators
+            ):
+                raise ToolError(
+                    "regression result operator list does not match the attempt"
+                )
+            seen_operators.add(regression_operator)
+            (
+                validated_result,
+                validated_digest,
+                validated_evidence_digest,
+            ) = validate_replay_result(
+                resolved,
+                binding,
+                contract,
+                allow_synthetic_replay=allow_synthetic_replay,
+                repair_target=True,
+                expected_operator_id=regression_operator,
+                expected_candidate_operator_id=attempt["operator_id"],
+                expected_candidate_result_path=(
+                    run_dir / "candidate-result.json"
+                ),
+            )
+            regression_records.append(
+                {
+                    "operator_id": regression_operator,
+                    "passed": validated_result["passed"],
+                    "result": str(resolved.relative_to(run_dir)),
+                    "result_sha256": validated_digest,
+                    "replay_evidence_sha256": validated_evidence_digest,
+                }
+            )
+        if seen_operators != set(expected_regressions):
+            raise ToolError(
+                "passing candidate is missing one or more required regressions"
+            )
+        regression_records.sort(
+            key=lambda item: expected_regressions.index(
+                item["operator_id"]
+            )
+        )
+    elif supplied_regressions:
+        raise ToolError(
+            "failed active replay must not carry regression results"
+        )
+
     patch_digest = hashlib.sha256(patch).hexdigest()
     candidate_record_digest = file_sha256(candidate_record_path)
+    passed = replay_result["passed"] and all(
+        record["passed"] for record in regression_records
+    )
     recovery_action = (
         "RETAIN_PATCH"
-        if replay_result["passed"]
+        if passed
         else "RESTORE_BASELINE"
     )
     outcome = {
@@ -1319,8 +1750,11 @@ def run_finish_attempt(
             baseline=baseline,
             worktree=worktree,
             allowed_paths=attempt["allowed_paths"],
+            operator_id=attempt["operator_id"],
+            accepted=attempt["_accepted"],
         ),
-        "passed": replay_result["passed"],
+        "passed": passed,
+        "active_replay_passed": replay_result["passed"],
         "attempt": attempt["attempt"],
         "attempt_history": attempt["attempt_history"],
         "hypothesis": attempt["hypothesis"],
@@ -1329,6 +1763,7 @@ def run_finish_attempt(
         "candidate_result_sha256": candidate_record_digest,
         "replay_result_sha256": replay_digest,
         "replay_evidence_sha256": replay_evidence_digest,
+        "regression_results": regression_records,
         "recovery_action": recovery_action,
     }
     outcome_path = run_dir / "outcome.json"
@@ -1348,11 +1783,12 @@ def run_finish_attempt(
             stream.write(
                 "action=seal-outcome\n"
                 f"replay_passed={str(replay_result['passed']).lower()}\n"
+                f"regressions_passed={str(passed).lower()}\n"
                 f"patch_sha256={patch_digest}\n"
                 f"recovery_action={recovery_action}\n"
             )
 
-    if replay_result["passed"]:
+    if passed:
         if not changes:
             raise ToolError(
                 "passing attempt cannot finish without its candidate patch "
@@ -1369,12 +1805,14 @@ def run_finish_attempt(
                 worktree,
                 baseline,
                 modified_paths,
+                accepted=attempt["_accepted"],
             )
         remaining = changed_paths(worktree)
-        if remaining:
+        expected_remaining = set(attempt["accepted_modified_paths"])
+        if remaining != expected_remaining:
             raise ToolError(
-                "failed attempt could not restore the fixed baseline: "
-                + ", ".join(sorted(remaining))
+                "failed attempt could not restore accepted passing patch: "
+                + ", ".join(sorted(remaining ^ expected_remaining))
             )
         workspace_state = "BASELINE_RESTORED"
 
@@ -1385,13 +1823,16 @@ def run_finish_attempt(
             baseline=baseline,
             worktree=worktree,
             allowed_paths=attempt["allowed_paths"],
+            operator_id=attempt["operator_id"],
+            accepted=attempt["_accepted"],
         ),
-        "passed": replay_result["passed"],
+        "passed": passed,
+        "active_replay_passed": replay_result["passed"],
         "attempt": attempt["attempt"],
         "attempt_history": attempt["attempt_history"],
         "max_repair_attempts": max_attempts,
         "attempt_limit_reached": (
-            not replay_result["passed"]
+            not passed
             and attempt["attempt"] == max_attempts
         ),
         "hypothesis": attempt["hypothesis"],
@@ -1402,6 +1843,8 @@ def run_finish_attempt(
         "replay_result": "replay/result.json",
         "replay_result_sha256": replay_digest,
         "replay_evidence_sha256": replay_evidence_digest,
+        "regression_operator_ids": expected_regressions,
+        "regression_results": regression_records,
         "workspace_state": workspace_state,
         "evidence": [
             "attempt.json",
@@ -1410,6 +1853,10 @@ def run_finish_attempt(
             "candidate-result.json",
             "outcome.json",
             "replay/result.json",
+            *[
+                record["result"]
+                for record in regression_records
+            ],
             "workspace.log",
         ],
     }
@@ -1420,6 +1867,7 @@ def run_finish_attempt(
         stream.write(
             "action=finish-attempt\n"
             f"replay_passed={str(replay_result['passed']).lower()}\n"
+            f"regressions_passed={str(passed).lower()}\n"
             f"patch_sha256={patch_digest}\n"
             f"workspace_state={workspace_state}\n"
         )
@@ -1448,6 +1896,22 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--hypothesis")
     parser.add_argument("--previous-result", type=Path)
     parser.add_argument(
+        "--operator-id",
+        default=SWIGLU_CLAMP_OPERATOR_ID,
+    )
+    parser.add_argument("--accepted-result", type=Path)
+    parser.add_argument(
+        "--regression-operator-id",
+        action="append",
+        default=[],
+    )
+    parser.add_argument(
+        "--regression-result",
+        action="append",
+        default=[],
+        type=Path,
+    )
+    parser.add_argument(
         "--allow-synthetic-replay",
         action="store_true",
         help=argparse.SUPPRESS,
@@ -1467,7 +1931,9 @@ def main() -> int:
                     args.hypothesis,
                     args.previous_result,
                 )
-            ) or args.allow_synthetic_replay:
+            ) or args.regression_operator_id or args.regression_result or (
+                args.allow_synthetic_replay
+            ):
                 raise ToolError(
                     "replay, attempt, hypothesis, and previous result "
                     "arguments are not "
@@ -1478,6 +1944,8 @@ def main() -> int:
                 args.run_dir,
                 args.worktree,
                 args.allowed_path,
+                args.operator_id,
+                args.accepted_result,
             )
         elif args.mode == "assess-baseline":
             if args.replay_result is None:
@@ -1488,6 +1956,8 @@ def main() -> int:
                 args.attempt is not None
                 or args.hypothesis is not None
                 or args.previous_result is not None
+                or args.regression_operator_id
+                or args.regression_result
             ):
                 raise ToolError(
                     "attempt, hypothesis, and previous result are not valid for "
@@ -1500,6 +1970,8 @@ def main() -> int:
                 args.allowed_path,
                 args.replay_result,
                 args.allow_synthetic_replay,
+                args.operator_id,
+                args.accepted_result,
             )
         elif args.mode == "start-attempt":
             if (
@@ -1514,6 +1986,7 @@ def main() -> int:
                 )
             if (
                 args.replay_result is not None
+                or args.regression_result
                 or args.allow_synthetic_replay
             ):
                 raise ToolError(
@@ -1527,6 +2000,9 @@ def main() -> int:
                 args.attempt,
                 args.hypothesis,
                 args.previous_result,
+                args.operator_id,
+                args.accepted_result,
+                args.regression_operator_id,
             )
         elif args.mode == "record-candidate":
             if (
@@ -1535,6 +2011,9 @@ def main() -> int:
                 or args.attempt is not None
                 or args.hypothesis is not None
                 or args.previous_result is not None
+                or args.accepted_result is not None
+                or args.regression_operator_id
+                or args.regression_result
                 or args.allow_synthetic_replay
             ):
                 raise ToolError(
@@ -1557,6 +2036,8 @@ def main() -> int:
                 or args.attempt is not None
                 or args.hypothesis is not None
                 or args.previous_result is not None
+                or args.accepted_result is not None
+                or args.regression_operator_id
             ):
                 raise ToolError(
                     "allowed path, attempt, hypothesis, and previous result "
@@ -1569,6 +2050,7 @@ def main() -> int:
                 args.worktree,
                 args.replay_result,
                 args.allow_synthetic_replay,
+                args.regression_result,
             )
     except (SpecContractError, ToolError, OSError) as error:
         print(f"workspace_guard.py: {error}", file=sys.stderr)

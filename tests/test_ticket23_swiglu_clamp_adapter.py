@@ -19,7 +19,13 @@ from model_adaptation_capture import plugin
 from model_adaptation_capture import preflight
 
 
-SPEC = ROOT / "migration-spec.md"
+SPEC = (
+    ROOT
+    / "runs"
+    / "handoff-build-r5-001"
+    / "bundle"
+    / "migration-spec.md"
+)
 SCAN = ROOT / "runs" / "scan-006" / "result.json"
 OPERATOR_ID = (
     "sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe."

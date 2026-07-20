@@ -1,0 +1,214 @@
+{
+  "action": "seal_candidate_and_queue_evidence_gates",
+  "behavior": {
+    "agent_selects_allowed_paths_per_attempt": true,
+    "agent_selects_hypothesis": true,
+    "all_baseline_direct_pass_allows_clean_closure": true,
+    "baseline_paths_lock_attempts": false,
+    "candidate_original_arguments_dataflow_checked": true,
+    "candidate_patch_bound_to_replay": true,
+    "candidate_replay_uses_original_kernel_call": true,
+    "candidate_result_bound_to_current_attempt": true,
+    "candidate_worktree_checked_before_and_after_replay": true,
+    "failed_attempt_restores_accepted_patch": true,
+    "human_supplied_patch_required": false,
+    "next_operator_selected_automatically": true,
+    "preauthored_attempt_patch": false,
+    "previous_regression_history_is_inherited": true,
+    "previous_repairs_are_cumulative": true
+  },
+  "delegated_to_p800_agent": {
+    "repair_implementation": true,
+    "repair_replay_adapter": true,
+    "single_hypothesis_per_attempt": true
+  },
+  "evidence": [
+    "validation.log",
+    "../code-review-35aa72e-001/result.json",
+    "../inline-repair-correction-r5-001/result.json",
+    "../operator-queue-tool-001/result.json"
+  ],
+  "evidence_files": [
+    {
+      "path": "runs/code-review-35aa72e-001/review.md",
+      "sha256": "887198d3c39e9e0566f84a4a96b8d9e65666511c4ff1eeac22ec3d14b7e5bede"
+    },
+    {
+      "path": "runs/code-review-35aa72e-001/result.json",
+      "sha256": "16ef4ae7a7d1f2c87419ea0dd4c38220e4315c8f1f7e29d2ed098f5db159a7e0"
+    },
+    {
+      "path": "runs/inline-repair-correction-r5-001/candidate.patch",
+      "sha256": "184c33dd223561446aa9674e6db37ee01191c7a3924a76765326e64f81b3901d"
+    },
+    {
+      "path": "runs/inline-repair-correction-r5-001/result.json",
+      "sha256": "28670405680ec81ea50523d0fd6d002be7574a4fc0844e1ffa6c9a50e65f7ecb"
+    },
+    {
+      "path": "runs/inline-repair-correction-r5-001/validation.log",
+      "sha256": "0ba47b495a3f608140bda61d6216e3ae6ff3f6ff163f7bf8cf2ebbf58d1fa5f8"
+    },
+    {
+      "path": "runs/operator-queue-tool-001/result.json",
+      "sha256": "ffe75d61ab787c5225c81bd33a16724b6ab9497b61ceb7e2e460c922dcc3081e"
+    },
+    {
+      "path": "runs/operator-queue-tool-001/validation.log",
+      "sha256": "c945fe097e32b86f17c9787d1b1c293a5c539b801207cb7b1dc38f3a91de84ab"
+    },
+    {
+      "path": "runs/spec-binding-005/result.json",
+      "sha256": "1df9d6994bb35f9d0bdcc9456d79029bb186c8791a2bf7b59d9cce38e8c42d33"
+    }
+  ],
+  "execution_site": "SOURCE",
+  "limitations": {
+    "non_swiglu_prepare_adapter": "NOT_IMPLEMENTED_PENDING_SCAN",
+    "p800_operator_repair": "NOT_RUN",
+    "revision_6_cuda_capture": "NOT_RUN",
+    "revision_6_multi_collector_and_bundle": "PENDING_SCAN_AND_ADAPTERS"
+  },
+  "passed": true,
+  "review": {
+    "fixed_point": "03cb3a1451e6d34ce6ec4342954ebd2d8e4aa947",
+    "reviewed_commit": "35aa72ee8cfb3c87851f9ca2771c2738023890c2",
+    "review_result": "runs/code-review-35aa72e-001/result.json",
+    "review_result_sha256": "16ef4ae7a7d1f2c87419ea0dd4c38220e4315c8f1f7e29d2ed098f5db159a7e0"
+  },
+  "run_id": "operator-queue-tool-002",
+  "runtime_validation": {
+    "attempts_used": 0,
+    "p800_operator_repair": "NOT_RUN",
+    "torch_dependent_tests": "NOT_RUN_TORCH_UNAVAILABLE"
+  },
+  "source_files": [
+    {
+      "path": "CONTEXT.md",
+      "sha256": "8dbd1a7228f574b520b030bc3c007a16bb1ab361ae21b5bd984c6a444fa0ee62"
+    },
+    {
+      "path": "docs/p800-environment-and-repair.md",
+      "sha256": "ec16af599c99e84b641c1b2db80c95c500dab967b2865c59e282e363c709ca3e"
+    },
+    {
+      "path": "migration-spec.md",
+      "sha256": "275989543bb4425e824c62c2081060d9c5cce8d5418f975f9353a1050df616b8"
+    },
+    {
+      "path": "model-adaptation/SKILL.md",
+      "sha256": "36934cb73c321cbc46cc1410d2c168029b7272ce016f709ab6e39a061b48dbbb"
+    },
+    {
+      "path": "model-adaptation/references/claude-p800-repair.md",
+      "sha256": "b8ea3f48c9a22b3345321b12eff7efbe055cc48caf19af785013bbf7ff7ff61d"
+    },
+    {
+      "path": "model-adaptation/references/migration-spec-template.md",
+      "sha256": "8f75475bd32589584922421f4fbce1744a2142f6e5368830cf52322913c9bf8a"
+    },
+    {
+      "path": "model-adaptation/scripts/capture_golden.py",
+      "sha256": "da8c745951ffd7e14b31dcc8561673ce54819373786da987cb7a854d04520698"
+    },
+    {
+      "path": "model-adaptation/scripts/model_adaptation_capture/contracts.py",
+      "sha256": "34f1b850eb121cfa5228011b822c197c44f113b7adfef1ede920053cb150c61d"
+    },
+    {
+      "path": "model-adaptation/scripts/model_adaptation_capture/kernel_replay.py",
+      "sha256": "db1beb7ecf2e06564c2a4b9a522c676839e5755da107b7ff9e06cfb59f2866a8"
+    },
+    {
+      "path": "model-adaptation/scripts/replay_compare.py",
+      "sha256": "ab3c65ab8ccc43ee721ffd888b1e37fc8ff0b805cf9aa5884889d268d0d4de50"
+    },
+    {
+      "path": "model-adaptation/scripts/workspace_guard.py",
+      "sha256": "1e8e8a093e7a0168d9bb5d6b17927029751f858917c1a926d3c7c9d2b67b659c"
+    },
+    {
+      "path": "outputs/step3p7-p800-migration-tool-design.md",
+      "sha256": "fcb0c81d0fc9badc2e98d57ba42718cc2e66ed698badad979ed812fa7222d330"
+    },
+    {
+      "path": "tests/test_ticket11_scan_artifact.py",
+      "sha256": "0f54f50d0f9a94886eae49acca53f134c30754bb141ad10fa71abe58526d0399"
+    },
+    {
+      "path": "tests/test_ticket14_repair_loop.py",
+      "sha256": "07f1015f3ea660dcb190a58b7b118aaa6968552cf6e24d28a676ff8e8a45323b"
+    },
+    {
+      "path": "tests/test_ticket16_p800_baseline_runbook.py",
+      "sha256": "a183c52e3b6040b91dda96c1acb55fd49b3a4065cf3cd8e86477b99f4d4f0f16"
+    },
+    {
+      "path": "tests/test_ticket21_kernel_scan_scope.py",
+      "sha256": "5239cd11d0760430829ec4d036d7e326e5dd09ac424d9db6189b21d13c6bb082"
+    },
+    {
+      "path": "tests/test_ticket23_kernel_replay.py",
+      "sha256": "998f4eee36f22aa7f7d530df078df56079635bb93594288b66c270cc05594bb0"
+    },
+    {
+      "path": "tests/test_ticket23_swiglu_clamp_adapter.py",
+      "sha256": "f8f9479424757025d229e031f7d22481baeb7fbc3a53591f0a52648a54cb9cf9"
+    },
+    {
+      "path": "tests/test_ticket24_repair_replay_adapter.py",
+      "sha256": "4d4b39f4f911cec3ed029f0aae6494deaf35093b62e7572c87001ba6443fa39f"
+    },
+    {
+      "path": "tests/test_ticket25_operator_queue.py",
+      "sha256": "e884f9f8dbb1ddc1a902766ddd5525253563296faf510d75794187340ee4c85a"
+    },
+    {
+      "path": ".scratch/step3p7-p800-migration-tool/issues/24-review-inline-repair-boundary.md",
+      "sha256": "1dfd783b5dbb77caf54166520bb3c8c041105e2300adafe5023170665d6acead"
+    },
+    {
+      "path": ".scratch/step3p7-p800-migration-tool/issues/25-continue-through-operator-gap-queue.md",
+      "sha256": "e2058a2d41f65fae56be7509b3fec1525e7749fca432494bc693ac736a367700"
+    }
+  ],
+  "spec_binding": {
+    "contract_data_sha256": "74723d4cca3008710b04ac56c6ea06a652babd81e101bddaf5ae9b70eb2fbab3",
+    "contract_revision": 6,
+    "spec_id": "step3p7-flash-p800-demo"
+  },
+  "summary": "Candidate replay remains on the original kunlun_ops.swiglu call, verifies the live cumulative patch and exact argument data flow, inherits the complete regression history across operators, and lets the Skill continue through the sealed gap queue.",
+  "supersedes": "runs/operator-queue-tool-001/result.json",
+  "tests": {
+    "focused": {
+      "commands": [
+        "python3 -m unittest discover -s tests -p 'test_ticket14_repair_loop.py' -v",
+        "python3 -m unittest discover -s tests -p 'test_ticket16_p800_baseline_runbook.py' -v",
+        "python3 -m unittest discover -s tests -p 'test_ticket25_operator_queue.py' -v"
+      ],
+      "passed": 29
+    },
+    "full_discovery": {
+      "command": "python3 -m unittest discover -s tests -v",
+      "errors": 7,
+      "failures": 1,
+      "reason": "Local Python has no torch; seven torch-dependent modules cannot import, and the remaining failure invokes one of those modules before its environment guard.",
+      "tests_run": 133
+    }
+  },
+  "tool": "migration-agent",
+  "validation": {
+    "accepted_patch_is_byte_checked": true,
+    "attempt_history_is_per_operator": true,
+    "candidate_patch_is_cumulative": true,
+    "capture_plan_validation_accepts_non_first_entries": true,
+    "inline_correction_git_apply": "PASS",
+    "non_swiglu_prepare_adapter": "NOT_IMPLEMENTED_PENDING_SCAN",
+    "original_call_argument_binding": "BASELINE_XY_AND_MODEL_CLAMP_LIMIT",
+    "prior_operator_regressions_are_finish_gate": true,
+    "regression_history_is_inherited": true,
+    "repair_replay_adapter": "SOURCE_BOUND_SWIGLU_ONLY_P800_NOT_RUN",
+    "revision_6_multi_collector_and_bundle": "PENDING_SCAN_AND_ADAPTERS",
+    "working_state_parsed_by_tool": false
+  }
+}

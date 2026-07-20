@@ -21,11 +21,12 @@ test "$(git rev-parse HEAD)" = \
 export SGLANG_KUNLUN_WORKTREE=/workspace/baidu/aicapx/sglang
 test "$(git -C "$SGLANG_KUNLUN_WORKTREE" rev-parse HEAD)" = \
   "546ad8c682392922792bbbfe53a8bf575545f118"
-test -z "$(git -C "$SGLANG_KUNLUN_WORKTREE" status --short)"
 ```
 
 如果实际路径不同，只替换 `SGLANG_KUNLUN_WORKTREE`。不要手工填写
-`active_hypothesis`，也不要提前修改 SGLang-Kunlun。
+`active_hypothesis`，也不要提前修改或清理 SGLang-Kunlun。第一个算子应处于固定
+revision 的干净工作区；后续算子会由主 Skill 用上一项 `passing_run` 核对累计
+patch，不能用手工 reset 代替。
 
 ## 2. 启动 Claude Code
 
@@ -42,24 +43,27 @@ claude
 ```
 
 项目入口 `.claude/skills/model-adaptation/SKILL.md` 会转到主
-`model-adaptation/SKILL.md`。Agent 应从 `migration-spec.md` revision 32 恢复，
-读取已验收的 P800 baseline，然后自行完成：
+`model-adaptation/SKILL.md`。Agent 必须从当前 `migration-spec.md` 恢复，只执行
+其中唯一 `next_action`。进入 `P800_REPAIR` 后，它自行完成：
 
 ```text
-分析失败证据
+当前算子 baseline
+  -> 若已等价，直接把当前行标为 PASS
+  -> 若存在差异，分析失败证据
   -> 选择一个可证伪假设和本轮最小文件集合
   -> 从源码确定修复位置和原始 Kernel Call 重放方式
-  -> 补齐并封存该边界的 repair replay adapter（不计 attempt）
   -> 领取 attempt
-  -> 生成候选修改与聚焦测试
+  -> 在原生产调用位置生成候选修改与聚焦测试
   -> 封存 candidate.patch
-  -> 确认重放确实经过本轮修复边界
+  -> 逐字节核对实际 worktree 与 candidate.patch
+  -> 从修改后的原生产调用点核对真实参数来源，用原有 Kernel Call 重放
   -> 用固定精度门槛重放全部三个 Golden shape
-  -> PASS，或从同一基线继续下一轮
+  -> 通过后在 finish-attempt 前回归以前已通过的算子
+  -> 自动进入 gap queue 下一项
+  -> 全部行通过后才 PASS / DONE
 ```
 
 除非缺少环境、需要越过 Repair Boundary 或达到停止条件，否则不要让人选择具体
-补丁，也不要在每轮之间暂停等待确认。不要把 baseline 的
-`kunlun_ops.swiglu` 直接调用误当作任意候选补丁已经生效；具体重放入口由 Agent
-根据本轮源码修改决定。当前控制器仍只接受 baseline adapter，因此 Claude 必须先
-完成上述 repair replay adapter，不能直接把现有工具写成候选 PASS。
+补丁，也不要在每轮或每个算子之间暂停等待确认。简单修复直接内联在原调用位置；
+replay config 可以绑定候选 patch，但 `invocation_target` 必须保持 Scan Run 记录的
+原有 P800 Kernel Call；adapter 要拒绝常量、错接参数和不可达伪调用；不新增生产 helper。

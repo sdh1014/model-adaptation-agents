@@ -2,13 +2,14 @@
 """Replay and compare captured samples without changing Migration Spec state."""
 
 import argparse
+import ast
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import subprocess
 import sys
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Iterable, Optional
 
 from capture_golden import resolve_git_revision, validate_scan_candidate
 from _lib.kernel_evidence import (
@@ -32,8 +33,8 @@ from model_adaptation_capture.contracts import (
     REPLAY_RESULT_SCHEMA,
     STATE_SCHEMA,
     SWIGLU_CLAMP_OPERATOR_ID,
+    SWIGLU_KUNLUN_SOURCE_RELATIVE_PATH,
     checkpoint_metadata,
-    repair_invocation_target,
     shape_id_for,
 )
 
@@ -51,7 +52,7 @@ DEFAULT_SYNTHETIC_CASE = {
 def require_loaded_model_mlp_adapter(contract: Dict[str, Any]) -> None:
     if uses_kernel_scan_contract(contract):
         raise ToolError(
-            "loaded-model MLP replay is not valid for revision 5; use "
+            "loaded-model MLP replay is not valid for a kernel-scan Contract; use "
             "--mode kernel-replay for the selected Kernel Call"
         )
 
@@ -109,6 +110,421 @@ def file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def run_git(
+    worktree: Path,
+    arguments: Iterable[str],
+    *,
+    text: bool = True,
+) -> subprocess.CompletedProcess:
+    completed = subprocess.run(
+        ["git", *arguments],
+        cwd=worktree,
+        text=text,
+        capture_output=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        stderr = (
+            completed.stderr.strip()
+            if text
+            else completed.stderr.decode(errors="replace").strip()
+        )
+        raise ToolError(f"git {' '.join(arguments)} failed: {stderr}")
+    return completed
+
+
+def candidate_worktree_patch(
+    worktree: Path,
+    baseline_revision: str,
+    modified_paths: list[str],
+) -> bytes:
+    worktree = worktree.resolve()
+    if not worktree.is_dir():
+        raise ToolError("candidate SGLang-Kunlun worktree does not exist")
+    top_level = Path(
+        run_git(worktree, ["rev-parse", "--show-toplevel"]).stdout.strip()
+    ).resolve()
+    if top_level != worktree:
+        raise ToolError("candidate worktree must be the Git repository root")
+    head = run_git(worktree, ["rev-parse", "HEAD"]).stdout.strip()
+    if head != baseline_revision:
+        raise ToolError("candidate worktree HEAD has drifted")
+    staged = subprocess.run(
+        ["git", "diff", "--cached", "--quiet", "--"],
+        cwd=worktree,
+        capture_output=True,
+        check=False,
+    )
+    if staged.returncode not in {0, 1}:
+        raise ToolError("cannot inspect candidate staged changes")
+    if staged.returncode == 1:
+        raise ToolError("candidate worktree must not contain staged changes")
+
+    normalized = []
+    for raw in modified_paths:
+        pure = PurePosixPath(raw)
+        if (
+            not isinstance(raw, str)
+            or not raw
+            or pure.is_absolute()
+            or str(pure) != raw
+            or ".." in pure.parts
+            or ".git" in pure.parts
+        ):
+            raise ToolError("candidate modified path is unsafe")
+        cursor = worktree
+        for part in pure.parts:
+            cursor /= part
+            if cursor.is_symlink():
+                raise ToolError("candidate modified path contains a symbolic link")
+        normalized.append(raw)
+    if normalized != sorted(set(normalized)):
+        raise ToolError("candidate modified paths have drifted")
+
+    tracked_raw = run_git(
+        worktree,
+        ["diff", "--name-only", "-z", "--no-renames", "HEAD", "--"],
+        text=False,
+    ).stdout
+    untracked_raw = run_git(
+        worktree,
+        ["ls-files", "--others", "--exclude-standard", "-z"],
+        text=False,
+    ).stdout
+    changed = {
+        os.fsdecode(item)
+        for item in tracked_raw.split(b"\0") + untracked_raw.split(b"\0")
+        if item
+    }
+    if changed != set(normalized):
+        raise ToolError("candidate worktree paths do not match candidate.patch")
+
+    tracked = []
+    untracked = []
+    for path in normalized:
+        present = subprocess.run(
+            ["git", "cat-file", "-e", f"{baseline_revision}:{path}"],
+            cwd=worktree,
+            capture_output=True,
+            check=False,
+        )
+        if present.returncode == 0:
+            tracked.append(path)
+        elif present.returncode in {1, 128}:
+            untracked.append(path)
+        else:
+            raise ToolError(f"cannot inspect candidate baseline path {path}")
+
+    chunks = []
+    if tracked:
+        chunks.append(
+            run_git(
+                worktree,
+                [
+                    "diff",
+                    "--binary",
+                    "--no-ext-diff",
+                    baseline_revision,
+                    "--",
+                    *tracked,
+                ],
+                text=False,
+            ).stdout
+        )
+    for path in untracked:
+        completed = subprocess.run(
+            [
+                "git",
+                "diff",
+                "--no-index",
+                "--binary",
+                "--",
+                os.devnull,
+                path,
+            ],
+            cwd=worktree,
+            capture_output=True,
+            check=False,
+        )
+        if completed.returncode not in {0, 1}:
+            raise ToolError(f"cannot create candidate patch for {path}")
+        chunks.append(completed.stdout)
+    patch = b"".join(chunks)
+    if not patch:
+        raise ToolError("candidate worktree patch is empty")
+    return patch
+
+
+def original_swiglu_call_metadata(
+    worktree: Path,
+    modified_paths: list[str],
+    baseline_revision: str,
+) -> Dict[str, Any]:
+    relative = SWIGLU_KUNLUN_SOURCE_RELATIVE_PATH
+    if relative not in modified_paths:
+        raise ToolError(
+            "candidate does not modify the original SwiGLU production call site"
+        )
+    source_path = worktree / relative
+    if source_path.is_symlink() or not source_path.is_file():
+        raise ToolError("original SwiGLU production source is missing")
+    try:
+        candidate_tree = ast.parse(source_path.read_text(encoding="utf-8"))
+        baseline_tree = ast.parse(
+            run_git(
+                worktree,
+                ["show", f"{baseline_revision}:{relative}"],
+            ).stdout
+        )
+    except (OSError, SyntaxError) as error:
+        raise ToolError(
+            f"cannot parse original SwiGLU production source: {error}"
+        ) from error
+
+    candidate_functions = [
+        node
+        for node in candidate_tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name == "unquantized_fused_moe_apply_kunlun"
+    ]
+    baseline_functions = [
+        node
+        for node in baseline_tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name == "unquantized_fused_moe_apply_kunlun"
+    ]
+    if len(candidate_functions) != 1 or len(baseline_functions) != 1:
+        raise ToolError("original SwiGLU production function has drifted")
+
+    def is_swiglu_call(node: ast.AST) -> bool:
+        if not isinstance(node, ast.Call):
+            return False
+        function = node.func
+        return (
+            isinstance(function, ast.Attribute)
+            and function.attr == "swiglu"
+            and isinstance(function.value, ast.Name)
+            and function.value.id == "kunlun_ops"
+        )
+
+    def call_arguments(node: ast.Call) -> Dict[str, ast.AST]:
+        if node.args or any(keyword.arg is None for keyword in node.keywords):
+            return {}
+        return {
+            keyword.arg: keyword.value
+            for keyword in node.keywords
+            if keyword.arg is not None
+        }
+
+    baseline_calls = [
+        node
+        for node in ast.walk(baseline_functions[0])
+        if is_swiglu_call(node)
+    ]
+    if len(baseline_calls) != 1:
+        raise ToolError("baseline SwiGLU production call has drifted")
+    baseline_arguments = call_arguments(baseline_calls[0])
+    if set(baseline_arguments) != {"x", "y"}:
+        raise ToolError("baseline SwiGLU production arguments have drifted")
+
+    assignments: Dict[str, list[ast.AST]] = {}
+    for node in ast.walk(candidate_functions[0]):
+        if (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+        ):
+            assignments.setdefault(node.targets[0].id, []).append(node)
+
+    def resolve_assignment(expression: ast.AST, before_line: int) -> ast.AST:
+        seen = set()
+        while isinstance(expression, ast.Name) and expression.id not in seen:
+            seen.add(expression.id)
+            earlier = [
+                node
+                for node in assignments.get(expression.id, [])
+                if getattr(node, "lineno", before_line) < before_line
+            ]
+            if len(earlier) != 1:
+                break
+            expression = earlier[0].value
+        return expression
+
+    expected_limit_source = ast.parse(
+        "layer.moe_runner_config.gemm1_clamp_limit",
+        mode="eval",
+    ).body
+    expected_limit_dump = ast.dump(expected_limit_source)
+
+    def is_limit_source(expression: ast.AST, before_line: int) -> bool:
+        return (
+            ast.dump(resolve_assignment(expression, before_line))
+            == expected_limit_dump
+        )
+
+    def is_limit_argument(expression: ast.AST, before_line: int) -> bool:
+        return (
+            isinstance(expression, ast.Call)
+            and isinstance(expression.func, ast.Name)
+            and expression.func.id == "float"
+            and len(expression.args) == 1
+            and not expression.keywords
+            and is_limit_source(expression.args[0], before_line)
+        )
+
+    def direct_swiglu_calls(statements: list[ast.stmt]) -> list[ast.Call]:
+        return [
+            statement.value
+            for statement in statements
+            if isinstance(statement, ast.Expr)
+            and is_swiglu_call(statement.value)
+        ]
+
+    candidate_calls = [
+        node
+        for node in ast.walk(candidate_functions[0])
+        if is_swiglu_call(node)
+    ]
+    matched = False
+    for guard in candidate_functions[0].body:
+        if (
+            not isinstance(guard, ast.If)
+            or not isinstance(guard.test, ast.Compare)
+            or len(guard.test.ops) != 1
+            or len(guard.test.comparators) != 1
+            or not isinstance(guard.test.ops[0], (ast.Is, ast.IsNot))
+        ):
+            continue
+        left = guard.test.left
+        right = guard.test.comparators[0]
+        if isinstance(right, ast.Constant) and right.value is None:
+            limit_expression = left
+        elif isinstance(left, ast.Constant) and left.value is None:
+            limit_expression = right
+        else:
+            continue
+        if not is_limit_source(limit_expression, guard.lineno):
+            continue
+
+        body_calls = direct_swiglu_calls(guard.body)
+        else_calls = direct_swiglu_calls(guard.orelse)
+        if isinstance(guard.test.ops[0], ast.Is):
+            no_limit_calls, limit_calls = body_calls, else_calls
+        else:
+            limit_calls, no_limit_calls = body_calls, else_calls
+        if len(no_limit_calls) != 1 or len(limit_calls) != 1:
+            continue
+        if set(candidate_calls) != {no_limit_calls[0], limit_calls[0]}:
+            continue
+
+        no_limit_arguments = call_arguments(no_limit_calls[0])
+        limit_arguments = call_arguments(limit_calls[0])
+        if (
+            set(no_limit_arguments) != {"x", "y"}
+            or set(limit_arguments) != {"limit", "x", "y"}
+        ):
+            continue
+        if any(
+            ast.dump(no_limit_arguments[name])
+            != ast.dump(baseline_arguments[name])
+            or ast.dump(limit_arguments[name])
+            != ast.dump(baseline_arguments[name])
+            for name in ("x", "y")
+        ):
+            continue
+        if not is_limit_argument(
+            limit_arguments["limit"],
+            limit_calls[0].lineno,
+        ):
+            continue
+        matched = True
+        break
+
+    if not matched:
+        raise ToolError(
+            "candidate must preserve the original x/y arguments and pass "
+            "layer.moe_runner_config.gemm1_clamp_limit at the original "
+            "kunlun_ops.swiglu call"
+        )
+    return {
+        "original_call_source": relative,
+        "original_call_source_sha256": file_sha256(source_path),
+        "original_call_arguments": {
+            "x": ast.unparse(baseline_arguments["x"]),
+            "y": ast.unparse(baseline_arguments["y"]),
+            "limit": (
+                "float(layer.moe_runner_config.gemm1_clamp_limit)"
+            ),
+        },
+        "original_call_none_fallback": True,
+    }
+
+
+def load_candidate_replay_metadata(
+    result_path: Path,
+    *,
+    binding: Dict[str, Any],
+    worktree: Path,
+    baseline_revision: str,
+) -> Dict[str, Any]:
+    if result_path.is_symlink():
+        raise ToolError("candidate result must not be a symbolic link")
+    result_path = result_path.resolve()
+    result = read_json_object(result_path, "candidate result")
+    checks = {
+        "tool": "workspace_guard.py",
+        "action": "record-candidate",
+        "spec_binding": binding,
+        "baseline_revision": baseline_revision,
+        "worktree": str(worktree.resolve()),
+        "passed": True,
+        "workspace_state": "CANDIDATE_RECORDED",
+        "patch_path": "candidate.patch",
+    }
+    for field, expected in checks.items():
+        if result.get(field) != expected:
+            raise ToolError(f"candidate result {field} has drifted")
+    patch_path = result_path.parent / "candidate.patch"
+    if patch_path.is_symlink() or not patch_path.is_file():
+        raise ToolError("candidate patch is missing")
+    patch_sha256 = file_sha256(patch_path)
+    if result.get("patch_sha256") != patch_sha256:
+        raise ToolError("candidate patch SHA-256 has drifted")
+    candidate_operator_id = result.get("operator_id")
+    if not isinstance(candidate_operator_id, str) or not candidate_operator_id:
+        raise ToolError("candidate operator id is invalid")
+    modified_paths = result.get("modified_paths")
+    if (
+        not isinstance(modified_paths, list)
+        or not modified_paths
+        or not all(isinstance(path, str) and path for path in modified_paths)
+        or modified_paths != sorted(set(modified_paths))
+    ):
+        raise ToolError("candidate modified paths are invalid")
+    live_patch = candidate_worktree_patch(
+        worktree,
+        baseline_revision,
+        modified_paths,
+    )
+    if live_patch != patch_path.read_bytes():
+        raise ToolError("candidate worktree bytes do not match candidate.patch")
+    call_metadata = original_swiglu_call_metadata(
+        worktree,
+        modified_paths,
+        baseline_revision,
+    )
+    return {
+        "candidate_operator_id": candidate_operator_id,
+        "modified_paths": modified_paths,
+        **call_metadata,
+        "result": str(result_path),
+        "result_sha256": file_sha256(result_path),
+        "patch_sha256": patch_sha256,
+        "sglang_kunlun_worktree": str(worktree.resolve()),
+        "sglang_kunlun_revision": baseline_revision,
+    }
+
+
 def _kernel_sample_files_sha256(
     golden_run: Path,
     binding: Dict[str, Any],
@@ -155,7 +571,10 @@ def create_run_dir(run_dir: Path) -> None:
 
 
 def run_synthetic(
-    spec_path: Path, run_dir: Path, case_path: Optional[Path] = None
+    spec_path: Path,
+    run_dir: Path,
+    case_path: Optional[Path] = None,
+    operator_id: str = SWIGLU_CLAMP_OPERATOR_ID,
 ) -> None:
     binding = load_spec_binding(spec_path)
     case = read_synthetic_case(case_path)
@@ -172,6 +591,7 @@ def run_synthetic(
         "tool": "replay_compare.py",
         "action": "synthetic",
         "spec_binding": binding.as_result_dict(),
+        "operator_id": operator_id,
         "passed": passed,
         "summary": (
             "Synthetic expected and actual values match."
@@ -713,12 +1133,14 @@ def run_kernel_replay(
     *,
     execution_site: str,
     sglang_worktree: Optional[Path] = None,
-    repair_entry: Optional[str] = None,
+    candidate_result: Optional[Path] = None,
 ) -> None:
     binding = load_spec_binding(spec_path)
     contract = load_contract_data(spec_path)
     if not uses_kernel_scan_contract(contract):
-        raise ToolError("standalone Kernel Call replay requires revision 5 Contract")
+        raise ToolError(
+            "standalone Kernel Call replay requires a kernel-scan Contract"
+        )
     if operator_id != SWIGLU_CLAMP_OPERATOR_ID:
         raise ToolError(f"kernel replay adapter is not implemented for {operator_id!r}")
     scan_result = read_json_object(scan_result_path, "Scan Run result")
@@ -730,9 +1152,12 @@ def run_kernel_replay(
     )
     if execution_site not in {"cuda", "p800"}:
         raise ToolError("execution_site must be cuda or p800")
-    if repair_entry is not None and execution_site != "p800":
-        raise ToolError("--repair-entry is only valid for P800 repair replay")
+    if candidate_result is not None and execution_site != "p800":
+        raise ToolError(
+            "--candidate-result is only valid for P800 candidate replay"
+        )
     kunlun_revision: Optional[str] = None
+    candidate: Optional[Dict[str, Any]] = None
     if execution_site == "cuda":
         if sglang_worktree is None:
             raise ToolError("--sglang-worktree is required for CUDA self-replay")
@@ -743,10 +1168,10 @@ def run_kernel_replay(
                 "SGLang worktree revision does not match Contract Data: "
                 f"expected {expected_revision}, got {actual_revision}"
             )
-    elif repair_entry is not None:
+    elif candidate_result is not None:
         if sglang_worktree is None:
             raise ToolError(
-                "--sglang-worktree is required for P800 repair replay"
+                "--sglang-worktree is required for P800 candidate replay"
             )
         actual_revision = resolve_git_revision(sglang_worktree)
         kunlun_revision = contract["source"]["sglang_kunlun_revision"]
@@ -755,6 +1180,12 @@ def run_kernel_replay(
                 "SGLang-Kunlun worktree revision does not match Contract Data: "
                 f"expected {kunlun_revision}, got {actual_revision}"
             )
+        candidate = load_candidate_replay_metadata(
+            candidate_result,
+            binding=binding.as_result_dict(),
+            worktree=sglang_worktree,
+            baseline_revision=kunlun_revision,
+        )
     elif sglang_worktree is not None:
         raise ToolError("--sglang-worktree is not valid for P800 baseline")
 
@@ -794,8 +1225,6 @@ def run_kernel_replay(
             )
     if execution_site == "cuda":
         invocation_target = SWIGLU_CLAMP_OPERATOR_ID
-    elif repair_entry is not None:
-        invocation_target = repair_invocation_target(repair_entry)
     else:
         invocation_target = KUNLUN_SWIGLU_TARGET
     create_run_dir(run_dir)
@@ -813,10 +1242,8 @@ def run_kernel_replay(
         "sample_files_sha256": sample_files_digest,
         "allow_active_capture": execution_site == "cuda",
     }
-    if repair_entry is not None:
-        config["repair_entry"] = repair_entry
-        config["sglang_kunlun_worktree"] = str(sglang_worktree.resolve())
-        config["sglang_kunlun_revision"] = kunlun_revision
+    if candidate is not None:
+        config["candidate"] = candidate
     config_path = run_dir / "replay-config.json"
     write_json(config_path, config)
     if execution_site == "cuda" and state["capture_closed"] is not True:
@@ -838,12 +1265,28 @@ def run_kernel_replay(
         capture_output=True,
         check=False,
     )
+    if candidate is not None:
+        current_candidate = load_candidate_replay_metadata(
+            candidate_result,
+            binding=binding.as_result_dict(),
+            worktree=sglang_worktree,
+            baseline_revision=kunlun_revision,
+        )
+        if current_candidate != candidate:
+            raise ToolError(
+                "candidate worktree changed while the replay worker was running"
+            )
     (run_dir / "replay.log").write_text(
         "\n".join(
             [
                 f"execution_site={execution_site}",
                 f"invocation_target={invocation_target}",
                 f"returncode={completed.returncode}",
+                *(
+                    [f"candidate_patch_sha256={candidate['patch_sha256']}"]
+                    if candidate is not None
+                    else []
+                ),
                 "--- stdout ---",
                 completed.stdout,
                 "--- stderr ---",
@@ -920,6 +1363,8 @@ def run_kernel_replay(
             else f"At least one Kernel Call sample failed through {invocation_target}."
         ),
     }
+    if candidate is not None:
+        result["candidate_patch_sha256"] = candidate["patch_sha256"]
     atomic_write_json(run_dir / "result.json", result)
 
 
@@ -945,7 +1390,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--operator-id")
     parser.add_argument("--execution-site", choices=("cuda", "p800"))
     parser.add_argument("--sglang-worktree", type=Path)
-    parser.add_argument("--repair-entry")
+    parser.add_argument("--candidate-result", type=Path)
     return parser.parse_args()
 
 
@@ -959,16 +1404,20 @@ def main() -> int:
                     args.result,
                     args.golden_run,
                     args.scan_result,
-                    args.operator_id,
                     args.execution_site,
                     args.sglang_worktree,
-                    args.repair_entry,
+                    args.candidate_result,
                 )
             ):
                 raise ToolError(
                     "replay arguments are not valid for synthetic mode"
                 )
-            run_synthetic(args.spec, args.run_dir, args.case)
+            run_synthetic(
+                args.spec,
+                args.run_dir,
+                args.case,
+                args.operator_id or SWIGLU_CLAMP_OPERATOR_ID,
+            )
         elif args.mode == "validate-binding":
             if args.result is None:
                 raise ToolError("--result is required for validate-binding mode")
@@ -981,7 +1430,7 @@ def main() -> int:
                     args.operator_id,
                     args.execution_site,
                     args.sglang_worktree,
-                    args.repair_entry,
+                    args.candidate_result,
                 )
             ):
                 raise ToolError(
@@ -1002,7 +1451,7 @@ def main() -> int:
                     args.operator_id,
                     args.execution_site,
                     args.sglang_worktree,
-                    args.repair_entry,
+                    args.candidate_result,
                 )
             ):
                 raise ToolError(
@@ -1021,7 +1470,7 @@ def main() -> int:
                     args.operator_id,
                     args.execution_site,
                     args.sglang_worktree,
-                    args.repair_entry,
+                    args.candidate_result,
                 )
             ):
                 raise ToolError(
@@ -1052,7 +1501,7 @@ def main() -> int:
                 args.golden_run,
                 execution_site=args.execution_site,
                 sglang_worktree=args.sglang_worktree,
-                repair_entry=args.repair_entry,
+                candidate_result=args.candidate_result,
             )
     except (SpecContractError, ToolError, OSError) as error:
         print(f"replay_compare.py: {error}", file=sys.stderr)

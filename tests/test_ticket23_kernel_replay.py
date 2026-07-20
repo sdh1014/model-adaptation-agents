@@ -13,6 +13,13 @@ import torch
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "model-adaptation" / "scripts"
 sys.path.insert(0, str(SCRIPTS))
+REVISION5_SPEC = (
+    ROOT
+    / "runs"
+    / "handoff-build-r5-001"
+    / "bundle"
+    / "migration-spec.md"
+)
 
 from model_adaptation_capture.contracts import shape_id_for
 from model_adaptation_capture.kernel_replay import (
@@ -395,7 +402,7 @@ class Ticket23KernelReplayTest(unittest.TestCase):
                 return_value="49e384ce9d304648e9959666ecb8ce8cd98d0deb",
             ), patch.object(replay_compare.subprocess, "run", side_effect=run_worker):
                 replay_compare.run_kernel_replay(
-                    ROOT / "migration-spec.md",
+                    REVISION5_SPEC,
                     cuda_run,
                     ROOT / "runs" / "scan-006" / "result.json",
                     OPERATOR_ID,
@@ -419,7 +426,7 @@ class Ticket23KernelReplayTest(unittest.TestCase):
             p800_run = workspace / "p800-baseline-001"
             with patch.object(replay_compare.subprocess, "run", side_effect=run_worker):
                 replay_compare.run_kernel_replay(
-                    ROOT / "migration-spec.md",
+                    REVISION5_SPEC,
                     p800_run,
                     ROOT / "runs" / "scan-006" / "result.json",
                     OPERATOR_ID,
@@ -455,7 +462,7 @@ class Ticket23KernelReplayTest(unittest.TestCase):
                 "sample_files_sha256",
             ):
                 replay_compare.run_kernel_replay(
-                    ROOT / "migration-spec.md",
+                    REVISION5_SPEC,
                     rejected_run,
                     ROOT / "runs" / "scan-006" / "result.json",
                     OPERATOR_ID,

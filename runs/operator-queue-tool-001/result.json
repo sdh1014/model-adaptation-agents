@@ -1,0 +1,120 @@
+{
+  "action": "seal_original_boundary_and_operator_queue_flow",
+  "behavior": {
+    "agent_selects_allowed_paths_per_attempt": true,
+    "agent_selects_hypothesis": true,
+    "baseline_paths_lock_attempts": false,
+    "candidate_patch_bound_to_replay": true,
+    "candidate_replay_uses_original_kernel_call": true,
+    "failed_attempt_restores_accepted_patch": true,
+    "human_supplied_patch_required": false,
+    "next_operator_selected_automatically": true,
+    "preauthored_attempt_patch": false,
+    "previous_repairs_are_cumulative": true
+  },
+  "delegated_to_p800_agent": {
+    "repair_implementation": true,
+    "repair_replay_adapter": true,
+    "single_hypothesis_per_attempt": true
+  },
+  "evidence": [
+    "validation.log"
+  ],
+  "execution_site": "SOURCE",
+  "passed": true,
+  "review": {
+    "fixed_point": "03cb3a1451e6d34ce6ec4342954ebd2d8e4aa947",
+    "reviewed_commit": "35aa72ee8cfb3c87851f9ca2771c2738023890c2",
+    "review_result": "runs/code-review-35aa72e-001/result.json",
+    "review_result_sha256": "16ef4ae7a7d1f2c87419ea0dd4c38220e4315c8f1f7e29d2ed098f5db159a7e0"
+  },
+  "run_id": "operator-queue-tool-001",
+  "runtime_validation": {
+    "attempts_used": 0,
+    "p800_operator_repair": "NOT_RUN",
+    "torch_dependent_tests": "NOT_RUN_TORCH_UNAVAILABLE"
+  },
+  "source_files": [
+    {
+      "path": "model-adaptation/scripts/capture_golden.py",
+      "sha256": "da8c745951ffd7e14b31dcc8561673ce54819373786da987cb7a854d04520698"
+    },
+    {
+      "path": "model-adaptation/scripts/model_adaptation_capture/contracts.py",
+      "sha256": "36764a2700e3bfd050b175a64e59352f85fdd4053928b66a64e218a147c3eb8c"
+    },
+    {
+      "path": "model-adaptation/scripts/model_adaptation_capture/kernel_replay.py",
+      "sha256": "32b31e6710a5ae93065cfa10dc7606ab7f45fe0e94d35f906d44acc102b8928f"
+    },
+    {
+      "path": "model-adaptation/scripts/replay_compare.py",
+      "sha256": "63a7d5781ef7cd16a6c4a4151a85fc7aa527615401f1ac01afc98391413a1125"
+    },
+    {
+      "path": "model-adaptation/scripts/workspace_guard.py",
+      "sha256": "7229eeaee8bd1f56de7524ba9a88afb2e547d47b1e0bba1711d493d8b4f6df07"
+    },
+    {
+      "path": "model-adaptation/SKILL.md",
+      "sha256": "4c073b48c600348654fc482465a0004ba4451dafdce4e477337ac4ae95994d79"
+    },
+    {
+      "path": "model-adaptation/references/migration-spec-template.md",
+      "sha256": "2c8ca581bce15ad5e96dcde91a36adee820d69bfc4714bd6a26af967f655bed1"
+    },
+    {
+      "path": "model-adaptation/references/claude-p800-repair.md",
+      "sha256": "200ae8e51a3ba19ea4794843e77115ebaff2f089765208c6356185afc5bbfd19"
+    },
+    {
+      "path": "tests/test_ticket14_repair_loop.py",
+      "sha256": "38843982dd733a0547d6413fce54de8ef01274ce394628b9569e50e3bb7908e8"
+    },
+    {
+      "path": "tests/test_ticket16_p800_baseline_runbook.py",
+      "sha256": "dfcae5c32c9a65cc143c45046beb63ea2274ac8ac744822f5e82da09b9ea5bc6"
+    },
+    {
+      "path": "tests/test_ticket24_repair_replay_adapter.py",
+      "sha256": "e00ad8153b9883b5098e226d147aee76ca6bc9312aa104b336981b06a3df1232"
+    },
+    {
+      "path": "tests/test_ticket25_operator_queue.py",
+      "sha256": "483000cc837f8fab67e048e6693648c7df945ce175894a0b25f780f96b61a274"
+    }
+  ],
+  "spec_binding": {
+    "contract_data_sha256": "74723d4cca3008710b04ac56c6ea06a652babd81e101bddaf5ae9b70eb2fbab3",
+    "contract_revision": 6,
+    "spec_id": "step3p7-flash-p800-demo"
+  },
+  "summary": "The retired module-callable repair protocol is removed, candidate replay remains on the original kunlun_ops.swiglu boundary, and later operators use the previous passing cumulative patch without resetting accepted repairs.",
+  "supersedes": "runs/repair-loop-tool-002/result.json",
+  "tests": {
+    "focused": {
+      "commands": [
+        "python3 -m unittest discover -s tests -p 'test_ticket14_repair_loop.py' -v",
+        "python3 -m unittest discover -s tests -p 'test_ticket16_p800_baseline_runbook.py' -v",
+        "python3 -m unittest discover -s tests -p 'test_ticket25_operator_queue.py' -v"
+      ],
+      "passed": 23
+    },
+    "full_discovery": {
+      "command": "python3 -m unittest discover -s tests -v",
+      "errors": 7,
+      "failures": 1,
+      "reason": "Local Python has no torch; seven torch-dependent modules cannot import, and the remaining failure invokes one of those modules before its environment guard.",
+      "tests_run": 127
+    }
+  },
+  "tool": "migration-agent",
+  "validation": {
+    "accepted_patch_is_byte_checked": true,
+    "attempt_history_is_per_operator": true,
+    "candidate_patch_is_cumulative": true,
+    "repair_replay_adapter": "BUILT",
+    "revision_6_capture_plan_can_prepare_non_first_entries": true,
+    "working_state_parsed_by_tool": false
+  }
+}

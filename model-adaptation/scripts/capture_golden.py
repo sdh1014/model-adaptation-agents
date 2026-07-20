@@ -164,14 +164,29 @@ def validate_scan_candidate(
         if scan_result.get("scan_scope") != contract["scan_scope"]:
             raise ToolError("Scan Run scope does not match Contract Data")
         selection = scan_result.get("selection")
+        capture_plan = scan_result.get("capture_plan")
+        first_planned_operator = (
+            capture_plan[0].get("operator_id")
+            if isinstance(capture_plan, list)
+            and capture_plan
+            and isinstance(capture_plan[0], dict)
+            else None
+        )
+        selected_operator = (
+            selection.get("active_operator")
+            if isinstance(selection, dict)
+            else None
+        )
         if (
             not isinstance(selection, dict)
             or selection.get("evaluated_after_scan") is not True
-            or selection.get("active_operator") != operator_id
+            or selected_operator != first_planned_operator
         ):
             raise ToolError(
-                "requested operator is not the post-scan active_operator"
+                "post-scan active_operator must be the first capture plan entry"
             )
+        if contract["contract_revision"] <= 5 and selected_operator != operator_id:
+            raise ToolError("requested operator is not the post-scan active_operator")
         sample_policy = contract["sample_policy"]
         if plan.get("tp_rank") != sample_policy["capture_tp_rank"]:
             raise ToolError("capture plan TP rank does not match Contract Data")
