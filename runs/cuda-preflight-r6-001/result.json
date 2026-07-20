@@ -1,0 +1,28 @@
+{
+  "action": "preflight-session",
+  "capture_status": "PREFLIGHT_FAILED",
+  "consumes_capture_session": false,
+  "evidence": [
+    "capture-config.json",
+    "preflight-capture.log"
+  ],
+  "operator_ids": [
+    "sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul",
+    "sgl_kernel.gemma_rmsnorm",
+    "sgl_kernel.gemma_fused_add_rmsnorm",
+    "sgl_kernel.topk_sigmoid",
+    "sglang.srt.layers.attention.triton_ops.prefill_attention._fwd_kernel"
+  ],
+  "passed": false,
+  "request_modes": [
+    "text-only",
+    "single-image"
+  ],
+  "spec_binding": {
+    "contract_data_sha256": "74723d4cca3008710b04ac56c6ea06a652babd81e101bddaf5ae9b70eb2fbab3",
+    "contract_revision": 6,
+    "spec_id": "step3p7-flash-p800-demo"
+  },
+  "summary": "The multi-collector preflight did not prove every planned call; inspect its per-operator logs.",
+  "tool": "capture_golden.py"
+}

@@ -1,0 +1,6 @@
+worker_mode=capture
+returncode=2
+--- stdout ---
+
+--- stderr ---
+capture preflight worker: loaded source /usr/local/lib/python3.12/dist-packages/sgl_kernel/elementwise.py for sgl_kernel.gemma_rmsnorm does not match fixed source /ssd1/sdh/sglang/python/sglang/srt/layers/layernorm.py

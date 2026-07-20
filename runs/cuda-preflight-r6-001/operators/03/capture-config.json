@@ -1,0 +1,78 @@
+{
+  "activation_guard": "Step3p5 decoder norm with residual present",
+  "adapter": "gemma-fused-add-rmsnorm",
+  "boundary": {
+    "inputs": [
+      "x",
+      "residual"
+    ],
+    "non_tensor_args": [
+      "eps"
+    ],
+    "outputs": [
+      "mutated_x",
+      "mutated_residual"
+    ],
+    "parameters": [
+      "weight"
+    ]
+  },
+  "capture_device_type": "cuda",
+  "checkpoint": {
+    "config_digest": "8d740ba5819e574b7a606ea7aa6d7d381142ed5cc77cab96dde2892c10414042",
+    "id": "stepfun-ai/Step-3.7-Flash@5f6244077ac62e04eec3f320501ff8c2b293373a",
+    "model_path": "stepfun-ai/Step-3.7-Flash",
+    "revision": "5f6244077ac62e04eec3f320501ff8c2b293373a"
+  },
+  "dtype": "bfloat16",
+  "hook_target": "sglang.srt.layers.layernorm.gemma_fused_add_rmsnorm",
+  "max_shapes": 3,
+  "model_path": "target",
+  "operator_id": "sgl_kernel.gemma_fused_add_rmsnorm",
+  "precision_gate": {
+    "atol": 0.01,
+    "check_stride": false,
+    "comparator": "torch.testing.assert_close",
+    "require_exact_structure": true,
+    "require_finite": true,
+    "require_same_dtype": true,
+    "rtol": 0.02
+  },
+  "replay": {
+    "cuda_target": "sglang.srt.layers.layernorm.gemma_fused_add_rmsnorm",
+    "mode": "standalone-kernel-call",
+    "p800_target": null,
+    "weights_in_golden_sample": false
+  },
+  "run_dir": "/ssd1/sdh/model-adaptation-agents/runs/cuda-preflight-r6-001/operators/03",
+  "sample_fields": {
+    "inputs": [
+      "x",
+      "residual"
+    ],
+    "non_tensor_args": [
+      "eps"
+    ],
+    "outputs": [
+      "mutated_x",
+      "mutated_residual"
+    ],
+    "parameters": [
+      "weight"
+    ]
+  },
+  "schema": "golden-capture-config/v1",
+  "serialization": "kernel-call-torch-save/v1",
+  "session_config": "/ssd1/sdh/model-adaptation-agents/runs/cuda-preflight-r6-001/capture-config.json",
+  "source": {
+    "capture_module_path": "/ssd1/sdh/sglang/python/sglang/srt/layers/layernorm.py",
+    "capture_module_sha256": "5c18eb97e1f101476bb54e2ec7270be496ccae4ccd86a68f5bc8e2f744473a0e"
+  },
+  "spec_binding": {
+    "contract_data_sha256": "74723d4cca3008710b04ac56c6ea06a652babd81e101bddaf5ae9b70eb2fbab3",
+    "contract_revision": 6,
+    "spec_id": "step3p7-flash-p800-demo"
+  },
+  "tensor_parallel_size": 8,
+  "tp_rank": 0
+}
