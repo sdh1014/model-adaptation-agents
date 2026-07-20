@@ -1,527 +1,268 @@
 ---
 name: model-adaptation
-description: 按模型参数启动或恢复 KLX P800 的 Spec 驱动模型适配。
+description: 按固定 Contract 在 KLX P800 上验证算子、跑通 eager 模型并检查精度。
 argument-hint: "Model name, e.g. Step-3.7-Flash"
 disable-model-invocation: true
 ---
 
 # Input
 
-把用户传给 Skill 的完整参数作为模型名。当前 Demo 只接受精确参数
-`Step-3.7-Flash`。
+把用户传给 Skill 的完整参数作为模型名。当前工作区只接受精确参数
+`Step-3.7-Flash`。参数缺失或不同于 Contract Data 的 `model` 时，报告正确调用：
 
-参数缺失或不同于 `Step-3.7-Flash` 时，报告正确调用方式
-`$model-adaptation Step-3.7-Flash` 并停止。Spec 已存在时，参数还必须与
-Contract Data 的 `model` 一致。
+```text
+$model-adaptation Step-3.7-Flash
+```
+
+然后停止，不猜测其他模型。
 
 # Outcome
 
-从工作区中的 `migration-spec.md` 启动或恢复工作，只执行其中唯一的
-`next_action`。一个算子通过不是停止条件：只要 gap queue 还有已封存 Golden 的
-待修复项，就自动选择下一项并继续。只有计划内跨机器动作需要 `WAITING`、全部
-gap queue 已关闭时达到 `PASS / DONE`，或状态进入 `BLOCKED` /
-`NEEDS_HUMAN` 时才停止。
+从工作区根目录的 `migration-spec.md` 启动或恢复同一个 Migration Agent。目标不是
+只关闭局部算子，而是依次完成：
 
-`migration-spec.md` 是恢复执行的唯一状态来源：
+```text
+PREFLIGHT
+-> OPERATOR_VERIFICATION
+-> EAGER_BRINGUP
+-> MODEL_ACCURACY
+-> ACCURACY_DEBUG（仅精度失败时）
+-> DONE
+```
 
-- `Contract` 保存人类批准的扫描范围、运行参数、样本规则、精度门槛和权限边界；
-  批准后本 Skill 不得修改。
-- `Working State` 保存当前阶段、gap queue、扫描完成后选出的
-  `active_operator`、每个算子的 `golden_run / repair_status /
-  attempts_used / passing_run`、Run 指针和唯一下一动作。
-- `runs/` 保存不可变证据；聊天记录不能替代它。
+初始 Operator Verification Queue 中的五个历史 gap 必须全部实际测试。一个局部算子
+通过不能跳过其余条目；局部队列全部通过也不能替代真实模型和精度验收。
 
-每次动作前完整重读 Spec。动作完成后先封存 Run，再更新 Working State。只要状态
-仍是 `ACTIVE`，就重新读取 Spec 后继续，不凭对话记忆恢复。
+本 Skill 不依赖本仓库内的通用 Tensor 采集、序列化、跨机交接或重放程序。Agent
+直接读取固定源码，在目标 SGLang-Kunlun 仓库创建聚焦测试、调用 P800 生产入口，并
+用 Contract 固定门槛比较。
+
+# State and authority
+
+`migration-spec.md` 是唯一恢复状态：
+
+- `Contract` 由人确认，固定模型、源码、checkpoint、运行方式、请求、Precision
+  Gate、Repair Scope 和停止规则；Agent 不得修改。
+- `Working State` 由 Agent 更新，保存 phase、队列、模型状态、Failure Observation、
+  Run Evidence 和唯一 `next_action`。
+- 每次动作前重读整个 Spec；动作后先写新 Run Evidence，再更新 Working State。
+- 旧 Contract revision 的 Run 只能提供源码线索，不能替当前 P800 测试或模型结果。
+
+允许 Agent：
+
+- 读取固定 SGLang、SGLang-Kunlun 和 checkpoint 配置；
+- 在固定 Kunlun worktree 内新增或修改聚焦测试和 Repair Scope 内的生产代码；
+- 运行 CPU、P800、单进程或 Contract 固定多卡命令；
+- 使用 SGLang 自带的 dumper、forward hook 和 comparator；
+- 按证据更新 Working State。
+
+不允许 Agent：
+
+- 放宽 Precision Gate；
+- 用 test-only helper 代替实际生产调用；
+- 把环境、工具或路由失败写成算子缺失；
+- 自动取得新凭证、猜 checkpoint 或猜节点类型；
+- 新增 C++、自定义 kernel 或底层注册。确实需要时进入 `BLOCKED`。
+
+# Precision Gate
+
+所有 Operator Verification 和模型张量比较都从 Contract 读取门槛：
+
+1. CPU reference 可以用 FP32 完成归约，但比较前转换到声明的输出 dtype。
+2. 输出容器结构和 shape 必须一致。
+3. P800 生产输出 dtype 必须等于源码声明的 dtype。
+4. 两侧数字 Tensor 必须都是有限值。
+5. 浮点 Tensor 使用 `torch.testing.assert_close` 和固定 `atol`、`rtol`。
+6. 整数和布尔 Tensor 精确相等。
+7. 原地算子分别比较每个被修改的 buffer；返回 `None` 不代表没有输出。
+8. 根据生产接口检查必要的 stride、非连续输入、alias 和输出 buffer 语义。
+9. Agent 不得因为失败而改变门槛；只能修实现、修输入构造错误或报告 `BLOCKED`。
 
 # Process
 
-## 1. 找到或创建 Spec
-
-默认使用当前工作区的 `migration-spec.md`。如果文件不存在：
-
-1. 完整读取
-   [references/migration-spec-template.md](references/migration-spec-template.md)。
-2. 复制模板为工作区的 `migration-spec.md`。
-3. 只用用户明确提供的值和可引用源码证据填写 Contract；不要猜 checkpoint、
-   revision、输入模式或容差。
-4. 只要有必填值未确定，就保持 `NEEDS_HUMAN / SCAN`、
-   `next_action: none`，只写一个需要人回答的问题，然后停止。
-
-Contract 首次批准前可以形成草稿。批准后的变化必须由人递增
-`contract_revision` 并追加 Human Decision；Skill 只能修改 Working State。
-
-## 2. 校验并恢复
-
-完整读取 Contract 和 Working State，依次检查：
-
-1. Contract Data 是唯一合法 JSON，`model` 与 Skill 参数一致，
-   `contract_revision` 是正整数，且存在同 revision 的 Human Decision。
-2. 固定运行条件没有漂移：target-only、TP8、BF16、无量化、无 draft 和投机解码、
-   decode/prefill CUDA Graph 都禁用、两端启动参数一致、不显式指定 attention
-   backend。
-3. 扫描约束没有漂移：`model_paths=["target"]`、粒度为 `kernel-call`、输入模式为
-   `text-only` 和 `single-image`。
-4. 样本约束没有漂移：rank 0、每个算子最多三个 shape；保存输入和 CUDA 期望
-   输出；允许保存当前 kernel 调用直接使用的当前 rank 参数 Tensor；禁止完整
-   checkpoint、module `state_dict` 和无关参数。
-5. 比较器为 `torch.testing.assert_close`，固定 `atol=0.01`、
-   `rtol=0.02`，结构、dtype 和有限值检查不变。
-6. Contract Data 中不存在 `active_operator`、`operator_boundary` 或单数
-   `demo_input_mode`。`active_operator` 只能在扫描完成后出现在 Working State。
-7. `ACTIVE` 恰有一条 `next_action`；最近 Run、gap queue 和活动算子引用真实存在。
-   每个 gap queue 行都有 `golden_run`、`repair_status`、`attempts_used` 和
-   `passing_run`；最多一行为 `ACTIVE`，且它必须等于 `active_operator`。
-   `passing_run` 只指向带累计 `candidate.patch` 的通过 attempt；baseline 直接
-   PASS 的行沿用此前最近一份非空 `passing_run`，此前没有补丁时保持 `null`。
-8. revision 5 的单算子 runbook、Golden 和 adapter 都是历史证据。当前
-   `contract_revision` 大于 5 时，不得执行这些旧 runbook，也不得把它们当成当前
-   多算子 Session 已具备的能力。
-
-如果 `contract_revision != observed_contract_revision`，先读最新 Human Decision，
-对齐 Working State，不能直接执行采集或重放。
-
-首次批准时，模板状态必须仍是 `NEEDS_HUMAN / SCAN`。校验通过后，把
-`observed_contract_revision` 设为当前 `contract_revision`，把
-`state_revision` 加一，并写入 `status: ACTIVE`、`phase: SCAN`、
-`last_completed_action: contract_approved`、
-`next_action: 运行 Spec 绑定自检`。
-
-每个新 revision 使用下一个未占用的 `runs/spec-binding-NNN`，调用：
-
-```text
-scripts/replay_compare.py \
-  --spec <migration-spec.md> \
-  --run-dir <fresh-spec-binding-run> \
-  --mode synthetic
-```
-
-只有退出码为 0、`passed: true` 且三项 Spec 绑定完全一致时，才封存绑定 Run 并进入
-扫描。首次绑定写入 `last_run: runs/spec-binding-001`、
-`last_completed_action: spec_binding_smoke_passed` 和
-`next_action: 完成 target-only eager 扫描并生成 Scan Run`。后续 revision 使用
-实际的新 Run 路径。这个动作不代表任何算子已扫描或精度已验证。
-
-## 3. 按 phase 执行唯一动作
-
-### `SCAN`
-
-用源码搜索、加载后配置和实际启动证据完成扫描，不创建顶层扫描编排器。
-
-#### 扫描范围
-
-- 从 `Step3p7ForConditionalGeneration.forward` 出发，只进入 target 路径，不进入
-  `Step3p5MTP.forward`。
-- 分别沿 `text-only` 和固定最小 `single-image` 请求会激活的路径向下扫描。
-- Step-3.7 的固定单图输入使用当前固定 SGLang worktree 中的
-  `examples/assets/example_image.png`。Scan Run 必须保存其 SHA-256；请求文本包含
-  `<im_patch>`。不得在正式 Session 中临时下载 URL 或换图。
-- 最小边界是源码中已经存在、能直接描述输入输出并可独立替换的 Kernel Call。
-  CUDA extension、Triton、SGLang JIT、第三方 kernel 和实际不兼容的
-  Torch 调用都可以进入清单。
-- 不把 view、reshape、split 等只改元数据的表达式单独列为缺口。
-- 不新增 helper、自定义算子函数、模型方法或整层 wrapper 作为扫描、捕获或重放
-  边界。
-
-#### 两端判断
-
-对每个 CUDA 调用沿 Kunlun 路径检查三种情况：
-
-1. 同一调用已有 Kunlun 实现；
-2. Kunlun 在更高调用点改走等价实现，因而不会进入 CUDA kernel；
-3. 固定参数下仍会进入未绑定或不可执行的调用。
-
-前两种为 `READY`。只有第三种或源码不足以证明等价时才进入 gap queue。不能因为
-缺少同名 Kunlun symbol 就直接判缺口，也不能把 “CUDA 使用 Triton” 当作入选硬
-条件。
-
-每条记录至少包含：
-
-- `operator_id`、输入模式、激活条件和从模型入口开始的 `call_chain`；
-- 现有 `kernel_call.symbol`、实现类型和现有 capture seam；
-- 输入、当前调用直接使用的参数、非 Tensor 参数和输出；
-- CUDA/Kunlun 源码或运行证据；
-- 等价路径判断、可重放/可替换判断和 verdict。
-
-verdict 只用 `READY`、`CAPTURE_REQUIRED`、`NEEDS_HUMAN`。
-
-#### 扫描后形成修复顺序
-
-先完成并封存整个 Scan Run，再从它的 gap queue 比较候选。至少比较
-`topk_sigmoid`、视觉 attention 和其他真实缺口。依次优先：
-
-1. 固定输入下必达；
-2. 边界输入、输出和直接参数更少；
-3. 不依赖 TP 通信、KV cache 或大型运行时对象；
-4. 可以用 P800 Torch 或已有 xspeedgate/kunlun_ops 在 Repair Boundary 内修复。
-
-按上述顺序写入 gap queue。第一项写入 Scan Run 的
-`selection.active_operator`，并把同一个值写入 Working State 的
-`active_operator`；但 `capture_plan` 必须包含本轮准备修复的全部 gap queue
-条目，不能只包含第一项。每行初始写
-`golden_run: null / repair_status: PENDING / attempts_used: 0 /
-passing_run: null`。Contract 保持不变。静态缺口只能写
-`STATIC_GAP_CANDIDATE`；P800 baseline 失败后才能称为实机缺口。
-
-完整结果写入新的 `runs/scan-NNN/result.json`。旧 Run 不可修改。
-
-当前 revision 6 Scan Run 是 `runs/scan-007`。它把五个
-`CAPTURE_REQUIRED` 项全部写入同一 `capture_plan`，其中包括单图路径上的
-`prefill_attention._fwd_kernel`。该项 Hook 现有
-`context_attention_fwd`：函数返回 `None`，结果写入参数 `o`，所以 capture
-保存调用前的 `q/k/v/b_start_loc/b_seq_len` 和标量参数，并在原调用完成后把 `o`
-保存为 `output`。这只固定 CUDA Golden 边界，不预先指定 attention 在 P800 上应
-改用哪个实现。
-
-### `CUDA_CAPTURE`
-
-逐项检查 Scan Run 的 `capture_plan.adapter_status`。Scan Run 不可改写；如果某项
-是 `NOT_IMPLEMENTED`，只有 Working State 的 Closure Evidence 已把该
-`operator_id` 的 adapter 标为 `PASS`，且所指 Run 绑定当前 Contract、该算子、
-当前源码摘要和 `passed: true`，才表示正式 Session 可以包含它。
-`last_completed_action` 和 `last_run` 随后可以推进到其他动作，不能因此丢失已经
-封存的 adapter closure evidence。
-
-如果任一计划项的 adapter 尚未实现：
-
-1. 把实现限制在现有 `capture_golden.py`、`replay_compare.py` 和采集插件中；
-2. Hook Scan Run 指定的现有 capture seam，不新增自定义算子函数；
-3. 用测试证明只保存 Contract 允许的输入、直接参数、非 Tensor 参数和 CUDA 输出，
-   最多三个 shape，且 rank 0 以外不落盘；
-4. 用测试证明 CUDA self-replay 调 Scan Run 记录的 CUDA capture seam。P800
-   replay 入口不由 CUDA capture plan 猜测：除已有 SwiGLU adapter 外，保持
-   `PENDING`，等队列推进到该算子时由 Agent 依据 Kunlun 原调用点补齐；两端都不得
-   新增模型 helper 或自定义算子；
-5. 把实现与测试证据写入新的 Run，不改写 Scan Run；所有计划项 adapter 都完成
-   后，才更新 Working State 的 Closure Evidence、`last_completed_action`、
-   `last_run` 和唯一 CUDA Capture 下一动作。
-6. `capture_golden.py --mode prepare-session` 必须生成一个 config，插件从中加载
-   全部 capture plan collector；不能靠逐项 `prepare` 宣称一次 Session。一个
-   bundle 包含全部 Golden Run 的能力仍要在正式 Session 前通过测试封存。
-
-当前仓库中的 `Step3p5MLP.forward` capture/replay adapter 只属于 revision 4
-历史方案，不能消费当前 kernel-scan Contract。缺少当前活动 kernel 的
-capture/replay adapter
-时，准确报告缺口并执行对应实现 ticket；不要运行旧 MLP preflight，也不要消耗
-CUDA Session。
-
-adapter 完成后，为当前 Contract revision 生成并审查新的正式 Capture runbook。
-现有
-[references/cuda-capture-validation.md](references/cuda-capture-validation.md)
-和 [references/formal-cuda-capture.md](references/formal-cuda-capture.md)
-只绑定 revision 5，当前 revision 不得直接执行。revision 6 当前正式入口是
-[references/formal-cuda-capture-r6.md](references/formal-cuda-capture-r6.md)；
-当 Working State 的唯一 `next_action` 指向该页并要求转到 CUDA 机器时，必须严格
-按该页执行，不自行重排 preflight、reservation、正式 Session、self-replay、
-Bundle build/verify 或最终回传的顺序。`execution_site` 记录最近完成动作所在位置，
-不能用它表示下一动作将在哪台机器执行。
-
-preflight 只验证正式采集所需的环境是否可用，不验证任何具体算子。它只检查：
-
-- 当前 Python 能导入 CUDA Torch，且可见设备数不少于 Contract 的 TP8；
-- CUDA 支持 Contract 固定的 BF16；
-- 加载的 SGLang 来自固定 worktree 且 Git revision 与 Contract 一致；
-- `model_adaptation_capture` 插件入口可以被 SGLang 加载；
-- CUDA 环境没有继承 P800 专用的 `SGLANG_PLATFORM` 或
-  `SGLANG_IS_FLASHINFER_AVAILABLE`。
-
-revision 6 的环境 preflight 入口是：
-
-```text
-python model-adaptation/scripts/capture_golden.py \
-  --spec migration-spec.md \
-  --run-dir runs/cuda-environment-preflight-r6-001 \
-  --mode preflight \
-  --sglang-worktree "$SGLANG_CUDA_WORKTREE"
-```
-
-这个入口不接收 `--scan-result` 或 `--operator-id`，不加载 checkpoint，不 Hook
-算子，不构造 shape，不保存 Tensor，也不执行 self-replay。它不消耗唯一 Capture
-Session，只能在 CUDA 机器运行；SOURCE 单元测试不能替代它。正式 runbook 在
-提交 `session-start.json` 前先运行该命令；通过后由同一个 CUDA Agent 继续，不需要
-为了环境结果单独中途回传。
-
-`runs/cuda-preflight-r6-001` 与 `runs/cuda-preflight-r6-002` 是本职责纠正前形成的
-历史采集集成验证：它们验证五个 collector、shape 去重、rank 过滤和 CUDA
-self-replay，不能再称为环境 preflight，也不要求重复执行。前者暴露工具的 seam
-源码解析问题，后者证明修复后的采集集成路径；两者都没有消耗正式 Session。
-保留的历史入口名为 `--mode capture-adapter-validation`，只允许 Contract revision
-1 至 5；revision 6 必须拒绝它。
-
-具体算子的 Hook、rank 0、最多三个真实 shape、参数保存边界和 CUDA self-replay
-全部属于正式 Capture Session。任何一项失败都使正式 Session 失败并保留证据，
-不能归因于环境 preflight。正式 Golden 会保存原 CUDA Kernel Call 的完整最小
-边界；P800 队列推进到每一项前，Agent 再根据 Kunlun 源码补齐该项
-baseline/candidate 参数装配。adapter 缺失必须报告为流程能力待补齐，不能记成
-Operator Gap。
-
-如果 Working State 的唯一 `next_action` 要求在 CUDA 机器执行，但当前会话不在
-用户指定的 CUDA 机器，不创建 preflight Run，也不运行合成替代品。只报告
-runbook 中的命令和 GitHub evidence 分支回传要求，保持 Working State 不变并停止
-本次执行。
-
-环境 preflight 通过后，继续执行当前 revision 新生成且绑定新 Scan Run、全部
-adapter Run 和全部 capture plan 的正式 runbook。revision 6 runbook 已完成
-SOURCE 修正复审；此时不再返回 SOURCE 重新设计。正式
-Session 启动前仍先通过 GitHub 提交占位；模型停止后不再为了审查样本做一次中途
-回传。同一个 CUDA Agent 继续在本地完成样本审查、临时 Spec、bundle build 和
-verify，全部通过后再一次性回传 Session、Golden、record-samples、bundle 和审查
-证据。后处理不得重启模型，也不算第二个 Capture Session。
-
-正式模型启动前，必须先把 `session-start.json` 和 prepare 证据提交到 runbook
-固定的 GitHub evidence 分支。只有首次 push 成功才授权该 reservation；实际产生
-第一份 Golden Sample 才消耗正式 Session。若模型加载失败且尚未产生任何样本，
-只能在同一个 reservation、Run 和 evidence 分支修正并继续；一旦已有样本，成功
-或失败都不得重启模型、换分支、换 Run 名或创建第二个 Session。
-
-不得在真实 Golden 回传前预填 shape 数量或伪造临时 Spec，也不得让人自行修改
-Working State。
-
-正式 CUDA Session 一次采集 capture plan 中的全部算子：
-
-1. 启动固定 checkpoint 的真实 TP8/BF16/eager 模型；采集只增加插件配置，不改变
-   两端模型启动参数。
-2. 同一模型进程依次发送 Scan Run `request_set` 中的固定文本请求和固定单图请求。
-   启动前重新计算图像 SHA-256；不一致时停止。启动日志必须确认实际 multimodal
-   backend；attention collector 没有命中时不得把 Session 封存为成功。
-3. 对每个算子，每种真实 shape 最多保存一份 rank 0 样本。样本包含该调用的输入、
-   直接参数、必要标量和 CUDA 期望输出。一次模型进程同时服务所有 collector；
-   “每个算子最多三种 shape”不能误计成整个 Session 只有三个样本。
-4. 停止采集进程后、CUDA self-replay 前，调用 `handoff_bundle.py
-   --mode record-samples --scan-result <当前 Scan result.json>`，把每个 Golden
-   Sample 文件的 shape、相对路径、大小和 SHA-256 写入 Golden Run 的
-   `sample-files.json`，并把这次动作保存在独立且不可修改的 record-samples Run。
-   对 gap queue 每项各执行一次；算子 id 从 capture state 和 Scan Run 核对，不在
-   命令或工具里写死。这一步只接受仍为 `ACTIVE`、尚未 self-replay 的 Golden Run；
-   失败时不得继续。
-5. 在同一次 CUDA Session 内按各自现有 Kernel Call 完成全部算子的 self-replay。
-   每个 `golden_run` 都通过才把 Session 标为 `SEALED`。replay config、worker
-   result、Golden state 和 wrapper result 必须携带各自
-   `sample-files.json` SHA-256；后续 build 会重新计算并要求它们与当前样本字节
-   完全一致。Agent 完成正式样本审查后，在 Session Run 新建
-   `formal-result.json`，明确记录 `capture_status=SEALED`、
-   `consumes_capture_session=true`、共同采集进程、Scan/Session 配置摘要，以及按
-   gap queue 排列的每个 Golden state/sidecar 摘要；不得覆盖
-   `prepare-session` 已生成的 `result.json`。
-
-   `formal-result.json` 使用下面这些字段；数组顺序就是 Scan gap queue 顺序，尖括号
-   由 Agent 从已验证证据填写：
-
-   ```json
-   {
-     "tool": "migration-agent",
-     "action": "complete_formal_cuda_capture_session",
-     "spec_binding": {
-       "spec_id": "<spec id>",
-       "contract_revision": 6,
-       "contract_data_sha256": "<Contract Data SHA-256>"
-     },
-     "passed": true,
-     "capture_status": "SEALED",
-     "consumes_capture_session": true,
-     "formal_session_consumed": true,
-     "scan_result_sha256": "<Scan result SHA-256>",
-     "capture_config_sha256": "<Session capture-config SHA-256>",
-     "operator_ids": ["<gap operator id>"],
-     "request_modes": ["text-only", "single-image"],
-     "capture_process_id": 12345,
-     "goldens": [
-       {
-         "operator_id": "<gap operator id>",
-         "golden_run": "<该 operator capture-config 的 run_dir>",
-         "capture_state_sha256": "<capture-state.json SHA-256>",
-         "sample_files_sha256": "<sample-files.json SHA-256>"
-       }
-     ]
-   }
-   ```
-
-6. Agent 先生成临时 Spec，把其中的 Working State 写成下一状态：
-   `WAITING / HANDOFF`，保留第一个 `active_operator`，把每个 gap queue 行的
-   `golden_run` 写成对应 SEALED Run，并写入 bundle/manifest 路径；唯一
-   `next_action` 是人工复制后在 P800 校验。`handoff_bundle.py` 不解析 Working State，
-   所以这些字段必须由 Agent 逐项核对。
-7. 用临时 Spec 构建 bundle。build 必须接收当前 Scan Run，并为每项重复传入一个
-   `--golden-run` 和一个 `--sample-record-result`。工具从 Scan Run 的
-   `gap_queue` 得到唯一有序算子集合，拒绝缺失、额外或重复证据；不要在 runbook
-   中维护另一份固定算子列表。全部 Golden 还必须引用同一个 Session 配置、来自
-   同一个采集进程，并对应 Session 中按队列排列的目录；带
-   `preflight_tp_context` 的预检配置必须拒绝。Session 的文本与单图请求还必须
-   逐项匹配 Scan Run。Manifest v2 包含原始 `scan-result.json`、原始 Session
-   配置、`formal-result.json`、全部 Golden、每项 record result/sidecar 摘要和
-   完整文件清单。revision 6 未提供 `--scan-result` 时必须停止，不能回退到历史
-   Manifest v1。
-8. 在 CUDA 端立即执行 `--mode verify`。verify 只信任包内 Scan Run，重新得到期望
-   算子集合，并用包内 Session 配置交叉核对全部 Golden。只有本地 Agent 的正式
-   样本审查、build、verify 和 Contract 绑定全部通过后，才用 bundle 中
-   `migration-spec.md` 的相同字节原子替换当前 Spec，并做采集后的唯一一次 GitHub
-   回传；不得在 manifest 生成后再次编辑该 Spec。
-
-任何步骤失败都要保留本地证据，不替换当前 Spec；随后把失败证据追加到同一
-GitHub evidence 分支。Session 已消耗但不能形成可信 Golden 时进入
-`BLOCKED / CUDA_CAPTURE`，不能重开第二次 Session。
-
-### `HANDOFF`
-
-工具只生成和校验 bundle；人工负责跨机器复制。
-
-P800 收到 bundle 后，先校验 manifest。文件缺失、多出、大小或 SHA-256 不符时，
-不得读取 Golden Tensor。校验通过后进入 `ACTIVE / P800_REPAIR`，下一动作是活动
-kernel 的 baseline replay。
-
-### `P800_REPAIR`
-
-具体修复方案由 Migration Agent 根据当前 baseline、失败样本元数据和目标源码自主
-提出。人只提供 P800 环境、仓库和必要权限，不需要提供 attempt 假设、补丁或逐条
-修复命令；确定性脚本也不能选择代码改法。
-
-P800 目标仓库由环境变量 `SGLANG_KUNLUN_WORKTREE` 指向。Agent 必须确认它是
-Contract 固定 revision 的 Git 根目录。变量缺失或路径无法确认时，才进入
-`NEEDS_HUMAN` 询问一个环境问题；不能猜路径。
-
-在 P800 启动服务、baseline replay 或 candidate replay 前，必须先固定 Kunlun
-导入环境：
-
-```bash
-export SGLANG_PLATFORM=kunlun
-export SGLANG_IS_FLASHINFER_AVAILABLE=False
-export PYTHONPATH="$SGLANG_KUNLUN_WORKTREE/python:$SGLANG_KUNLUN_WORKTREE/sglang-kunlun${PYTHONPATH:+:$PYTHONPATH}"
-```
-
-完整候选变量表位于 `docs/p800-environment-and-repair.md`。Agent 必须完整读取该表，
-再根据 D/P 节点类型、DeepEP/BKCL 拓扑、实际 backend 和当前活动算子按需选择；
-除上述三个导入约束外，不能整表导出。每个额外设置的变量都要在当前 P800 环境
-Run 中记录最终值和选择原因。需要 D/P 专属值但节点类型无法确认时进入
-`NEEDS_HUMAN`，不能猜值。环境、插件导入或设备发现失败是工具/环境失败，不是
-Operator Gap。
-
-调用 `replay_compare.py --mode kernel-replay` 时，对每个实际导出的候选变量追加
-`--p800-environment-reason '变量名=选择原因'`。工具自动读取真实值并写入 Run；
-没有选择任何候选变量时不传该参数。缺少原因时先补齐环境证据，不能执行 replay。
-
-先用 `workspace_guard.py` 检查固定 revision。第一个算子要求干净工作区；后续算子
-允许工作区恰好等于上一项 `passing_run` 的完整通过 patch。把该 Run 作为
-`--accepted-result` 传入，工具必须逐字节核对；除此之外的已有修改进入
-`NEEDS_HUMAN`，不得替用户清理。
-
-baseline 直接用 Golden Sample 的输入、直接参数和非 Tensor 参数调用活动 kernel
-边界：
-
-- 全部样本通过：该行记录 `repair_status: PASS` 和 baseline Run，说明 Kunlun
-  已有等价行为；不伪造失败，也不消耗修复次数。该行 `passing_run` 沿用之前
-  PASS 行中最近一份非空值；如果此前没有补丁则保持 `null`，然后自动选择下一项。
-- 任一样本执行或精度失败：记录 baseline，`attempts_used` 保持 0，开始有限修复。
-
-baseline 前先调用 `workspace_guard.py --mode check-baseline --operator-id
-<active_operator>`；replay 完成后调用 `--mode assess-baseline --operator-id
-<active_operator> --replay-result <baseline-replay/result.json>`。只要此前 PASS 行中
-存在非空 `passing_run`，两条命令都追加
-`--accepted-result <最近非空 passing_run/result.json>`；不能把没有
-`candidate.patch` 的 baseline PASS Run 传给该参数。两次都要显式给出检查所覆盖的
-文件，但 baseline 的文件列表不预先锁定后续 attempt 的实现位置。工具从 Contract
-读取固定 Kunlun revision 和五轮上限，不允许命令行覆盖。
-正式 Spec 只接受
-`replay_compare.py --mode kernel-replay --execution-site p800` 的结果；测试用
-synthetic 结果不能推进正式流程。
-
-每轮修复：
-
-1. Agent 先重读上一结果、失败样本元数据和相关源码，自主选择一个可证伪假设及
-   该假设需要的最小文件集合。不同 attempt 可以选择不同文件；第二项以后，声明
-   的允许文件还要包含已接受 patch 中的修改文件，使工具能校验完整累计 patch。
-   工具只保护声明的文件并拒绝其他改动。不得要求人替 Agent 指定改法。
-2. Agent 根据源码追踪 P800 的原始 Kernel Call 边界，再决定修复位置和重放方式。
-   流程不预设某个 Python 函数名、函数签名或 attempt 改法。简单改动直接内联在
-   原生产函数的既有调用位置，不得为了让 replay import 而新增生产 helper。
-   领取 attempt 前，Agent 必须确认 model-adaptation 已有或补齐该 Kernel Call 的
-   replay 参数装配，并把源码位置、命令和测试封存在 adapter Run。参数装配只能
-   调用原有 P800 Kernel Call，不能复制一份修复算法。adapter 必须验证实际
-   `x/y`、直接参数和非 Tensor 参数的数据来源；仅检查同名关键字、常量或不可达
-   调用不能作为候选生效证据。
-3. 从同一基线开始，只写一个假设；调用
-   `workspace_guard.py --mode start-attempt --operator-id <active_operator>
-   --attempt N --hypothesis <一句话> --previous-result <上一结果>` 创建 Run 后，
-   Agent 才能修改源码。此前存在累计 patch 时同时传
-   `--accepted-result <最近非空 passing_run/result.json>`。每个算子的 attempt 1
-   都从自己的失败 baseline 开始；同一算子的后续轮必须指向紧邻的上一轮失败结果，
-   不能重用编号绕过五轮上限。还要为此前所有 `repair_status: PASS` 且有 Golden
-   的行逐个追加 `--regression-operator-id <operator_id>`；这份列表在领取 attempt
-   时封存，后续轮不得删减。工具会从 `--accepted-result` 继承已经封存的完整
-   历史列表并拒绝缺项，不能只回归最近一份 patch 的所属算子。
-4. 修改前把 Working State 的 `attempts_used` 加一；通过轮也计数。
-5. 修改只限活动 kernel 调用的 Python、P800 可执行 Torch、已有
-   xspeedgate/kunlun_ops 能力和聚焦测试。
-6. 修改完成后，先调用 `workspace_guard.py --mode record-candidate` 保存相对固定
-   Git revision 的完整累计 `candidate.patch`。然后运行
-   `replay_compare.py --mode kernel-replay --execution-site p800
-   --candidate-result <attempt-run>/candidate-result.json`，仍以 Scan 记录的原
-   P800 Kernel Call 为 `invocation_target`，对活动算子的全部 Golden Samples
-   使用固定 `torch.testing.assert_close`。候选 replay 启动前和结束后都必须确认
-   当前工作区的完整累计 diff 与 `candidate.patch` 逐字节一致；该算子的 adapter
-   必须从被修改后的原生产调用点取得实际参数装配，不能仅以“存在 candidate”作为
-   修复生效开关。不得用新生产 wrapper 充当回放入口。
-7. 调用 `workspace_guard.py --mode finish-attempt
-   --replay-result <attempt-run>/replay/result.json`。若活动 replay 通过，先用同一
-   `candidate-result.json` 逐项重放第 3 步封存的历史 operator，把结果写在
-   `<attempt-run>/regressions/<operator>/result.json`，并为每项向
-   `finish-attempt` 追加一个 `--regression-result`。
-   `finish-attempt` 要求工作区仍与已记录 patch 完全一致，并先把 patch 摘要和 replay
-   结果摘要、每个历史回归的结果与摘要共同写入 `outcome.json`。活动算子或任一
-   历史算子失败，本轮整体都失败并恢复上一份累计 patch。Agent 只有在源码与运行
-   日志都能说明重放经过本轮修复边界后，才能接受该结果；否则先修正重放方式，不能
-   伪造 PASS。
-   失败时只恢复到 `--accepted-result` 指向的上一份通过 patch；通过时保留新的
-   累计 patch，并确认它是唯一工作区修改。未知或 staged 修改一律停止且不清理。
-
-需要新增 C++/自定义 kernel/底层注册、改完整模型、放宽精度门槛，或第五轮仍失败，
-都进入 `BLOCKED`，不能扩大范围。
-
-`finish-attempt` 已把当前算子和所有先前 `repair_status: PASS` 且有 Golden 的
-算子作为同一通过门槛封存。整体通过后：
-
-1. 封存当前 Run，把活动行更新为 `repair_status: PASS`，记录
-   `attempts_used`；修复 attempt 通过时 `passing_run` 指向本轮，baseline 直接
-   PASS 时沿用之前最近一份非空值；
-2. 若存在下一行 `repair_status: PENDING` 且 `golden_run` 为 `SEALED`，按 gap
-   queue 表格顺序自动选择下一项，更新 `active_operator`，把该行改为 `ACTIVE`，
-   清空当前假设，并把唯一 `next_action` 写成该算子的 P800 baseline；
-3. 立即重读 Spec 并继续，不等待人工确认；
-4. 若仍有 `PENDING` 但缺少 SEALED Golden，说明唯一 CUDA Session 或 Handoff
-   不完整，写入 `BLOCKED`，不得临时重访 CUDA；
-5. 只有全部 gap queue 行都是 `PASS`，才写 `PASS / DONE`、
-   `active_operator: null` 和 `next_action: none`。若至少发生过一次修复，最后一份
-   非空 `passing_run` 必须保存完整累计 patch，且该 patch 是唯一工作区修改；若
-   全部 baseline 直接 PASS，则 `passing_run` 可以全部为 `null`，但工作区必须是
-   Contract 固定 revision 的干净状态。
-
-同一 P800 Agent 会话中，只要状态仍为 `ACTIVE`，就按上述规则继续当前轮或自动选择
-下一项。只有达到全队列 `PASS / DONE`、`BLOCKED`、`NEEDS_HUMAN`，或确实需要计划内
-跨机器动作时才停止。
-
-新选中的活动行以 `attempts_used: 0 / active_hypothesis: null` 开始；其中
-`active_hypothesis: null` 是人工确认的合法交接状态，不是让人预填修复方案。
-Migration Agent 在领取该算子 attempt 1 的同一动作里自主写入单一假设。
-
-## 4. 接受工具结果
-
-这些确定性脚本至少接收：
-
-```text
---spec <migration-spec.md> --run-dir <fresh-run-directory>
-```
-
-调用前确认脚本和当前活动算子的 adapter 存在。缺少能力时准确报告代码缺口，不把
-工具缺失写成 Operator Gap。不得用命令行覆盖 Contract 的容差、shape 或修复次数。
-
-接受结果前重新计算 Contract Data SHA-256，核对 `spec_id`、
-`contract_revision`、`contract_data_sha256`。任一不一致都不得推进状态。
-
-## 5. 停止条件
-
-- `ACTIVE`：重读 Spec 后继续唯一下一动作。
-- `WAITING`：报告 bundle、manifest 和人工复制动作。
-- `PASS`：只用于全部 gap queue 已关闭；报告逐算子结果和最终累计 patch。
-- `BLOCKED`：报告停止原因和相关 Run。
-- `NEEDS_HUMAN`：报告唯一问题和恢复所需证据。
-
-不自动 SSH、上传、下载、登录、管理凭证、创建分支、commit 或 push。
+## 1. Validate Contract and workspace
+
+读取 Contract Data，确认：
+
+- `schema` 为 `model-adaptation/v1`；
+- 模型参数与 Skill 输入相同；
+- SGLang、SGLang-Kunlun revision 和 checkpoint 都已固定；
+- TP、dtype、target-only eager、文本与单图请求已固定；
+- operator 和 model 两组 Precision Gate 完整；
+- Repair Scope 明确禁止新 C++、自定义 kernel 和底层注册。
+
+读取 `docs/p800-environment-and-repair.md`。检查当前工作区已有修改，只修改本轮相关
+文件，不清理或覆盖无法解释的用户改动。
+
+## 2. `PREFLIGHT`
+
+在任何算子判断之前，在 P800 现场验证：
+
+- `SGLANG_KUNLUN_WORKTREE` 指向固定 revision；
+- `sglang`、`sglang_kunlun` 从固定 worktree 导入；
+- Kunlun platform 和 Contract 要求的设备数量可用；
+- BF16 Tensor 创建、设备搬运和简单 PyTorch 运算正常；
+- checkpoint 可读且配置摘要一致；
+- decode 和 prefill graph backend 都关闭；
+- 实际环境变量及选择原因已经记录。
+
+把命令、版本、导入路径、设备结果和日志写入新的 Run Evidence。
+
+- 全部通过：`environment_status: PASS`，进入 `OPERATOR_VERIFICATION`。
+- 任一失败：记录 `ENVIRONMENT`；修复后重复本 phase。
+- 缺少人才能提供的路径、权限或节点类型：进入 `NEEDS_HUMAN`。
+
+环境通过前不得把任何条目标为 `OPERATOR_MISSING` 或
+`OPERATOR_CONTRACT`。
+
+## 3. `OPERATOR_VERIFICATION`
+
+按 Spec 表格顺序选择第一项 `PENDING`，改为 `ACTIVE`。初始五项必须全部完成：
+
+1. `sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul`
+2. `sgl_kernel.gemma_rmsnorm`
+3. `sgl_kernel.gemma_fused_add_rmsnorm`
+4. `sgl_kernel.topk_sigmoid`
+5. `sglang.srt.layers.attention.triton_ops.prefill_attention._fwd_kernel`
+
+### 3.1 Establish the source contract
+
+Agent 从固定版本源码确认：
+
+- 从模型入口到 P800 Production Operator 的实际调用链；
+- 输入、输出、直接参数和非 Tensor 参数；
+- 输出 dtype、输出 buffer、原地修改和 layout 要求；
+- 社区测试或数学定义中的独立 CPU reference。
+
+静态缺少同名 symbol 只能记录为 Operator Candidate。只有实际 P800 生产调用已经
+到达，才能判为 `OPERATOR_MISSING` 或 `OPERATOR_CONTRACT`。
+
+### 3.2 Create focused tests
+
+优先扩展目标仓库已有测试；没有合适 seam 时，在目标仓库按其测试约定新增一个聚焦
+测试。测试必须直接调用 P800 生产入口，不能在本仓库建设统一 adapter。
+
+输入由代码确定性构造，不保存任意活体 Tensor。涉及非连续布局时，在 CPU 和 P800
+分别从 base Tensor 创建 view，显式断言预期 stride。
+
+每项至少覆盖 Spec 的 required cases：
+
+- SwiGLU clamp：`gemm1_limit=None` 和有限 limit；输入包含超过正负 clamp 边界的值，
+  同时验证实际 Kunlun 调用取得模型配置中的 limit。
+- Gemma RMSNorm：BF16、生产 hidden size、较小诊断 shape、连续和
+  `base[:, :hidden]` 非连续输入；参考计算用 FP32 归约后转回输入 dtype。
+- Gemma fused add RMSNorm：除 RMSNorm 条件外，分别比较修改后的 `x` 和
+  `residual`，确认函数返回 `None` 时两个输出仍被验证。
+- TopK sigmoid：有/无 `correction_bias`、`renormalize` 分支、生产 top-k 和专家数；
+  构造无并列分数，weights 按浮点门槛比较，ids 精确相等。
+- Visual prefill attention：ragged sequence、causal 分支、生产 head dim、Q/KV head
+  数和 GQA 映射；按 `b_start_loc`、`b_seq_len` 分段，用
+  `torch.nn.functional.scaled_dot_product_attention` 建立 CPU reference。
+
+历史 shape 可以作为 case 线索，但不能单独替代当前 P800 生产测试。运行时出现的新
+shape 要加入当前算子的聚焦回归测试。
+
+### 3.3 Compare and decide
+
+运行 CPU reference 和 P800 生产算子，按 Precision Gate 比较并保存 Run Evidence。
+
+- 直接通过：队列行改为 `PASS`。
+- 实现不存在：记录 `OPERATOR_MISSING`，在 Repair Scope 内修复并重测。
+- 执行成功但数值、dtype、layout 或原地语义失败：记录
+  `OPERATOR_CONTRACT`，修复并重测。
+- 生产调用没有到达：记录 `ADAPTATION`，先修实际路由。
+- 多卡通信、rank、内存或 stream 失败：记录 `DISTRIBUTED_RUNTIME`。
+
+修复通过后保留聚焦回归测试，并继续下一条，不等待人工选择方案。五项全部
+`PASS` 后进入 `EAGER_BRINGUP`。
+
+## 4. `EAGER_BRINGUP`
+
+使用 Contract 固定的 TP8、BF16、target-only eager 配置启动真实模型，依次执行
+固定文本和单图请求。至少验证：
+
+- 服务或离线 engine 完成启动；
+- 实际 backend 和调用路径符合固定源码；
+- 两种请求都完成，输出和必要 logits 有限；
+- 相同输入在确定性设置下可以重复；
+- 初始五个算子的 P800 Production Operator 在真实模型路径可达。
+
+遇到失败时按以下规则处理：
+
+| category | rule | action |
+|---|---|---|
+| `ENVIRONMENT` | 生产算子前的导入、设备、依赖、checkpoint 问题 | 回到 `PREFLIGHT` |
+| `ADAPTATION` | 模型类、plugin、backend、dispatch 或调用路由错误 | 修适配代码后重启 |
+| `OPERATOR_MISSING` | 实际到达的新生产算子没有实现 | 追加队列并回到 `OPERATOR_VERIFICATION` |
+| `OPERATOR_CONTRACT` | 实际 shape/dtype/layout/原地语义暴露新问题 | 扩充对应聚焦测试并回到算子验证 |
+| `DISTRIBUTED_RUNTIME` | TP/EP、collective、rank、通信、内存或 stream 问题 | 建立最小多卡复现后修复 |
+| `ACCURACY` | 请求完成但结果不满足门槛 | 进入 `MODEL_ACCURACY` |
+
+每轮只处理有证据的首个根因。修复后重新运行失败请求；两个固定请求都通过后设置
+`model_status: PASS`，进入 `MODEL_ACCURACY`。
+
+## 5. `MODEL_ACCURACY`
+
+使用 Contract 固定的同版本 SGLang reference runtime 和相同 checkpoint、输入、
+tokenizer、TP 拓扑、dtype 与 eager 设置进行比较。不要只比较自然语言观感。
+
+至少检查：
+
+- 输入 token、图像预处理结果和生成配置一致；
+- 第一个生成位置和需要的后续位置 logits 满足 model Precision Gate；
+- 离散 token、router ids 等整数结果精确相等；
+- 两种固定请求都通过；
+- P800 结果全部有限。
+
+通过后设置 `accuracy_status: PASS` 并进入 `DONE`。失败时记录 `ACCURACY`，进入
+`ACCURACY_DEBUG`，不得回头放宽门槛。
+
+## 6. `ACCURACY_DEBUG`
+
+优先复用固定 SGLang 版本已有的：
+
+- `python/sglang/srt/debug_utils/dumper.py`
+- `python/sglang/srt/debug_utils/tensor_dump_forward_hook.py`
+- `python/sglang/srt/debug_utils/comparator/`
+
+保持两端输入、tokenizer、checkpoint、拓扑、dtype 和 eager 设置一致。先比较
+embedding、每个 decoder layer 输出、final norm 和 logits，定位第一个发散层；多卡
+Tensor 必须记录 rank 和切分维度，必要时给 comparator 提供 dims override。
+
+找到第一个发散层后：
+
+1. 对比该层输入，确认误差不是上游传播；
+2. 缩小到模块和 P800 Production Operator；
+3. 将新算子或新 case 加入 Operator Verification Queue；
+4. 修复并依次重跑局部测试、真实模型和 Model Accuracy Gate。
+
+函数级 logger 只可辅助确认调用和崩溃；对返回 `None` 的原地算子，必须显式保存并
+比较修改后的参数，不能只查看返回值。
+
+# Run Evidence
+
+每次动作创建新的 `runs/<run-id>/result.md` 或 `result.json`，至少记录：
+
+- Contract revision、phase、category 和结论；
+- SGLang、SGLang-Kunlun commit、checkpoint 和完整命令；
+- CPU reference 的固定源码位置；
+- P800 Production Operator 的固定源码位置和真实调用链；
+- 输入 shape、dtype、layout、stride、seed 和关键标量；
+- 使用的 Precision Gate；
+- 通过项、失败项、traceback 和下一动作。
+
+默认不保存完整输入输出 Tensor。只有 `ACCURACY_DEBUG` 无法由统计和局部测试定位时，
+Agent 才保存必要的定点张量，并在 Run Evidence 中说明原因和范围。
+
+# State transitions and stop conditions
+
+- `ACTIVE`：保存证据、更新 Working State、重读 Spec 并继续唯一下一动作。
+- `NEEDS_HUMAN`：只用于缺少人才能提供的路径、权限、节点类型、baseline 或 Contract
+  决定；写一个明确问题后停止。
+- `BLOCKED`：需要新增 C++、自定义 kernel、底层注册或越过 Repair Scope；保存证据后
+  停止。
+- `PASS / DONE`：环境、全部队列项、两个真实模型请求和 Model Accuracy Gate 全部
+  通过，且没有未处理 Failure Observation。
+
+不自动 SSH、登录、管理凭证、创建分支、commit 或 push。用户明确提供远端会话或
+要求相应 Git 动作时再执行。
