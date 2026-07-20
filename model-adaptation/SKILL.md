@@ -30,8 +30,9 @@ PREFLIGHT
 -> DONE
 ```
 
-初始 Operator Verification Queue 中的五个历史 gap 必须全部实际测试。一个局部算子
-通过不能跳过其余条目；局部队列全部通过也不能替代真实模型和精度验收。
+Operator Verification Queue 中的每一行都必须实际测试。初始五个历史 Operator
+Candidate 不能因旧 Run 或静态源码判断而跳过；局部队列全部通过也不能替代真实
+模型和精度验收。
 
 本 Skill 不依赖本仓库内的通用 Tensor 采集、序列化、跨机交接或重放程序。Agent
 直接读取固定源码，在目标 SGLang-Kunlun 仓库创建聚焦测试、调用 P800 生产入口，并
@@ -117,13 +118,8 @@ PREFLIGHT
 
 ## 3. `OPERATOR_VERIFICATION`
 
-按 Spec 表格顺序选择第一项 `PENDING`，改为 `ACTIVE`。初始五项必须全部完成：
-
-1. `sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul`
-2. `sgl_kernel.gemma_rmsnorm`
-3. `sgl_kernel.gemma_fused_add_rmsnorm`
-4. `sgl_kernel.topk_sigmoid`
-5. `sglang.srt.layers.attention.triton_ops.prefill_attention._fwd_kernel`
+按 Spec 表格顺序选择第一项 `PENDING`，改为 `ACTIVE`。必须遍历当前 Operator
+Verification Queue 中的每一行；Skill 不另存一份 operator id 清单。
 
 ### 3.1 Establish the source contract
 
@@ -156,8 +152,9 @@ Agent 从固定版本源码确认：
 - TopK sigmoid：有/无 `correction_bias`、`renormalize` 分支、生产 top-k 和专家数；
   构造无并列分数，weights 按浮点门槛比较，ids 精确相等。
 - Visual prefill attention：ragged sequence、causal 分支、生产 head dim、Q/KV head
-  数和 GQA 映射；按 `b_start_loc`、`b_seq_len` 分段，用
-  `torch.nn.functional.scaled_dot_product_attention` 建立 CPU reference。
+  数和 GQA 映射；按 `b_start_loc`、`b_seq_len` 分段。Agent 检查固定源码和社区测试
+  后选择独立 CPU reference，并在 Run Evidence 中说明其 mask、scale 和 GQA 语义；
+  Skill 不预先指定具体 PyTorch helper。
 
 历史 shape 可以作为 case 线索，但不能单独替代当前 P800 生产测试。运行时出现的新
 shape 要加入当前算子的聚焦回归测试。

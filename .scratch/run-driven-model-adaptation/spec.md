@@ -8,7 +8,7 @@ Status: Done
 驱动的 P800 eager bring-up：
 
 1. 先检查 P800 环境和固定源码；
-2. 对已知缺口建立独立 CPU reference，并直接调用 P800 生产算子比较；
+2. 对历史 Operator Candidate 建立独立 CPU reference，并直接调用 P800 生产算子比较；
 3. 运行真实 eager 模型，按失败类别修复并继续；
 4. 模型能运行后验证精度；
 5. 只有精度失败时才使用 SGLang dumper/comparator 逐层、多卡定位。
@@ -27,12 +27,14 @@ Status: Done
   生产调用。
 - 失败至少分为 `ENVIRONMENT`、`ADAPTATION`、`OPERATOR_MISSING`、
   `OPERATOR_CONTRACT`、`DISTRIBUTED_RUNTIME`、`ACCURACY`。
-- 当前五个历史 gap 必须全部进入初始 Operator Verification Queue：
+- 当前五个历史 Operator Candidate 必须全部进入初始 Operator Verification Queue：
+<!-- REQUIRED-OPERATOR-CANDIDATES: BEGIN -->
   - `sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul`
   - `sgl_kernel.gemma_rmsnorm`
   - `sgl_kernel.gemma_fused_add_rmsnorm`
   - `sgl_kernel.topk_sigmoid`
   - `sglang.srt.layers.attention.triton_ops.prefill_attention._fwd_kernel`
+<!-- REQUIRED-OPERATOR-CANDIDATES: END -->
 - 算子测试必须覆盖各自语义风险：SwiGLU clamp 边界、RMSNorm 非连续输入、
   fused add 的两个原地结果、TopK 的 correction bias/renormalize/无并列输入、
   visual prefill attention 的 ragged sequence/causal/GQA 语义。
@@ -61,7 +63,7 @@ Status: Done
 ## Acceptance
 
 - 活跃 Skill、Context、Spec 和模板只描述 run-driven 流程。
-- 当前 Spec 的五个历史 gap 全部为待验证项。
+- 当前 Spec 的五个历史 Operator Candidate 全部为待验证项。
 - 旧 replay Python 栈及其插件项目不存在。
 - 活跃文档不再引用已删除脚本或旧状态阶段。
 - 新行为测试和剩余全量测试通过。

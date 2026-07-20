@@ -5,20 +5,12 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parents[1]
+REQUIREMENTS_SPEC = ROOT / ".scratch" / "run-driven-model-adaptation" / "spec.md"
 SKILL = ROOT / "model-adaptation" / "SKILL.md"
 CONTEXT = ROOT / "CONTEXT.md"
 SPEC = ROOT / "migration-spec.md"
 TEMPLATE = ROOT / "model-adaptation" / "references" / "migration-spec-template.md"
 ENVIRONMENT = ROOT / "docs" / "p800-environment-and-repair.md"
-
-KNOWN_GAPS = (
-    "sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe."
-    "_swiglu_silu_clamp_mul",
-    "sgl_kernel.gemma_rmsnorm",
-    "sgl_kernel.gemma_fused_add_rmsnorm",
-    "sgl_kernel.topk_sigmoid",
-    "sglang.srt.layers.attention.triton_ops.prefill_attention._fwd_kernel",
-)
 
 FAILURE_CATEGORIES = (
     "ENVIRONMENT",
@@ -56,6 +48,28 @@ def _contract_data(spec_text: str) -> dict:
     return json.loads(match.group(1))
 
 
+def _required_operator_candidates(requirements_text: str) -> tuple[str, ...]:
+    match = re.search(
+        r"<!-- REQUIRED-OPERATOR-CANDIDATES: BEGIN -->\s*(.*?)\s*"
+        r"<!-- REQUIRED-OPERATOR-CANDIDATES: END -->",
+        requirements_text,
+        flags=re.DOTALL,
+    )
+    if match is None:
+        raise AssertionError("Requirements must expose the operator candidate list")
+    return tuple(re.findall(r"^\s*-\s+`([^`]+)`\s*$", match.group(1), re.MULTILINE))
+
+
+def _operator_queue_statuses(spec_text: str) -> dict[str, str]:
+    return dict(
+        re.findall(
+            r"^\|\s*`([^`]+)`\s*\|\s*`(PENDING|ACTIVE|PASS|BLOCKED)`\s*\|",
+            spec_text,
+            re.MULTILINE,
+        )
+    )
+
+
 class RunDrivenModelAdaptationTest(unittest.TestCase):
     def test_public_skill_exposes_the_run_driven_workflow(self):
         skill = _read(SKILL)
@@ -72,18 +86,19 @@ class RunDrivenModelAdaptationTest(unittest.TestCase):
         for category in FAILURE_CATEGORIES:
             self.assertIn(category, skill)
 
-        for gap in KNOWN_GAPS:
-            self.assertIn(gap, skill)
-
         self.assertIn("torch.testing.assert_close", skill)
         self.assertIn("生产调用", skill)
         self.assertIn("CPU reference", skill)
+        self.assertIn("Operator Verification Queue 中的每一行", skill)
         self.assertIn("dumper", skill)
         self.assertIn("comparator", skill)
 
-    def test_current_spec_queues_every_known_gap_under_fixed_precision(self):
+    def test_current_spec_queues_every_required_candidate_under_fixed_precision(self):
+        requirements = _read(REQUIREMENTS_SPEC)
         spec = _read(SPEC)
         contract = _contract_data(spec)
+        required_candidates = _required_operator_candidates(requirements)
+        queue_statuses = _operator_queue_statuses(spec)
 
         self.assertEqual(contract["schema"], "model-adaptation/v1")
         self.assertEqual(contract["contract_revision"], 7)
@@ -100,15 +115,20 @@ class RunDrivenModelAdaptationTest(unittest.TestCase):
             },
         )
 
-        for gap in KNOWN_GAPS:
-            self.assertRegex(
-                spec,
-                rf"\|\s*`{re.escape(gap)}`\s*\|\s*`PENDING`\s*\|",
-            )
+        self.assertEqual(len(required_candidates), 5)
+        self.assertEqual(len(set(required_candidates)), len(required_candidates))
+        for candidate in required_candidates:
+            self.assertEqual(queue_statuses.get(candidate), "PENDING")
 
         self.assertIn("- `phase`: `PREFLIGHT`", spec)
         self.assertIn("- `model_status`: `NOT_STARTED`", spec)
         self.assertIn("- `accuracy_status`: `NOT_STARTED`", spec)
+
+        last_run_match = re.search(r"- `last_run`: `([^`]+)`", spec)
+        self.assertIsNotNone(last_run_match)
+        last_run = last_run_match.group(1)
+        self.assertNotEqual(last_run, "null")
+        self.assertTrue((ROOT / last_run).is_file(), last_run)
 
     def test_old_replay_module_and_live_references_are_removed(self):
         self.assertFalse((ROOT / "model-adaptation" / "scripts").exists())
@@ -154,7 +174,7 @@ class RunDrivenModelAdaptationTest(unittest.TestCase):
         ):
             self.assertIn(required_rule, template)
 
-    def test_environment_guide_keeps_preflight_separate_from_operator_gaps(self):
+    def test_environment_guide_keeps_preflight_separate_from_operator_missing(self):
         guide = _read(ENVIRONMENT)
 
         self.assertIn("SGLANG_PLATFORM=kunlun", guide)

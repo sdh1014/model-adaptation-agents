@@ -86,7 +86,7 @@ checkpoint、运行方式、Precision Gate、Repair Scope 或停止规则。任�
 在固定 TP8、BF16、target-only eager 环境中：
 
 1. 验证 P800 环境；
-2. 对五个历史 gap 全部执行独立 CPU reference 与 P800 生产算子测试；
+2. 对五个历史 Operator Candidate 全部执行独立 CPU reference 与 P800 生产算子测试；
 3. 跑通固定文本和单图真实模型请求；
 4. 对固定同版本 reference runtime 验证模型精度；
 5. 只有精度失败时逐层、多卡定位并把新 case 返回算子队列。
@@ -136,7 +136,7 @@ SOURCE 静态检查、历史 Run 或已有建议补丁不能替代当前 P800 �
 | revision | decision |
 |---:|---|
 | 1-6 | 历史 Contract 使用算子级 Golden 流程；只保留为 Git 历史。 |
-| 7 | 删除通用采集与重放框架，改为 Agent 驱动的 CPU reference、P800 生产算子、真实 eager 模型和按需逐层精度定位；五个历史 gap 全部重新进入测试队列。 |
+| 7 | 删除通用采集与重放框架，改为 Agent 驱动的 CPU reference、P800 生产算子、真实 eager 模型和按需逐层精度定位；五个历史 Operator Candidate 全部重新进入测试队列。 |
 
 <!-- HUMAN-OWNED CONTRACT: END -->
 
@@ -150,14 +150,14 @@ Agent 每次动作前重读 Contract 和本区。动作结束后先写新 Run Ev
 ### Current
 
 - `observed_contract_revision`: `7`
-- `state_revision`: `50`
+- `state_revision`: `51`
 - `status`: `ACTIVE`
 - `phase`: `PREFLIGHT`
 - `execution_site`: `SOURCE`
 - `active_operator`: `null`
-- `last_completed_action`: `run_driven_workflow_source_rewrite`
-- `last_run`: `null`
-- `next_action`: `在 P800 固定 worktree 完成环境检查；通过后按 Operator Verification Queue 顺序测试全部五个历史 gap`
+- `last_completed_action`: `run_driven_workflow_source_rewrite_and_review_alignment`
+- `last_run`: `runs/run-driven-workflow-rewrite-001/result.md`
+- `next_action`: `在 P800 固定 worktree 完成环境检查；通过后按 Operator Verification Queue 顺序测试全部五个历史 Operator Candidate`
 
 phase 只使用：
 
