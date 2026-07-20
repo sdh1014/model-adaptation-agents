@@ -217,14 +217,14 @@ Agent 每次动作前完整读取 Contract 与本区；每次动作结束后立�
 ### Current
 
 - `observed_contract_revision`: `6`
-- `state_revision`: `47`
+- `state_revision`: `48`
 - `status`: `ACTIVE`
 - `phase`: `CUDA_CAPTURE`
-- `execution_site`: `SOURCE`
+- `execution_site`: `CUDA`
 - `active_operator`: `sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul`
-- `last_completed_action`: `environment_preflight_public_interface_reviewed`
-- `last_run`: `runs/preflight-responsibility-review-001`
-- `next_action`: `在 SOURCE 生成并审查 revision 6 正式 CUDA Capture runbook：其第一步使用只验证 CUDA Torch、TP8、BF16、固定 SGLang worktree 和插件入口的 --mode preflight；通过后由同一 CUDA Agent 启动唯一真实 TP8 Session，以文本和单图请求一次收齐 gap queue 五项 Golden、逐项 self-replay、审查并动态构建及验证 Bundle`
+- `last_completed_action`: `revision_6_formal_cuda_capture_runbook_generated_and_reviewed`
+- `last_run`: `runs/formal-cuda-runbook-r6-001`
+- `next_action`: `在 CUDA 机器严格执行 model-adaptation/references/formal-cuda-capture-r6.md；先完成环境 preflight，通过后在同一 reservation 内完成唯一正式 Session、全部 Golden self-replay 和 Handoff Bundle build/verify`
 
 规则：`ACTIVE` 时 `next_action` 必须恰好一条；`WAITING` 时必须是一条人工动作；`PASS`、`BLOCKED`、`NEEDS_HUMAN` 时必须为 `none`。
 
@@ -318,6 +318,7 @@ replay。`finish-attempt` 只有收到完整列表且全部通过才保留新 pa
 | P800 Kunlun required launch environment and Agent-selected optional policy implemented at SOURCE | `PASS` | `runs/p800-launch-environment-tool-001/result.json` |
 | gap-driven multi-Golden bundle build and verification implemented and reviewed at SOURCE | `PASS` | `runs/gap-driven-handoff-tool-001/result.json`; `runs/gap-driven-handoff-tool-002/result.json`; `runs/gap-driven-handoff-tool-003/result.json` |
 | revision 6 CUDA collector integration validated without consuming the formal Session | `PASS` | `runs/cuda-preflight-r6-002/result.json` |
+| revision 6 formal CUDA runbook generated and reviewed at SOURCE | `PASS` | `runs/formal-cuda-runbook-r6-001/result.json` |
 | P800 replay adapter resolved from the original Kunlun call site for each active operator | `PENDING` | `null` |
 | revision 6 CUDA environment preflight passed without reading Scan or operators | `PENDING` | `null` |
 | one revision 6 CUDA Session and at most three samples per operator | `PENDING` | `null` |
@@ -388,5 +389,6 @@ replay。`finish-attempt` 只有收到完整列表且全部通过才保留新 pa
 | `45` | 首次 revision 6 CUDA preflight（`runs/cuda-preflight-r6-001`）在算子 `sgl_kernel.gemma_rmsnorm` 处 `PREFLIGHT_FAILED`：worker 用被调用对象的定义模块解析固定源，而 `sglang.srt.layers.layernorm` 对该 kernel 是 `from sgl_kernel import …` 的 re-export，`__module__` 落到 `sgl_kernel/elementwise.py`，与固定 seam 源 layernorm.py 不一致。按用户决定改用 SGLang 侧调用它的 layernorm.py：把 `preflight.py` 多 collector 分支的固定源解析改为取 `hook_target` seam 模块的源文件（不改 Contract、不新增 wrapper）。保留失败 Run 为历史，重跑 `runs/cuda-preflight-r6-002` 五算子各三 shape、rank 过滤与逐算子 CUDA self-replay 全部 PASS，未消耗正式 Session；下一动作为唯一 revision 6 正式 Capture Session | `runs/cuda-preflight-r6-002/result.json`、`runs/cuda-preflight-r6-001/result.json`、`.scratch/step3p7-p800-migration-tool/issues/29-preflight-seam-module-source-fixation.md` |
 | `46` | 用户纠正 preflight 职责：preflight 只验证环境可用性，不应依赖具体算子。`runs/cuda-preflight-r6-001/002` 保留并重新归类为历史采集集成验证；前者暴露 seam 源解析工具问题，后者证明五个 collector、shape 去重、rank 过滤与 CUDA self-replay 集成通过，均不代表 Operator Gap。当前 `preflight-session` 改为不接收 Scan/operator，只检查 CUDA Torch、TP8 设备数、BF16、固定 SGLang worktree、插件入口和 P800 环境变量污染。正式 runbook 在 Session 占位前运行该环境检查，通过后由同一 CUDA Agent 继续正式采集，不增加中途回传 | `runs/preflight-responsibility-correction-001/result.json`、`runs/cuda-preflight-r6-002/result.json`、`runs/cuda-preflight-r6-001/result.json` |
 | `47` | 正式代码与 Spec 复审收口：公开 `--mode preflight` 只运行独立的环境检查模块，不接收 Scan/operator；旧算子 Hook、shape、rank 过滤和 self-replay 入口改名为 `--mode capture-adapter-validation`，且只允许历史 Contract revision 1 至 5，revision 6 会在创建 Run 前拒绝。当前还没有 revision 6 正式 runbook，因此唯一下一步先在 SOURCE 生成并审查它，再交给 CUDA 机器执行 | `runs/preflight-responsibility-review-001/result.json` |
+| `48` | revision 6 正式 CUDA runbook 已在 SOURCE 生成并审查：先执行与算子无关的环境 preflight，再从 `scan-007` 动态准备唯一 Session；远端 reservation 成功后，同一 CUDA Agent 启动一次 TP8/BF16/eager 模型，发送固定文本与单图请求，逐项记录并 self-replay 全部 Golden，最后动态构建和验证 Handoff Bundle。SOURCE 未执行 preflight、模型 Session 或 Bundle | `runs/formal-cuda-runbook-r6-001/result.json` |
 
 <!-- AGENT-WRITABLE WORKING STATE: END -->

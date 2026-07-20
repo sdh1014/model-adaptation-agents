@@ -209,7 +209,11 @@ adapter 完成后，为当前 Contract revision 生成并审查新的正式 Capt
 现有
 [references/cuda-capture-validation.md](references/cuda-capture-validation.md)
 和 [references/formal-cuda-capture.md](references/formal-cuda-capture.md)
-只绑定 revision 5，当前 revision 不得直接执行。
+只绑定 revision 5，当前 revision 不得直接执行。revision 6 当前正式入口是
+[references/formal-cuda-capture-r6.md](references/formal-cuda-capture-r6.md)；
+当 Working State 为 `execution_site: CUDA` 时，必须严格按该页执行，不自行重排
+preflight、reservation、正式 Session、self-replay、Bundle build/verify 或最终
+回传的顺序。
 
 preflight 只验证正式采集所需的环境是否可用，不验证任何具体算子。它只检查：
 
@@ -255,15 +259,18 @@ Operator Gap。
 GitHub evidence 分支回传要求，保持 Working State 不变并停止本次执行。
 
 环境 preflight 通过后，继续执行当前 revision 新生成且绑定新 Scan Run、全部
-adapter Run 和全部 capture plan 的正式 runbook。正式
+adapter Run 和全部 capture plan 的正式 runbook。revision 6 runbook 已生成并完成
+SOURCE 审查；此时不再返回 SOURCE 重新设计。正式
 Session 启动前仍先通过 GitHub 提交占位；模型停止后不再为了审查样本做一次中途
 回传。同一个 CUDA Agent 继续在本地完成样本审查、临时 Spec、bundle build 和
 verify，全部通过后再一次性回传 Session、Golden、record-samples、bundle 和审查
 证据。后处理不得重启模型，也不算第二个 Capture Session。
 
 正式模型启动前，必须先把 `session-start.json` 和 prepare 证据提交到 runbook
-固定的 GitHub evidence 分支。只有首次 push 成功才消耗并授权该 Session；成功或
-失败都只向同一分支追加，不能换分支或 Run 名重试。
+固定的 GitHub evidence 分支。只有首次 push 成功才授权该 reservation；实际产生
+第一份 Golden Sample 才消耗正式 Session。若模型加载失败且尚未产生任何样本，
+只能在同一个 reservation、Run 和 evidence 分支修正并继续；一旦已有样本，成功
+或失败都不得重启模型、换分支、换 Run 名或创建第二个 Session。
 
 不得在真实 Golden 回传前预填 shape 数量或伪造临时 Spec，也不得让人自行修改
 Working State。

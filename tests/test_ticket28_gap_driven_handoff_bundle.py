@@ -16,7 +16,7 @@ SPEC = ROOT / "migration-spec.md"
 SOURCE_RUN = (
     ROOT
     / "runs"
-    / "preflight-responsibility-review-001"
+    / "formal-cuda-runbook-r6-001"
     / "result.json"
 )
 
