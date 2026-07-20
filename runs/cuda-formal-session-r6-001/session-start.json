@@ -1,0 +1,33 @@
+{
+  "action": "reserve_formal_cuda_capture_session",
+  "capture_config_sha256": "2af282f95c323724898102608a79d00a0c4fdd10dfbd25ab0c5369b80bd7ce7a",
+  "capture_session_consumed": false,
+  "consumes_capture_session": false,
+  "environment_preflight_result_sha256": "5f8384500b8a0a03f0a129021d1f20d58e8c4f3ca7f7353898ceb62bfc1546a2",
+  "environment_preflight_run": "runs/cuda-environment-preflight-r6-001",
+  "operator_ids": [
+    "sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul",
+    "sgl_kernel.gemma_rmsnorm",
+    "sgl_kernel.gemma_fused_add_rmsnorm",
+    "sgl_kernel.topk_sigmoid",
+    "sglang.srt.layers.attention.triton_ops.prefill_attention._fwd_kernel"
+  ],
+  "request_modes": [
+    "text-only",
+    "single-image"
+  ],
+  "reservation_active": true,
+  "reservation_id": "009ceaa77c504231b1253cdb5c2cd7ed",
+  "scan_result": "runs/scan-007/result.json",
+  "scan_result_sha256": "7581209a85c6e501c0d5e9623371189219437641295e1e5d58bea041ac308fe5",
+  "session_id": "cuda-formal-session-r6-001",
+  "sglang_revision": "49e384ce9d304648e9959666ecb8ce8cd98d0deb",
+  "spec_binding": {
+    "contract_data_sha256": "74723d4cca3008710b04ac56c6ea06a652babd81e101bddaf5ae9b70eb2fbab3",
+    "contract_revision": 6,
+    "spec_id": "step3p7-flash-p800-demo"
+  },
+  "status": "ACTIVE",
+  "tool": "migration-agent",
+  "tool_revision": "256ac51b496d8236d3cf0a5c07d9a500bbbace07"
+}

@@ -1,0 +1,5 @@
+worker_mode=environment
+returncode=0
+--- stdout ---
+
+--- stderr ---

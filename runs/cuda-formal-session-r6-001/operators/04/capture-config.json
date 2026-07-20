@@ -1,0 +1,76 @@
+{
+  "activation_guard": "MoE layers 3-44 with scoring_func=sigmoid, correction_bias present, top_k=8 and renormalize=true",
+  "adapter": "topk-sigmoid",
+  "boundary": {
+    "inputs": [
+      "gating_output"
+    ],
+    "non_tensor_args": [
+      "renormalize"
+    ],
+    "outputs": [
+      "topk_weights",
+      "topk_ids"
+    ],
+    "parameters": [
+      "correction_bias"
+    ]
+  },
+  "capture_device_type": "cuda",
+  "checkpoint": {
+    "config_digest": "8d740ba5819e574b7a606ea7aa6d7d381142ed5cc77cab96dde2892c10414042",
+    "id": "stepfun-ai/Step-3.7-Flash@5f6244077ac62e04eec3f320501ff8c2b293373a",
+    "model_path": "stepfun-ai/Step-3.7-Flash",
+    "revision": "5f6244077ac62e04eec3f320501ff8c2b293373a"
+  },
+  "dtype": "bfloat16",
+  "hook_target": "sglang.srt.layers.moe.topk.topk_sigmoid",
+  "max_shapes": 3,
+  "model_path": "target",
+  "operator_id": "sgl_kernel.topk_sigmoid",
+  "precision_gate": {
+    "atol": 0.01,
+    "check_stride": false,
+    "comparator": "torch.testing.assert_close",
+    "require_exact_structure": true,
+    "require_finite": true,
+    "require_same_dtype": true,
+    "rtol": 0.02
+  },
+  "replay": {
+    "cuda_target": "sglang.srt.layers.moe.topk.topk_sigmoid",
+    "mode": "standalone-kernel-call",
+    "p800_target": null,
+    "weights_in_golden_sample": false
+  },
+  "run_dir": "/ssd1/sdh/model-adaptation-agents/runs/cuda-formal-session-r6-001/operators/04",
+  "sample_fields": {
+    "inputs": [
+      "gating_output"
+    ],
+    "non_tensor_args": [
+      "renormalize"
+    ],
+    "outputs": [
+      "topk_weights",
+      "topk_ids"
+    ],
+    "parameters": [
+      "correction_bias"
+    ]
+  },
+  "schema": "golden-capture-config/v1",
+  "serialization": "kernel-call-torch-save/v1",
+  "session_config": "/ssd1/sdh/model-adaptation-agents/runs/cuda-formal-session-r6-001/capture-config.json",
+  "source": {
+    "capture_module_path": "/ssd1/sdh/sglang/python/sglang/srt/layers/moe/topk.py",
+    "capture_module_sha256": "ca35e317522d85b391005f270df34ebd692120927e8c66d9ca22d4778dfa140e"
+  },
+  "spec_binding": {
+    "contract_data_sha256": "74723d4cca3008710b04ac56c6ea06a652babd81e101bddaf5ae9b70eb2fbab3",
+    "contract_revision": 6,
+    "spec_id": "step3p7-flash-p800-demo"
+  },
+  "tensor_parallel_size": 8,
+  "tp_rank": 0
+}

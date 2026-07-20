@@ -217,14 +217,14 @@ Agent 每次动作前完整读取 Contract 与本区；每次动作结束后立�
 ### Current
 
 - `observed_contract_revision`: `6`
-- `state_revision`: `49`
+- `state_revision`: `50`
 - `status`: `ACTIVE`
 - `phase`: `CUDA_CAPTURE`
-- `execution_site`: `SOURCE`
+- `execution_site`: `CUDA`
 - `active_operator`: `sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul`
-- `last_completed_action`: `revision_6_formal_cuda_capture_runbook_review_corrected`
-- `last_run`: `runs/formal-cuda-runbook-r6-002`
-- `next_action`: `在 CUDA 机器严格执行 model-adaptation/references/formal-cuda-capture-r6.md；先完成环境 preflight，通过后在同一 reservation 内完成唯一正式 Session、全部 Golden self-replay 和 Handoff Bundle build/verify`
+- `last_completed_action`: `revision_6_cuda_capture_session_reserved`
+- `last_run`: `runs/cuda-formal-session-r6-001`
+- `next_action`: `在同一个 reservation、SESSION_RUN 和 evidence 分支启动一次 TP8/BF16/eager 模型，完成全部 Golden、self-replay 和 Handoff Bundle build/verify`
 
 规则：`ACTIVE` 时 `next_action` 必须恰好一条；`WAITING` 时必须是一条人工动作；`PASS`、`BLOCKED`、`NEEDS_HUMAN` 时必须为 `none`。
 
@@ -252,8 +252,8 @@ Agent 每次动作前完整读取 Contract 与本区；每次动作结束后立�
 
 ### CUDA Capture
 
-- `capture_session_id`: `null`
-- `session_status`: `NOT_STARTED`
+- `capture_session_id`: `runs/cuda-formal-session-r6-001`
+- `session_status`: `ACTIVE`
 - `golden_runs`: `{}`
 - `captured_sample_counts`: `{}`
 
@@ -391,5 +391,7 @@ replay。`finish-attempt` 只有收到完整列表且全部通过才保留新 pa
 | `47` | 正式代码与 Spec 复审收口：公开 `--mode preflight` 只运行独立的环境检查模块，不接收 Scan/operator；旧算子 Hook、shape、rank 过滤和 self-replay 入口改名为 `--mode capture-adapter-validation`，且只允许历史 Contract revision 1 至 5，revision 6 会在创建 Run 前拒绝。当前还没有 revision 6 正式 runbook，因此唯一下一步先在 SOURCE 生成并审查它，再交给 CUDA 机器执行 | `runs/preflight-responsibility-review-001/result.json` |
 | `48` | revision 6 正式 CUDA runbook 已在 SOURCE 生成并审查：先执行与算子无关的环境 preflight，再从 `scan-007` 动态准备唯一 Session；远端 reservation 成功后，同一 CUDA Agent 启动一次 TP8/BF16/eager 模型，发送固定文本与单图请求，逐项记录并 self-replay 全部 Golden，最后动态构建和验证 Handoff Bundle。SOURCE 未执行 preflight、模型 Session 或 Bundle | `runs/formal-cuda-runbook-r6-001/result.json` |
 | `49` | SOURCE 双轴审查整改完成：CUDA self-replay 从每个 Golden 的 capture config 读取五个 Scan 驱动 adapter；环境 preflight、reservation 和 Session 失败都会推进 Working State；每次模型启动使用独立 launch 证据目录；失败判定同时检查严格绑定当前 capture config 的完整 state 与 samples 目录全部文件，只有可信零样本 state 才归档并允许同一 reservation 重试，其余情况进入 BLOCKED；最终回传动态引用实际 ENV Run。当前动作仍在 SOURCE，未执行 CUDA preflight、模型 Session 或 Bundle | `runs/formal-cuda-runbook-r6-002/result.json` |
+
+| `50` | revision 6 正式 CUDA Session 已在 GitHub evidence 分支占位；尚未产生 Golden Sample，只允许在同一个 reservation 内继续 | `runs/cuda-formal-session-r6-001/session-start.json` |
 
 <!-- AGENT-WRITABLE WORKING STATE: END -->

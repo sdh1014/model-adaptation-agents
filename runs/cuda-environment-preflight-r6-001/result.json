@@ -1,0 +1,39 @@
+{
+  "action": "environment-preflight",
+  "consumes_capture_session": false,
+  "environment": {
+    "bfloat16_supported": true,
+    "cuda_available": true,
+    "cuda_device_count": 8,
+    "cuda_devices": [
+      "NVIDIA A800-SXM4-80GB",
+      "NVIDIA A800-SXM4-80GB",
+      "NVIDIA A800-SXM4-80GB",
+      "NVIDIA A800-SXM4-80GB",
+      "NVIDIA A800-SXM4-80GB",
+      "NVIDIA A800-SXM4-80GB",
+      "NVIDIA A800-SXM4-80GB",
+      "NVIDIA A800-SXM4-80GB"
+    ],
+    "cuda_visible_devices": null,
+    "plugin_entry_point": "model_adaptation_capture",
+    "python_executable": "/usr/bin/python",
+    "python_version": "3.12.3",
+    "sglang_module_path": "/ssd1/sdh/sglang/python/sglang/__init__.py",
+    "torch_version": "2.11.0+cu129"
+  },
+  "evidence": [
+    "environment-config.json",
+    "environment.log",
+    "environment-result.json"
+  ],
+  "passed": true,
+  "preflight_status": "PREFLIGHT_PASSED",
+  "spec_binding": {
+    "contract_data_sha256": "74723d4cca3008710b04ac56c6ea06a652babd81e101bddaf5ae9b70eb2fbab3",
+    "contract_revision": 6,
+    "spec_id": "step3p7-flash-p800-demo"
+  },
+  "summary": "The fixed CUDA Python, TP8, BF16, SGLang worktree, and capture plugin environment are available.",
+  "tool": "capture_golden.py"
+}

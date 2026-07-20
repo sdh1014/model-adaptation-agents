@@ -1,0 +1,5 @@
+01	sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul	/ssd1/sdh/model-adaptation-agents/runs/cuda-formal-session-r6-001/operators/01	/ssd1/sdh/model-adaptation-agents/runs/cuda-golden-record-r6-001/01
+02	sgl_kernel.gemma_rmsnorm	/ssd1/sdh/model-adaptation-agents/runs/cuda-formal-session-r6-001/operators/02	/ssd1/sdh/model-adaptation-agents/runs/cuda-golden-record-r6-001/02
+03	sgl_kernel.gemma_fused_add_rmsnorm	/ssd1/sdh/model-adaptation-agents/runs/cuda-formal-session-r6-001/operators/03	/ssd1/sdh/model-adaptation-agents/runs/cuda-golden-record-r6-001/03
+04	sgl_kernel.topk_sigmoid	/ssd1/sdh/model-adaptation-agents/runs/cuda-formal-session-r6-001/operators/04	/ssd1/sdh/model-adaptation-agents/runs/cuda-golden-record-r6-001/04
+05	sglang.srt.layers.attention.triton_ops.prefill_attention._fwd_kernel	/ssd1/sdh/model-adaptation-agents/runs/cuda-formal-session-r6-001/operators/05	/ssd1/sdh/model-adaptation-agents/runs/cuda-golden-record-r6-001/05
