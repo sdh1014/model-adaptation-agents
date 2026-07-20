@@ -18,6 +18,9 @@ Status: Done
   缺失、额外、重复或算子绑定不一致都会拒绝构建。
 - 全部 Golden 必须引用同一个正式 `capture-config.json`，并记录同一个采集进程；
   每个 Golden 的目录和配置必须对应这个 Session 中按 gap queue 排列的位置。
+  带 `preflight_tp_context` 的预检 Session 不能用于正式 Bundle；Session 的固定
+  请求必须逐项匹配 Scan Run，并由 `formal-result.json` 封存配置、进程和全部
+  Golden 摘要。
 - Manifest v2 包含原始 Scan Run、按 gap queue 排序的全部 Golden Run，以及完整
   Session 配置、文件大小和 SHA-256；verify 重新从包内 Scan Run 得到期望算子
   集合，并交叉核对 Session 中的算子配置。

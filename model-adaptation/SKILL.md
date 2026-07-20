@@ -280,7 +280,44 @@ Working State。
    每个 `golden_run` 都通过才把 Session 标为 `SEALED`。replay config、worker
    result、Golden state 和 wrapper result 必须携带各自
    `sample-files.json` SHA-256；后续 build 会重新计算并要求它们与当前样本字节
-   完全一致。
+   完全一致。Agent 完成正式样本审查后，在 Session Run 新建
+   `formal-result.json`，明确记录 `capture_status=SEALED`、
+   `consumes_capture_session=true`、共同采集进程、Scan/Session 配置摘要，以及按
+   gap queue 排列的每个 Golden state/sidecar 摘要；不得覆盖
+   `prepare-session` 已生成的 `result.json`。
+
+   `formal-result.json` 使用下面这些字段；数组顺序就是 Scan gap queue 顺序，尖括号
+   由 Agent 从已验证证据填写：
+
+   ```json
+   {
+     "tool": "migration-agent",
+     "action": "complete_formal_cuda_capture_session",
+     "spec_binding": {
+       "spec_id": "<spec id>",
+       "contract_revision": 6,
+       "contract_data_sha256": "<Contract Data SHA-256>"
+     },
+     "passed": true,
+     "capture_status": "SEALED",
+     "consumes_capture_session": true,
+     "formal_session_consumed": true,
+     "scan_result_sha256": "<Scan result SHA-256>",
+     "capture_config_sha256": "<Session capture-config SHA-256>",
+     "operator_ids": ["<gap operator id>"],
+     "request_modes": ["text-only", "single-image"],
+     "capture_process_id": 12345,
+     "goldens": [
+       {
+         "operator_id": "<gap operator id>",
+         "golden_run": "<该 operator capture-config 的 run_dir>",
+         "capture_state_sha256": "<capture-state.json SHA-256>",
+         "sample_files_sha256": "<sample-files.json SHA-256>"
+       }
+     ]
+   }
+   ```
+
 6. Agent 先生成临时 Spec，把其中的 Working State 写成下一状态：
    `WAITING / HANDOFF`，保留第一个 `active_operator`，把每个 gap queue 行的
    `golden_run` 写成对应 SEALED Run，并写入 bundle/manifest 路径；唯一
@@ -290,10 +327,12 @@ Working State。
    `--golden-run` 和一个 `--sample-record-result`。工具从 Scan Run 的
    `gap_queue` 得到唯一有序算子集合，拒绝缺失、额外或重复证据；不要在 runbook
    中维护另一份固定算子列表。全部 Golden 还必须引用同一个 Session 配置、来自
-   同一个采集进程，并对应 Session 中按队列排列的目录。Manifest v2 包含原始
-   `scan-result.json`、原始 Session 配置、全部 Golden、每项 record
-   result/sidecar 摘要和完整文件清单。revision 6 未提供 `--scan-result` 时必须
-   停止，不能回退到历史 Manifest v1。
+   同一个采集进程，并对应 Session 中按队列排列的目录；带
+   `preflight_tp_context` 的预检配置必须拒绝。Session 的文本与单图请求还必须
+   逐项匹配 Scan Run。Manifest v2 包含原始 `scan-result.json`、原始 Session
+   配置、`formal-result.json`、全部 Golden、每项 record result/sidecar 摘要和
+   完整文件清单。revision 6 未提供 `--scan-result` 时必须停止，不能回退到历史
+   Manifest v1。
 8. 在 CUDA 端立即执行 `--mode verify`。verify 只信任包内 Scan Run，重新得到期望
    算子集合，并用包内 Session 配置交叉核对全部 Golden。只有本地 Agent 的正式
    样本审查、build、verify 和 Contract 绑定全部通过后，才用 bundle 中

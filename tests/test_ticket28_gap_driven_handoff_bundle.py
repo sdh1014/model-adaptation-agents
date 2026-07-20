@@ -13,7 +13,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 HANDOFF = ROOT / "model-adaptation" / "scripts" / "handoff_bundle.py"
 SPEC = ROOT / "migration-spec.md"
-SOURCE_RUN = ROOT / "runs" / "gap-driven-handoff-tool-002" / "result.json"
+SOURCE_RUN = ROOT / "runs" / "gap-driven-handoff-tool-003" / "result.json"
 
 
 def canonical_json_bytes(value: object) -> bytes:
@@ -158,6 +158,30 @@ def make_scan(contract: dict, binding: dict, definitions: list[dict]) -> dict:
         "operators": operators,
         "gap_queue": gap_queue,
         "capture_plan": capture_plan,
+        "request_set": [
+            {
+                "input_mode": "text-only",
+                "request": {
+                    "text": "Write one word.",
+                    "sampling_params": {
+                        "temperature": 0,
+                        "max_new_tokens": 1,
+                    },
+                },
+            },
+            {
+                "input_mode": "single-image",
+                "image_sha256": "0" * 64,
+                "request": {
+                    "text": "<im_patch>\nDescribe this image.",
+                    "image_data": "examples/assets/example_image.png",
+                    "sampling_params": {
+                        "temperature": 0,
+                        "max_new_tokens": 1,
+                    },
+                },
+            },
+        ],
     }
 
 
@@ -437,6 +461,8 @@ class GapDrivenHandoffBundleTest(unittest.TestCase):
         self.assertTrue(result["capture_session_binding"]["one_session_config"])
         self.assertTrue(result["capture_session_binding"]["one_process"])
         self.assertTrue(result["capture_session_binding"]["bundled"])
+        self.assertTrue(result["capture_session_binding"]["formal_result"])
+        self.assertTrue(result["capture_session_binding"]["scan_requests"])
         self.assertTrue(result["sample_validation"]["output_tensor_metadata"])
         self.assertTrue(result["compatibility"]["revision_6_requires_scan"])
         for source in result["source_files"]:
@@ -457,10 +483,8 @@ class GapDrivenHandoffBundleTest(unittest.TestCase):
         scan_result = workspace / "scan-result.json"
         write_spec(current_spec, contract, "status: ACTIVE")
         write_spec(bundle_spec, contract, "status: WAITING")
-        write_json(
-            scan_result,
-            make_scan(contract, binding, definitions),
-        )
+        scan = make_scan(contract, binding, definitions)
+        write_json(scan_result, scan)
         evidence = [
             write_golden(
                 workspace,
@@ -475,40 +499,89 @@ class GapDrivenHandoffBundleTest(unittest.TestCase):
         model_path, revision = checkpoint_id.rsplit("@", 1)
         session_dir = workspace / "runs" / "cuda-session"
         session_config = session_dir / "capture-config.json"
-        write_json(
-            session_config,
-            {
-                "schema": "golden-capture-session-config/v1",
-                "spec_binding": binding,
-                "run_dir": str(session_dir.resolve()),
-                "scan_result": {
-                    "path": str(scan_result.resolve()),
-                    "sha256": hashlib.sha256(
-                        scan_result.read_bytes()
-                    ).hexdigest(),
-                },
-                "source": {
-                    "sglang_revision": contract["source"]["sglang_revision"],
-                    "sglang_worktree": "/synthetic/sglang",
-                },
-                "checkpoint": {
-                    "id": checkpoint_id,
-                    "model_path": model_path,
-                    "revision": revision,
-                    "config_digest": contract["checkpoint"]["config_digest"],
-                },
-                "tensor_parallel_size": contract["runtime"][
-                    "tensor_parallel_size"
-                ],
-                "tp_rank": contract["sample_policy"]["capture_tp_rank"],
-                "requests": [],
-                "operators": [
-                    json.loads(
-                        (golden / "capture-config.json").read_text(
-                            encoding="utf-8"
-                        )
+        requests = json.loads(json.dumps(scan["request_set"]))
+        for item in requests:
+            if item["input_mode"] == "single-image":
+                item["request"]["image_data"] = str(
+                    (
+                        Path("/synthetic/sglang")
+                        / item["request"]["image_data"]
+                    ).resolve()
+                )
+        session_config_value = {
+            "schema": "golden-capture-session-config/v1",
+            "spec_binding": binding,
+            "run_dir": str(session_dir.resolve()),
+            "scan_result": {
+                "path": str(scan_result.resolve()),
+                "sha256": hashlib.sha256(
+                    scan_result.read_bytes()
+                ).hexdigest(),
+            },
+            "source": {
+                "sglang_revision": contract["source"]["sglang_revision"],
+                "sglang_worktree": "/synthetic/sglang",
+            },
+            "checkpoint": {
+                "id": checkpoint_id,
+                "model_path": model_path,
+                "revision": revision,
+                "config_digest": contract["checkpoint"]["config_digest"],
+            },
+            "tensor_parallel_size": contract["runtime"][
+                "tensor_parallel_size"
+            ],
+            "tp_rank": contract["sample_policy"]["capture_tp_rank"],
+            "requests": requests,
+            "operators": [
+                json.loads(
+                    (golden / "capture-config.json").read_text(
+                        encoding="utf-8"
                     )
-                    for golden, _ in evidence
+                )
+                for golden, _ in evidence
+            ],
+        }
+        write_json(session_config, session_config_value)
+        write_json(
+            session_dir / "formal-result.json",
+            {
+                "tool": "migration-agent",
+                "action": "complete_formal_cuda_capture_session",
+                "spec_binding": binding,
+                "passed": True,
+                "capture_status": "SEALED",
+                "consumes_capture_session": True,
+                "formal_session_consumed": True,
+                "scan_result_sha256": hashlib.sha256(
+                    scan_result.read_bytes()
+                ).hexdigest(),
+                "capture_config_sha256": hashlib.sha256(
+                    session_config.read_bytes()
+                ).hexdigest(),
+                "operator_ids": [
+                    definition["operator_id"]
+                    for definition in definitions
+                ],
+                "request_modes": [
+                    item["input_mode"] for item in scan["request_set"]
+                ],
+                "capture_process_id": 4242,
+                "goldens": [
+                    {
+                        "operator_id": definition["operator_id"],
+                        "golden_run": str(golden.resolve()),
+                        "capture_state_sha256": hashlib.sha256(
+                            (golden / "capture-state.json").read_bytes()
+                        ).hexdigest(),
+                        "sample_files_sha256": hashlib.sha256(
+                            (golden / "sample-files.json").read_bytes()
+                        ).hexdigest(),
+                    }
+                    for definition, (golden, _) in zip(
+                        definitions,
+                        evidence,
+                    )
                 ],
             },
         )
@@ -566,8 +639,12 @@ class GapDrivenHandoffBundleTest(unittest.TestCase):
                 (build_run / "bundle" / "scan-result.json").is_file()
             )
             self.assertEqual(
-                manifest["capture_session"]["path"],
+                manifest["capture_session"]["config_path"],
                 "capture-session.json",
+            )
+            self.assertEqual(
+                manifest["capture_session"]["result_path"],
+                "capture-session-result.json",
             )
             self.assertEqual(
                 manifest["capture_session"]["process_id"],
@@ -575,6 +652,13 @@ class GapDrivenHandoffBundleTest(unittest.TestCase):
             )
             self.assertTrue(
                 (build_run / "bundle" / "capture-session.json").is_file()
+            )
+            self.assertTrue(
+                (
+                    build_run
+                    / "bundle"
+                    / "capture-session-result.json"
+                ).is_file()
             )
 
             copied = workspace / "copied-bundle"
@@ -828,6 +912,124 @@ class GapDrivenHandoffBundleTest(unittest.TestCase):
             built = run_tool(*arguments)
             self.assertEqual(built.returncode, 2)
             self.assertIn("one capture process", built.stderr)
+
+    def test_build_rejects_a_preflight_capture_session(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            definitions = operator_definitions()[:1]
+            current_spec, bundle_spec, scan_result, evidence = (
+                self.prepare_workspace(workspace, definitions)
+            )
+            golden = evidence[0][0]
+            preflight_context = {"rank": 0, "size": 8}
+            child_config_path = golden / "capture-config.json"
+            child_config = json.loads(
+                child_config_path.read_text(encoding="utf-8")
+            )
+            child_config["preflight_tp_context"] = preflight_context
+            write_json(child_config_path, child_config)
+            session_config_path = (
+                workspace / "runs" / "cuda-session" / "capture-config.json"
+            )
+            session_config = json.loads(
+                session_config_path.read_text(encoding="utf-8")
+            )
+            session_config["preflight_tp_context"] = preflight_context
+            session_config["operators"][0] = child_config
+            write_json(session_config_path, session_config)
+
+            built = run_tool(
+                "--mode",
+                "build",
+                "--spec",
+                str(current_spec),
+                "--run-dir",
+                str(workspace / "runs" / "handoff-build"),
+                "--scan-result",
+                str(scan_result),
+                "--bundle-spec",
+                str(bundle_spec),
+                "--golden-run",
+                str(golden),
+                "--sample-record-result",
+                str(evidence[0][1]),
+            )
+            self.assertEqual(built.returncode, 2)
+            self.assertIn("preflight", built.stderr)
+
+    def test_build_rejects_capture_requests_that_drift_from_scan(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            definitions = operator_definitions()[:1]
+            current_spec, bundle_spec, scan_result, evidence = (
+                self.prepare_workspace(workspace, definitions)
+            )
+            session_config_path = (
+                workspace / "runs" / "cuda-session" / "capture-config.json"
+            )
+            session_config = json.loads(
+                session_config_path.read_text(encoding="utf-8")
+            )
+            session_config["requests"] = []
+            write_json(session_config_path, session_config)
+
+            built = run_tool(
+                "--mode",
+                "build",
+                "--spec",
+                str(current_spec),
+                "--run-dir",
+                str(workspace / "runs" / "handoff-build"),
+                "--scan-result",
+                str(scan_result),
+                "--bundle-spec",
+                str(bundle_spec),
+                "--golden-run",
+                str(evidence[0][0]),
+                "--sample-record-result",
+                str(evidence[0][1]),
+            )
+            self.assertEqual(built.returncode, 2)
+            self.assertIn("requests do not match", built.stderr)
+
+    def test_build_requires_a_sealed_formal_session_result(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            definitions = operator_definitions()[:1]
+            current_spec, bundle_spec, scan_result, evidence = (
+                self.prepare_workspace(workspace, definitions)
+            )
+            session_result_path = (
+                workspace
+                / "runs"
+                / "cuda-session"
+                / "formal-result.json"
+            )
+            session_result = json.loads(
+                session_result_path.read_text(encoding="utf-8")
+            )
+            session_result["capture_status"] = "PREPARED"
+            session_result["consumes_capture_session"] = False
+            write_json(session_result_path, session_result)
+
+            built = run_tool(
+                "--mode",
+                "build",
+                "--spec",
+                str(current_spec),
+                "--run-dir",
+                str(workspace / "runs" / "handoff-build"),
+                "--scan-result",
+                str(scan_result),
+                "--bundle-spec",
+                str(bundle_spec),
+                "--golden-run",
+                str(evidence[0][0]),
+                "--sample-record-result",
+                str(evidence[0][1]),
+            )
+            self.assertEqual(built.returncode, 2)
+            self.assertIn("capture_status", built.stderr)
 
     def test_build_rejects_missing_output_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

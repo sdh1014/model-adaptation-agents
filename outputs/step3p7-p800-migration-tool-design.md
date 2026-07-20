@@ -405,11 +405,14 @@ revision 6 的 Handoff 使用 Manifest v2。build 不再读取生产代码中的
 而是校验不可变 Scan Run 的 `CAPTURE_REQUIRED` operators、gap queue 和 capture
 plan 三者完全一致，再要求每项恰好匹配一个 SEALED Golden 和一个
 record-samples Run。全部 Golden 必须引用同一个 Session 配置、记录同一个采集
-进程，并与 Session 中按 gap queue 排列的算子配置逐项一致。包内保存原始
-`scan-result.json` 和 `capture-session.json`，因此 P800 verify 可以从同一证据
-重建期望集合并核对 Session；增减缺口只改变 Scan 与传入证据，不修改 bundle
-工具。revision 5 Manifest v1 仅保留历史兼容，revision 6 不能省略 Scan 后回退
-到 v1。
+进程，并与 Session 中按 gap queue 排列的算子配置逐项一致；带
+`preflight_tp_context` 的预检配置不能进入正式 Bundle，Session 请求也必须逐项
+匹配 Scan 的固定文本与单图请求。正式样本审查生成的 `formal-result.json` 绑定
+Session 配置摘要、共同进程和每个 Golden state/sidecar 摘要。包内保存原始
+`scan-result.json`、`capture-session.json` 和
+`capture-session-result.json`，因此 P800 verify 可以从同一证据重建期望集合并
+核对 Session；增减缺口只改变 Scan 与传入证据，不修改 bundle 工具。revision 5
+Manifest v1 仅保留历史兼容，revision 6 不能省略 Scan 后回退到 v1。
 
 CUDA capture plan 不替 Agent 猜测 P800 修复入口：现有 SwiGLU adapter 继续使用
 `kunlun_ops.swiglu`；其余四项的 P800 replay adapter 保持待实现。队列推进到对应
@@ -532,15 +535,15 @@ P800 PASS；需要设备验证时仍应形成新 Run。
 
 ## 14. revision 6 当前状态与自动续行
 
-当前 Working State 为 revision 43 `ACTIVE / CUDA_CAPTURE`。`runs/scan-007`
+当前 Working State 为 revision 44 `ACTIVE / CUDA_CAPTURE`。`runs/scan-007`
 已固定五个缺口及同一 capture plan；`runs/multimodal-capture-tool-001` 已在
 SOURCE 实现一个 session config、五个原调用 Hook、逐算子 rank-0 collector 和
 CUDA self-replay 编排；`runs/p800-launch-environment-tool-001` 又固定了 P800
 Kunlun 必需环境和 Agent 按需选择其余变量的边界；
 `runs/gap-driven-handoff-tool-001` 已实现由 Scan 缺口集合驱动的多 Golden
-Manifest v2；`runs/gap-driven-handoff-tool-002` 进一步封存同一 Session/进程、
-输出元数据、revision 6 禁止回退 v1，以及缺失、额外、重复、篡改和动态算子数量
-测试。唯一下一步是在固定 CUDA revision 的 TP8 环境执行
+Manifest v2；`runs/gap-driven-handoff-tool-002` 补齐同一 Session/进程、输出
+元数据和 revision 6 禁止回退 v1；`runs/gap-driven-handoff-tool-003` 再补齐
+正式 Session 结果和固定请求绑定。唯一下一步是在固定 CUDA revision 的 TP8 环境执行
 `capture_golden.py --mode preflight-session`。真实 CUDA preflight、正式一次性
 Session 和真实样本构建的 bundle 仍为 `PENDING`；旧 revision 5 单算子 runbook
 不可直接执行。除已有 SwiGLU 外，其余 P800 replay adapter 也保持

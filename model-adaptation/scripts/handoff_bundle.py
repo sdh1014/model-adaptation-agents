@@ -458,6 +458,11 @@ def validate_gap_capture_config(
             raise ToolError(
                 f"Golden capture config {field} for {operator_id!r} has drifted"
             )
+    if "preflight_tp_context" in config:
+        raise ToolError(
+            f"Golden capture config for {operator_id!r} comes from preflight, "
+            "not the formal CUDA Session"
+        )
     if not isinstance(config.get("adapter"), str) or not config["adapter"]:
         raise ToolError(
             f"Golden capture config adapter for {operator_id!r} is invalid"
@@ -1256,13 +1261,18 @@ def validate_gap_golden_run(
 
 def validate_gap_capture_session_evidence(
     session_config: Dict[str, Any],
+    session_result: Dict[str, Any],
     *,
     binding: Dict[str, Any],
     contract: Dict[str, Any],
+    scan_result: Dict[str, Any],
     inventory: Sequence[Dict[str, Any]],
     scan_result_digest: str,
+    session_config_digest: str,
     capture_configs: Dict[str, Dict[str, Any]],
     capture_states: Dict[str, Dict[str, Any]],
+    capture_state_digests: Dict[str, str],
+    sample_files_digests: Dict[str, str],
     live_session_path: Optional[Path] = None,
     live_scan_result_path: Optional[Path] = None,
     live_golden_runs: Optional[Dict[str, Path]] = None,
@@ -1317,6 +1327,11 @@ def validate_gap_capture_session_evidence(
     for field, expected in checks.items():
         if session_config.get(field) != expected:
             raise ToolError(f"capture session config {field} has drifted")
+    if "preflight_tp_context" in session_config:
+        raise ToolError(
+            "preflight capture session cannot be used to build a formal "
+            "Handoff Bundle"
+        )
 
     session_run_dir = session_config.get("run_dir")
     if not isinstance(session_run_dir, str) or not session_run_dir:
@@ -1348,8 +1363,58 @@ def validate_gap_capture_session_evidence(
         or not source["sglang_worktree"]
     ):
         raise ToolError("capture session source has drifted")
-    if not isinstance(session_config.get("requests"), list):
-        raise ToolError("capture session requests must be a list")
+    session_requests = session_config.get("requests")
+    scan_requests = scan_result.get("request_set")
+    if (
+        not isinstance(session_requests, list)
+        or not isinstance(scan_requests, list)
+        or len(session_requests) != len(scan_requests)
+    ):
+        raise ToolError(
+            "capture session requests do not match the Scan request set"
+        )
+    request_modes = [
+        item.get("input_mode") if isinstance(item, dict) else None
+        for item in scan_requests
+    ]
+    if request_modes != contract["scan_scope"]["input_modes"]:
+        raise ToolError(
+            "Scan request modes do not match Contract Data"
+        )
+    worktree_path = Path(source["sglang_worktree"])
+    if not worktree_path.is_absolute():
+        raise ToolError("capture session SGLang worktree path is invalid")
+    for expected, actual in zip(scan_requests, session_requests):
+        if not isinstance(expected, dict) or not isinstance(actual, dict):
+            raise ToolError(
+                "capture session request entry must be one object"
+            )
+        expected_copy = json.loads(json.dumps(expected))
+        if expected.get("input_mode") == "single-image":
+            expected_request = expected_copy.get("request")
+            actual_request = actual.get("request")
+            if (
+                not isinstance(expected_request, dict)
+                or not isinstance(actual_request, dict)
+                or not isinstance(expected_request.get("image_data"), str)
+                or not expected_request["image_data"]
+            ):
+                raise ToolError(
+                    "single-image capture request is invalid"
+                )
+            expected_image_path = (
+                worktree_path / expected_request["image_data"]
+            ).resolve()
+            if actual_request.get("image_data") != str(expected_image_path):
+                raise ToolError(
+                    "capture session image request does not match "
+                    "the Scan request set"
+                )
+            expected_request["image_data"] = str(expected_image_path)
+        if actual != expected_copy:
+            raise ToolError(
+                "capture session requests do not match the Scan request set"
+            )
 
     session_operators = session_config.get("operators")
     expected_operator_configs = [
@@ -1378,6 +1443,40 @@ def validate_gap_capture_session_evidence(
                 f"Golden capture state for {operator_id!r} "
                 "does not match the common capture session"
             )
+
+    result_checks = {
+        "tool": "migration-agent",
+        "action": "complete_formal_cuda_capture_session",
+        "spec_binding": binding,
+        "passed": True,
+        "capture_status": "SEALED",
+        "consumes_capture_session": True,
+        "formal_session_consumed": True,
+        "scan_result_sha256": scan_result_digest,
+        "capture_config_sha256": session_config_digest,
+        "operator_ids": expected_ids,
+        "request_modes": request_modes,
+        "capture_process_id": process_id,
+    }
+    for field, expected in result_checks.items():
+        if session_result.get(field) != expected:
+            raise ToolError(
+                f"formal capture session result {field} has drifted"
+            )
+    expected_goldens = [
+        {
+            "operator_id": operator_id,
+            "golden_run": capture_configs[operator_id]["run_dir"],
+            "capture_state_sha256": capture_state_digests[operator_id],
+            "sample_files_sha256": sample_files_digests[operator_id],
+        }
+        for operator_id in expected_ids
+    ]
+    if session_result.get("goldens") != expected_goldens:
+        raise ToolError(
+            "formal capture session result does not bind every "
+            "Scan-ordered Golden Run"
+        )
 
     if live_session_path is not None:
         if live_session_path.resolve() != session_ref_path.resolve():
@@ -1421,12 +1520,13 @@ def load_live_gap_capture_session(
     *,
     binding: Dict[str, Any],
     contract: Dict[str, Any],
+    scan_result: Dict[str, Any],
     inventory: Sequence[Dict[str, Any]],
     scan_result_path: Path,
     capture_configs: Dict[str, Dict[str, Any]],
     capture_states: Dict[str, Dict[str, Any]],
     golden_runs: Dict[str, Path],
-) -> tuple[Path, Dict[str, Any], int]:
+) -> tuple[Path, Path, Dict[str, Any], Dict[str, Any], int]:
     refs = {
         config.get("session_config") for config in capture_configs.values()
     }
@@ -1446,19 +1546,52 @@ def load_live_gap_capture_session(
         session_path,
         "capture session config",
     )
+    unresolved_result = session_path.parent / "formal-result.json"
+    if unresolved_result.is_symlink():
+        raise ToolError(
+            "formal capture session result must not be a symbolic link"
+        )
+    require_regular_file(
+        unresolved_result,
+        "formal capture session result",
+    )
+    session_result_path = unresolved_result.resolve()
+    session_result = read_json_object(
+        session_result_path,
+        "formal capture session result",
+    )
+    capture_state_digests = {
+        operator_id: file_sha256(golden_run / "capture-state.json")
+        for operator_id, golden_run in golden_runs.items()
+    }
+    sample_files_digests = {
+        operator_id: file_sha256(golden_run / "sample-files.json")
+        for operator_id, golden_run in golden_runs.items()
+    }
     process_id = validate_gap_capture_session_evidence(
         session_config,
+        session_result,
         binding=binding,
         contract=contract,
+        scan_result=scan_result,
         inventory=inventory,
         scan_result_digest=file_sha256(scan_result_path),
+        session_config_digest=file_sha256(session_path),
         capture_configs=capture_configs,
         capture_states=capture_states,
+        capture_state_digests=capture_state_digests,
+        sample_files_digests=sample_files_digests,
         live_session_path=session_path,
         live_scan_result_path=scan_result_path,
         live_golden_runs=golden_runs,
     )
-    return session_path, session_config, process_id
+    return (
+        session_path,
+        session_result_path,
+        session_config,
+        session_result,
+        process_id,
+    )
 
 
 def validate_sample_record_result(
@@ -1748,11 +1881,14 @@ def run_gap_build(
     }
     (
         capture_session_path,
+        capture_session_result_path,
         _capture_session_config,
+        _capture_session_result,
         capture_process_id,
     ) = load_live_gap_capture_session(
         binding=binding,
         contract=contract,
+        scan_result=scan_result,
         inventory=inventory,
         scan_result_path=scan_result_path,
         capture_configs=capture_configs,
@@ -1822,6 +1958,10 @@ def run_gap_build(
     shutil.copyfile(bundle_spec, bundle_dir / "migration-spec.md")
     shutil.copyfile(scan_result_path, bundle_dir / "scan-result.json")
     shutil.copyfile(capture_session_path, bundle_dir / "capture-session.json")
+    shutil.copyfile(
+        capture_session_result_path,
+        bundle_dir / "capture-session-result.json",
+    )
     runs_dir = bundle_dir / "runs"
     runs_dir.mkdir()
     for operator_id in expected_ids:
@@ -1836,8 +1976,10 @@ def run_gap_build(
             "sha256": file_sha256(scan_result_path),
         },
         "capture_session": {
-            "path": "capture-session.json",
-            "sha256": file_sha256(capture_session_path),
+            "config_path": "capture-session.json",
+            "config_sha256": file_sha256(capture_session_path),
+            "result_path": "capture-session-result.json",
+            "result_sha256": file_sha256(capture_session_result_path),
             "process_id": capture_process_id,
         },
         "operators": operator_records,
@@ -1860,7 +2002,12 @@ def run_gap_build(
             item["golden_run"] for item in operator_records
         ],
         "scan_result_sha256": manifest["scan_result"]["sha256"],
-        "capture_session_sha256": manifest["capture_session"]["sha256"],
+        "capture_session_sha256": manifest["capture_session"][
+            "config_sha256"
+        ],
+        "capture_session_result_sha256": manifest["capture_session"][
+            "result_sha256"
+        ],
         "capture_process_id": capture_process_id,
         "evidence": ["bundle/manifest.json", "handoff.log"],
         "summary": (
@@ -1947,9 +2094,20 @@ def validate_gap_bundle(
     capture_session_record = manifest.get("capture_session")
     if (
         not isinstance(capture_session_record, dict)
-        or set(capture_session_record) != {"path", "sha256", "process_id"}
-        or capture_session_record.get("path") != "capture-session.json"
-        or not is_sha256(capture_session_record.get("sha256"))
+        or set(capture_session_record)
+        != {
+            "config_path",
+            "config_sha256",
+            "result_path",
+            "result_sha256",
+            "process_id",
+        }
+        or capture_session_record.get("config_path")
+        != "capture-session.json"
+        or capture_session_record.get("result_path")
+        != "capture-session-result.json"
+        or not is_sha256(capture_session_record.get("config_sha256"))
+        or not is_sha256(capture_session_record.get("result_sha256"))
         or isinstance(capture_session_record.get("process_id"), bool)
         or not isinstance(capture_session_record.get("process_id"), int)
         or capture_session_record["process_id"] <= 0
@@ -1957,11 +2115,31 @@ def validate_gap_bundle(
         raise ToolError("Handoff manifest capture session binding is invalid")
     bundled_session_path = bundle_dir / "capture-session.json"
     require_regular_file(bundled_session_path, "bundled capture session")
-    if file_sha256(bundled_session_path) != capture_session_record["sha256"]:
+    if (
+        file_sha256(bundled_session_path)
+        != capture_session_record["config_sha256"]
+    ):
         raise ToolError("bundled capture session SHA-256 differs from manifest")
     bundled_session = read_json_object(
         bundled_session_path,
         "bundled capture session",
+    )
+    bundled_session_result_path = bundle_dir / "capture-session-result.json"
+    require_regular_file(
+        bundled_session_result_path,
+        "bundled formal capture session result",
+    )
+    if (
+        file_sha256(bundled_session_result_path)
+        != capture_session_record["result_sha256"]
+    ):
+        raise ToolError(
+            "bundled formal capture session result SHA-256 "
+            "differs from manifest"
+        )
+    bundled_session_result = read_json_object(
+        bundled_session_result_path,
+        "bundled formal capture session result",
     )
 
     operator_records = manifest.get("operators")
@@ -2031,6 +2209,7 @@ def validate_gap_bundle(
             "migration-spec.md",
             "scan-result.json",
             "capture-session.json",
+            "capture-session-result.json",
         }
         and not path.startswith(golden_prefixes)
     ]
@@ -2087,12 +2266,27 @@ def validate_gap_bundle(
         )
     process_id = validate_gap_capture_session_evidence(
         bundled_session,
+        bundled_session_result,
         binding=binding,
         contract=contract,
+        scan_result=scan_result,
         inventory=inventory,
         scan_result_digest=scan_record["sha256"],
+        session_config_digest=capture_session_record["config_sha256"],
         capture_configs=capture_configs,
         capture_states=capture_states,
+        capture_state_digests={
+            record["operator_id"]: file_sha256(
+                bundle_dir
+                / record["golden_run"]
+                / "capture-state.json"
+            )
+            for record in operator_records
+        },
+        sample_files_digests={
+            record["operator_id"]: record["sample_files_sha256"]
+            for record in operator_records
+        },
     )
     if process_id != capture_session_record["process_id"]:
         raise ToolError(
