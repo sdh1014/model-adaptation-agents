@@ -1,0 +1,25 @@
+{
+  "action": "record_revision_6_cuda_failure",
+  "archived_zero_sample_states": [],
+  "capture_state_errors": [],
+  "error_summary": "server warmup POST /generate returned HTTP 502 empty body; HTTP_PROXY routed localhost warmup through agent.baidu.com proxy; model loaded on all 8 TP ranks",
+  "exit_code": 1,
+  "failed_command": "python -m sglang.launch_server --model-path stepfun-ai/Step-3.7-Flash --revision 5f6244077ac62e04eec3f320501ff8c2b293373a --tp-size 8 --dtype bfloat16 --cuda-graph-backend-decode disabled --cuda-graph-backend-prefill disabled --host 127.0.0.1 --port 30000",
+  "formal_session_consumed": false,
+  "launch_evidence_dir": "runs/cuda-formal-session-r6-001/launch-50",
+  "reservation_id": "009ceaa77c504231b1253cdb5c2cd7ed",
+  "sample_artifact_paths": [],
+  "sample_artifacts_on_disk": 0,
+  "sample_files_on_disk": 0,
+  "sample_paths": [],
+  "saved_shape_count": 0,
+  "session_id": "cuda-formal-session-r6-001",
+  "spec_binding": {
+    "contract_data_sha256": "74723d4cca3008710b04ac56c6ea06a652babd81e101bddaf5ae9b70eb2fbab3",
+    "contract_revision": 6,
+    "spec_id": "step3p7-flash-p800-demo"
+  },
+  "state_revision_after": 51,
+  "state_revision_before": 50,
+  "tool": "migration-agent"
+}

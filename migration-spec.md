@@ -217,14 +217,14 @@ Agent 每次动作前完整读取 Contract 与本区；每次动作结束后立�
 ### Current
 
 - `observed_contract_revision`: `6`
-- `state_revision`: `50`
+- `state_revision`: `51`
 - `status`: `ACTIVE`
 - `phase`: `CUDA_CAPTURE`
 - `execution_site`: `CUDA`
 - `active_operator`: `sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul`
-- `last_completed_action`: `revision_6_cuda_capture_session_reserved`
+- `last_completed_action`: `revision_6_cuda_capture_failed_before_sample`
 - `last_run`: `runs/cuda-formal-session-r6-001`
-- `next_action`: `在同一个 reservation、SESSION_RUN 和 evidence 分支启动一次 TP8/BF16/eager 模型，完成全部 Golden、self-replay 和 Handoff Bundle build/verify`
+- `next_action`: `修正模型加载或服务环境后，只在同一个 reservation、SESSION_RUN 和 evidence 分支继续正式 CUDA Capture；下一次启动必须使用新 state revision 对应的 launch 证据目录`
 
 规则：`ACTIVE` 时 `next_action` 必须恰好一条；`WAITING` 时必须是一条人工动作；`PASS`、`BLOCKED`、`NEEDS_HUMAN` 时必须为 `none`。
 
@@ -393,5 +393,7 @@ replay。`finish-attempt` 只有收到完整列表且全部通过才保留新 pa
 | `49` | SOURCE 双轴审查整改完成：CUDA self-replay 从每个 Golden 的 capture config 读取五个 Scan 驱动 adapter；环境 preflight、reservation 和 Session 失败都会推进 Working State；每次模型启动使用独立 launch 证据目录；失败判定同时检查严格绑定当前 capture config 的完整 state 与 samples 目录全部文件，只有可信零样本 state 才归档并允许同一 reservation 重试，其余情况进入 BLOCKED；最终回传动态引用实际 ENV Run。当前动作仍在 SOURCE，未执行 CUDA preflight、模型 Session 或 Bundle | `runs/formal-cuda-runbook-r6-002/result.json` |
 
 | `50` | revision 6 正式 CUDA Session 已在 GitHub evidence 分支占位；尚未产生 Golden Sample，只允许在同一个 reservation 内继续 | `runs/cuda-formal-session-r6-001/session-start.json` |
+
+| `51` | revision 6 CUDA 启动失败但 state 与磁盘均无 Golden Sample；保留证据并只允许同一 reservation 内重试 | `runs/cuda-formal-session-r6-001/failure-51.json` |
 
 <!-- AGENT-WRITABLE WORKING STATE: END -->
