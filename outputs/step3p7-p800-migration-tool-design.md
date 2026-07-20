@@ -5,8 +5,8 @@
 > 当前状态：`ACTIVE / CUDA_CAPTURE`，当前扫描为 `runs/scan-007`
 >
 > 当前采集准备：`runs/capture-session-tool-001` 已生成一个五算子、文本加单图的
-> session config；`runs/cuda-preflight-r6-002` 已证明采集器集成，但只检查环境的
-> preflight 将在正式 Session 占位前执行
+> session config；`runs/cuda-preflight-r6-002` 已证明采集器集成，独立的环境
+> preflight 尚未执行，并将在正式 Session 占位前运行
 >
 > 证据边界：revision 5 的单算子 CUDA/P800 数值证据保留为历史；`35aa72e`
 > 的自定义 repair helper 未通过正式审查。revision 6 不复用旧 Golden 冒充全队列
@@ -398,7 +398,7 @@ worktree 的完整 diff 与 `candidate.patch` 逐字节比较；当前 SwiGLU ad
 
 revision 6 的 `prepare-session` 生成一个包含五个 operator collector 和两条请求的
 正式 Session config。插件只 Hook Scan Run 记录的五个现有调用；每个 collector
-各自按输入 shape 去重并保存 rank 0 最多三份。`preflight-session` 不读取该
+各自按输入 shape 去重并保存 rank 0 最多三份。`preflight` 不读取该
 capture plan，也不调用任何算子；它只验证 CUDA Torch、TP8 设备数、BF16、固定
 SGLang worktree 和插件入口是否可用。SOURCE 单元测试已覆盖完整 capture plan、
 固定图像摘要、多 Hook 注册、attention 输出缓冲区和逐算子 CUDA self-replay
@@ -451,7 +451,7 @@ Contract revision 6
   -> spec-binding-005
   -> scan-007（scan-006 只作历史线索）
   -> 排好完整 gap queue，第一项成为 active_operator
-  -> CUDA 环境 preflight-session（不读取 Scan 或算子，不消耗正式 Session）
+  -> CUDA 环境 preflight（不读取 Scan 或算子，不消耗正式 Session）
   -> 一个正式 session config 装入五个 collector
   -> 一次 CUDA 模型 Session 收齐全部计划项
      同一进程发送固定文本和固定单图请求
@@ -548,7 +548,8 @@ Manifest v2；`runs/gap-driven-handoff-tool-002` 补齐同一 Session/进程、�
 元数据和 revision 6 禁止回退 v1；`runs/gap-driven-handoff-tool-003` 再补齐
 正式 Session 结果和固定请求绑定。CUDA 回传的 `runs/cuda-preflight-r6-001` 与
 `runs/cuda-preflight-r6-002` 已重新归类为历史采集集成验证，不再充当环境
-preflight。唯一下一步是执行 revision 6 正式 runbook：先做不读取算子的环境检查，
+preflight。唯一下一步是在 SOURCE 生成并审查 revision 6 正式 runbook；该 runbook
+到 CUDA 后先做不读取算子的环境检查，
 通过后再提交 Session 占位并启动一次真实 TP8 Capture。正式一次性 Session 和真实
 样本构建的 bundle 仍为 `PENDING`；旧 revision 5 单算子 runbook不可直接执行。
 除已有 SwiGLU 外，其余 P800 replay adapter 也保持

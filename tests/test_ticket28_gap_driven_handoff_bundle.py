@@ -16,7 +16,7 @@ SPEC = ROOT / "migration-spec.md"
 SOURCE_RUN = (
     ROOT
     / "runs"
-    / "preflight-responsibility-correction-001"
+    / "preflight-responsibility-review-001"
     / "result.json"
 )
 

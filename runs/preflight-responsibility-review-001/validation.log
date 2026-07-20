@@ -1,0 +1,26 @@
+execution_site=SOURCE
+capture_session_consumed=false
+
+public_mode_preflight=environment_only
+environment_preflight_accepts_scan_result=false
+environment_preflight_accepts_operator_id=false
+environment_preflight_runs_operator_hooks=false
+environment_preflight_records_samples=false
+environment_preflight_runs_self_replay=false
+
+historical_mode=capture-adapter-validation
+historical_mode_contract_revisions=1..5
+revision_6_historical_mode_rejected=true
+
+focused_command=PYTHONPYCACHEPREFIX=/tmp/model-adaptation-agents-pyc python3 -m unittest tests.test_ticket26_single_session_vision_capture
+focused_tests_run=11
+focused_passed=true
+
+regression_tests_run=161
+regression_passed=true
+torch_required_tests_discovered=7
+torch_required_tests_status=NOT_RUN_NO_LOCAL_TORCH
+
+python_compile=PASS
+json_validation=PASS
+git_diff_check=PASS

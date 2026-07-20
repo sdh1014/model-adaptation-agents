@@ -226,7 +226,7 @@ revision 6 的环境 preflight 入口是：
 python3 model-adaptation/scripts/capture_golden.py \
   --spec migration-spec.md \
   --run-dir runs/cuda-environment-preflight-r6-001 \
-  --mode preflight-session \
+  --mode preflight \
   --sglang-worktree "$SGLANG_CUDA_WORKTREE"
 ```
 
@@ -240,6 +240,8 @@ Session，只能在 CUDA 机器运行；SOURCE 单元测试不能替代它。正
 历史采集集成验证：它们验证五个 collector、shape 去重、rank 过滤和 CUDA
 self-replay，不能再称为环境 preflight，也不要求重复执行。前者暴露工具的 seam
 源码解析问题，后者证明修复后的采集集成路径；两者都没有消耗正式 Session。
+保留的历史入口名为 `--mode capture-adapter-validation`，只允许 Contract revision
+1 至 5；revision 6 必须拒绝它。
 
 具体算子的 Hook、rank 0、最多三个真实 shape、参数保存边界和 CUDA self-replay
 全部属于正式 Capture Session。任何一项失败都使正式 Session 失败并保留证据，

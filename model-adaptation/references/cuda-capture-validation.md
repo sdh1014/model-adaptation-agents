@@ -1,4 +1,4 @@
-# CUDA preflight 与证据回传
+# Revision 5 CUDA 历史采集适配器验证与证据回传
 
 ## 当前边界
 
@@ -8,9 +8,9 @@ Contract revision 5 和 `scan-006` 选择的活动调用是：
 sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul
 ```
 
-Ticket 23 已实现对应 adapter。preflight 只验证现有 SGLang Hook、rank 0 三种 shape
-格式和新进程 CUDA self-replay；不加载 checkpoint，不启动正式模型，也不消耗唯一
-CUDA Capture Session。
+Ticket 23 已实现对应 adapter。这份历史采集适配器验证会检查现有 SGLang Hook、
+rank 0 三种 shape 格式和新进程 CUDA self-replay；不加载 checkpoint，不启动正式
+模型，也不消耗唯一 CUDA Capture Session。它不是环境 preflight。
 
 `runs/cuda-preflight-r5-001` 已验证 adapter-001。随后 `adapter-002` 增加样本摘要
 与 replay 证据绑定，新的 `runs/cuda-preflight-r5-002` 也已回传并通过。旧 Run
@@ -86,11 +86,11 @@ python -m unittest \
 `test_latest_adapter_run_records_source_only_hardening` 会检查
 `runs/adapter-002/result.json` 中的源码 SHA 与当前 checkout 完全一致。
 
-## 3. 执行当前源码的 revision 5 preflight
+## 3. 执行当前源码的 revision 5 历史采集适配器验证
 
 ```bash
 python model-adaptation/scripts/capture_golden.py \
-  --mode preflight \
+  --mode capture-adapter-validation \
   --spec migration-spec.md \
   --run-dir "$PREFLIGHT_RUN" \
   --scan-result runs/scan-006/result.json \
@@ -98,7 +98,8 @@ python model-adaptation/scripts/capture_golden.py \
   --sglang-worktree "$SGLANG_WORKTREE"
 ```
 
-该命令会启动三个新进程：
+该命令是 revision 5 保留的历史采集适配器验证，不是环境 preflight。它会启动
+三个新进程：
 
 1. rank 0 通过真实 `HookRegistry` 包裹已有 `_swiglu_silu_clamp_mul`，合成三种
    BF16 shape，再验证重复 shape 和第四种 shape 不落 Tensor；
@@ -138,7 +139,8 @@ operator = (
 )
 
 assert result["passed"] is True
-assert result["capture_status"] == "PREFLIGHT_PASSED"
+status = result.get("validation_status", result.get("capture_status"))
+assert status in {"VALIDATION_PASSED", "PREFLIGHT_PASSED"}
 assert result["consumes_capture_session"] is False
 assert result["operator_id"] == operator
 assert state["operator_id"] == operator
@@ -171,7 +173,7 @@ for path in samples:
     assert payload["inputs"]["x"].dtype == torch.bfloat16
     assert payload["outputs"]["output"].dtype == torch.bfloat16
 
-print("CUDA revision 5 adapter-002 preflight: PASS")
+print("CUDA revision 5 adapter-002 capture adapter validation: PASS")
 PY
 ```
 

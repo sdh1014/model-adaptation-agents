@@ -8,8 +8,10 @@
 继续记录通过 tickets 实现最小 Demo 的范围变化。revision 5 的单算子 Golden、
 Handoff 和 P800 baseline 保留为历史；当前 revision 6 已完成 `scan-007` 与五算子
 Session 的 SOURCE 实现，状态为 `ACTIVE / CUDA_CAPTURE`。P800 Kunlun 必需启动
-环境和 Agent 按需选择其余变量的规则也已封存。唯一下一步是在 CUDA 机器执行
-不消耗正式 Session 的五算子 `preflight-session`。
+环境和 Agent 按需选择其余变量的规则也已封存。唯一下一步是在 SOURCE 生成并审查
+revision 6 正式 runbook；该 runbook 到 CUDA 后先执行只检查 Torch、TP8、BF16、
+固定 SGLang 和插件入口的环境 `preflight`。算子 Hook、shape 去重和 self-replay
+已重新归类为历史采集适配器验证。
 
 ## Notes
 

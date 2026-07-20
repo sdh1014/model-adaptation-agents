@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check CUDA readiness and prepare bounded Golden capture."""
+"""Check CUDA readiness and prepare bounded CUDA Golden Capture."""
 
 import argparse
 import hashlib
@@ -42,9 +42,12 @@ from model_adaptation_capture.contracts import (
 )
 from model_adaptation_capture.preflight import (
     ENVIRONMENT_CONFIG_SCHEMA,
-    PreflightError,
-    run_capture_preflight,
+    EnvironmentPreflightError,
     run_environment_preflight,
+)
+from model_adaptation_capture.capture_adapter_validation import (
+    PreflightError,
+    run_capture_adapter_validation as execute_capture_adapter_validation,
 )
 
 
@@ -813,7 +816,7 @@ def run_prepare_session(
     )
 
 
-def run_preflight_session(
+def run_cuda_environment_preflight(
     spec_path: Path,
     run_dir: Path,
     sglang_worktree: Path,
@@ -876,13 +879,19 @@ def run_preflight_session(
     write_json(run_dir / "result.json", result)
 
 
-def run_preflight(
+def run_capture_adapter_validation(
     spec_path: Path,
     run_dir: Path,
     scan_result_path: Path,
     operator_id: str,
     sglang_worktree: Path,
 ) -> None:
+    contract = load_contract_data(spec_path)
+    if contract["contract_revision"] > 5:
+        raise ToolError(
+            "capture-adapter-validation is historical and is allowed only for "
+            "Contract revisions 1 through 5"
+        )
     binding, config = prepare_capture_config(
         spec_path,
         run_dir,
@@ -891,16 +900,18 @@ def run_preflight(
         sglang_worktree,
         preflight=True,
     )
-    passed, evidence = run_capture_preflight(
+    passed, evidence = execute_capture_adapter_validation(
         run_dir / "capture-config.json",
         sglang_worktree,
     )
     result = {
         "tool": "capture_golden.py",
-        "action": "preflight",
+        "action": "capture-adapter-validation",
         "spec_binding": binding.as_result_dict(),
         "passed": passed,
-        "capture_status": "PREFLIGHT_PASSED" if passed else "PREFLIGHT_FAILED",
+        "validation_status": (
+            "VALIDATION_PASSED" if passed else "VALIDATION_FAILED"
+        ),
         "consumes_capture_session": False,
         "operator_id": operator_id,
         "serialization": config["serialization"],
@@ -915,7 +926,8 @@ def run_preflight(
             "real checkpoint capture and loaded-model replay remain real-model steps."
             if passed
             else
-            "CUDA preflight did not prove the selected existing hook, rank-0 "
+            "CUDA capture-adapter validation did not prove the selected "
+            "existing hook, rank-0 "
             "format, and self-replay; inspect the preflight logs."
         ),
     }
@@ -933,7 +945,7 @@ def parse_args() -> argparse.Namespace:
             "prepare",
             "prepare-session",
             "preflight",
-            "preflight-session",
+            "capture-adapter-validation",
         ),
     )
     parser.add_argument("--scan-result", type=Path)
@@ -945,13 +957,13 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     try:
-        if args.mode == "preflight-session":
+        if args.mode == "preflight":
             if args.operator_id is not None or args.scan_result is not None:
                 raise ToolError(
                     "environment preflight does not accept --operator-id or "
                     "--scan-result"
                 )
-            run_preflight_session(
+            run_cuda_environment_preflight(
                 args.spec,
                 args.run_dir,
                 args.sglang_worktree,
@@ -971,10 +983,20 @@ def main() -> int:
             )
         else:
             if args.scan_result is None:
-                raise ToolError("--scan-result is required by prepare and preflight")
+                raise ToolError(
+                    "--scan-result is required by prepare and "
+                    "capture-adapter-validation"
+                )
             if not args.operator_id:
-                raise ToolError("--operator-id is required by prepare and preflight")
-            action = run_prepare if args.mode == "prepare" else run_preflight
+                raise ToolError(
+                    "--operator-id is required by prepare and "
+                    "capture-adapter-validation"
+                )
+            action = (
+                run_prepare
+                if args.mode == "prepare"
+                else run_capture_adapter_validation
+            )
             action(
                 args.spec,
                 args.run_dir,
@@ -982,7 +1004,13 @@ def main() -> int:
                 args.operator_id,
                 args.sglang_worktree,
             )
-    except (SpecContractError, PreflightError, ToolError, OSError) as error:
+    except (
+        EnvironmentPreflightError,
+        SpecContractError,
+        PreflightError,
+        ToolError,
+        OSError,
+    ) as error:
         print(f"capture_golden.py: {error}", file=sys.stderr)
         return 2
     return 0

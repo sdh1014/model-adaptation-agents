@@ -240,7 +240,9 @@ class Ticket12CudaCapturePreflightTest(unittest.TestCase):
             )
             self.assertTrue((run_dir / "samples").is_dir())
 
-    def test_preflight_failure_is_evidence_but_does_not_consume_session(self) -> None:
+    def test_capture_adapter_validation_failure_does_not_consume_session(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = Path(temp_dir)
             source, revision = create_sglang_fixture(workspace)
@@ -258,7 +260,7 @@ class Ticket12CudaCapturePreflightTest(unittest.TestCase):
                 "--run-dir",
                 str(run_dir),
                 "--mode",
-                "preflight",
+                "capture-adapter-validation",
                 "--scan-result",
                 str(scan_result),
                 "--operator-id",
@@ -270,7 +272,7 @@ class Ticket12CudaCapturePreflightTest(unittest.TestCase):
             self.assertEqual(completed.returncode, 0, completed.stderr)
             result = json.loads((run_dir / "result.json").read_text(encoding="utf-8"))
             self.assertFalse(result["passed"])
-            self.assertEqual(result["capture_status"], "PREFLIGHT_FAILED")
+            self.assertEqual(result["validation_status"], "VALIDATION_FAILED")
             self.assertFalse(result["consumes_capture_session"])
             self.assertTrue((run_dir / "preflight-capture.log").is_file())
             self.assertFalse((run_dir / "capture-state.json").exists())

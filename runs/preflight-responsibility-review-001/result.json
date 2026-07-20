@@ -1,0 +1,165 @@
+{
+  "action": "review_environment_preflight_responsibility",
+  "capture_session_binding": {
+    "bundled": true,
+    "formal_result": true,
+    "one_process": true,
+    "one_session_config": true,
+    "scan_ordered_operator_configs": true,
+    "scan_requests": true
+  },
+  "compatibility": {
+    "revision_5_capture_adapter_validation_historical": true,
+    "revision_6_rejects_capture_adapter_validation": true,
+    "revision_6_requires_scan": true,
+    "revision_6_requires_scan_for_formal_capture": true
+  },
+  "consumes_capture_session": false,
+  "execution_site": "SOURCE",
+  "gap_inventory": {
+    "production_operator_constants_in_v2": false,
+    "required_operator_verdict": "CAPTURE_REQUIRED",
+    "requires_exact_operator_set": true,
+    "requires_queue_order": true,
+    "source": "Scan Run gap_queue"
+  },
+  "historical_capture_validation": {
+    "failed_run": "runs/cuda-preflight-r6-001",
+    "failed_run_classification": "CAPTURE_TOOL_SOURCE_SEAM_VALIDATION_FAILURE",
+    "passed_run": "runs/cuda-preflight-r6-002",
+    "passed_run_classification": "CAPTURE_ADAPTER_INTEGRATION_VALIDATION",
+    "proves_environment_preflight": false,
+    "proves_operator_gap": false,
+    "reexecution_required": false
+  },
+  "manifest_schema": "handoff-manifest/v2",
+  "passed": true,
+  "preflight_boundary": {
+    "accepts_operator_id": false,
+    "accepts_scan_result": false,
+    "checks": [
+      "CUDA Torch import and availability",
+      "at least Contract tensor_parallel_size devices",
+      "bfloat16 support",
+      "fixed SGLang worktree import and Git revision",
+      "model_adaptation_capture plugin entry point",
+      "absence of P800-only launch flags"
+    ],
+    "command_mode": "preflight",
+    "loads_checkpoint": false,
+    "module": "model_adaptation_capture.preflight",
+    "records_samples": false,
+    "runs_operator_hooks": false,
+    "runs_self_replay": false
+  },
+  "review": {
+    "spec": {
+      "finding": "The former public preflight mode still selected operators under Contract revision 6.",
+      "resolution": "The public preflight mode is environment-only. Historical operator validation is named capture-adapter-validation and rejects revision 6.",
+      "status": "PASS"
+    },
+    "standards": {
+      "finding": "Environment readiness and historical operator validation had ambiguous names and shared one module.",
+      "resolution": "The responsibilities now use separate modules and the exact CUDA Golden Capture vocabulary.",
+      "status": "PASS"
+    }
+  },
+  "sample_validation": {
+    "input_tensor_metadata": true,
+    "non_tensor_arguments": true,
+    "output_tensor_metadata": true,
+    "saved_direct_parameters": true
+  },
+  "source_files": [
+    {
+      "path": "migration-spec.md",
+      "sha256": "4d5c5f0d958dfc1ac2c6c889534e88c1d7e968c0fd6f2ed72181d594d057138a"
+    },
+    {
+      "path": "model-adaptation/SKILL.md",
+      "sha256": "b2203dc493e3787ff32d80074e380ee8829a2e53a7fd11a721b6edad79d06132"
+    },
+    {
+      "path": "model-adaptation/references/cuda-capture-validation.md",
+      "sha256": "03d4507fd2f1420a7cf2709959119058f18a3b9b7a0de31f50f9972996c26c69"
+    },
+    {
+      "path": "model-adaptation/scripts/capture_golden.py",
+      "sha256": "f47adf66e7dbbc36c747b13d1e786347dc4b5833f25470f3e63a7f4c06a7c5dd"
+    },
+    {
+      "path": "model-adaptation/scripts/model_adaptation_capture/preflight.py",
+      "sha256": "1e2a18fb526707eb7a0da92bc87f845c788887e7e2b7495d1841d20445d4c111"
+    },
+    {
+      "path": "model-adaptation/scripts/model_adaptation_capture/capture_adapter_validation.py",
+      "sha256": "4ef1cef53be5aa7d138fdd68c5ece617c863833ed768d36f19a631d04b068c71"
+    },
+    {
+      "path": "outputs/step3p7-p800-migration-tool-design.md",
+      "sha256": "c9cbc34f318a3d5080133981882bbccf548ceb32382cc19f739a1714306eca90"
+    },
+    {
+      "path": ".scratch/step3p7-p800-migration-tool/map.md",
+      "sha256": "f5dd74f258b4fc6d3b75a3afefab5a38ff66763084620719e766f7df0f7b43aa"
+    },
+    {
+      "path": ".scratch/step3p7-p800-migration-tool/issues/29-preflight-seam-module-source-fixation.md",
+      "sha256": "5cbc3fd6dfcff751510a932fe0c0d4bd5730f7fcfb75ed08d13365c43038ae3d"
+    },
+    {
+      "path": "tests/test_ticket12_cuda_capture_entrypoint.py",
+      "sha256": "d80eee7da0f06066ff1bfc98243fbe85f7a0216d85bb01ddf207924b4419862f"
+    },
+    {
+      "path": "tests/test_ticket12_cuda_capture_preflight.py",
+      "sha256": "2c4a1c594555a8de8558214b3572892c060daff88b86e9d4ae3039170951eceb"
+    },
+    {
+      "path": "tests/test_ticket16_p800_baseline_runbook.py",
+      "sha256": "12d8538d1628867bf9e26f9cae768bc17ab21acfda2eb84b77a4234431d1ccb0"
+    },
+    {
+      "path": "tests/test_ticket23_swiglu_clamp_adapter.py",
+      "sha256": "f00e561d656b0fb7de5c6630aa61a0bd64cebd7013fd534d09de63e654b5cbe8"
+    },
+    {
+      "path": "tests/test_ticket26_single_session_vision_capture.py",
+      "sha256": "d52dda4e1b314ba3b982c52a64301097486a461a3146bf37aa2c24b7f48cde2b"
+    },
+    {
+      "path": "tests/test_ticket27_p800_kunlun_environment.py",
+      "sha256": "11fa519d342617c5c7579ee707e26e5bc2948aa6900e48d137d62111c8971195"
+    },
+    {
+      "path": "tests/test_ticket28_gap_driven_handoff_bundle.py",
+      "sha256": "21a36613b8f2caab24fbd2aa9e55889e4845a5a09f91dc4f3a8647b3d9acb526"
+    }
+  ],
+  "source_validation": {
+    "focused_tests": {
+      "command": "python3 -m unittest tests.test_ticket26_single_session_vision_capture",
+      "passed": true,
+      "tests_run": 11
+    },
+    "git_diff_check": "PASS",
+    "python_compile": "PASS",
+    "torch_available": false,
+    "torch_free_regression_tests": {
+      "passed": true,
+      "tests_run": 161
+    },
+    "torch_required_tests": {
+      "discovered": 7,
+      "status": "NOT_RUN_NO_LOCAL_TORCH"
+    }
+  },
+  "spec_binding": {
+    "contract_data_sha256": "74723d4cca3008710b04ac56c6ea06a652babd81e101bddaf5ae9b70eb2fbab3",
+    "contract_revision": 6,
+    "spec_id": "step3p7-flash-p800-demo"
+  },
+  "summary": "Environment preflight now validates only CUDA runtime readiness. Operator hooks, shapes, rank filtering, Tensor capture, and self-replay remain Capture Session work; the former revision 6 results remain immutable historical capture-adapter validation evidence.",
+  "supersedes": "runs/preflight-responsibility-correction-001/result.json",
+  "tool": "migration-agent"
+}

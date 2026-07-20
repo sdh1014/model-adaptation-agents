@@ -1,5 +1,9 @@
 # 修正 revision 6 preflight 的固定源解析：按 seam 模块而非 kernel 定义模块
 
+> 后续职责纠正：本 Ticket 当时所称 `preflight-session` 实际执行了算子 Hook、
+> shape 采集和 self-replay，现归类为历史“采集适配器验证”，不是环境 preflight。
+> 当前公开 `--mode preflight` 只验证环境；Revision 6 不再运行本 Ticket 的旧入口。
+
 Type: bugfix
 Status: fixed
 Blocked by: 28

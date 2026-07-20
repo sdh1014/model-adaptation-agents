@@ -16,7 +16,7 @@ sys.path.insert(0, str(SCRIPTS))
 
 import capture_golden
 from model_adaptation_capture import plugin
-from model_adaptation_capture import preflight
+from model_adaptation_capture import capture_adapter_validation
 
 
 SPEC = (
@@ -377,10 +377,16 @@ class Ticket23SwiGLUClampAdapterTest(unittest.TestCase):
                     stderr="",
                 )
 
-            with patch.object(preflight.subprocess, "run", side_effect=worker):
-                passed, evidence = preflight.run_capture_preflight(
-                    config_path,
-                    worktree,
+            with patch.object(
+                capture_adapter_validation.subprocess,
+                "run",
+                side_effect=worker,
+            ):
+                passed, evidence = (
+                    capture_adapter_validation.run_capture_adapter_validation(
+                        config_path,
+                        worktree,
+                    )
                 )
 
             self.assertTrue(passed)
@@ -482,10 +488,16 @@ class Ticket23SwiGLUClampAdapterTest(unittest.TestCase):
                     stderr="",
                 )
 
-            with patch.object(preflight.subprocess, "run", side_effect=worker):
-                passed, evidence = preflight.run_capture_preflight(
-                    config_path,
-                    worktree,
+            with patch.object(
+                capture_adapter_validation.subprocess,
+                "run",
+                side_effect=worker,
+            ):
+                passed, evidence = (
+                    capture_adapter_validation.run_capture_adapter_validation(
+                        config_path,
+                        worktree,
+                    )
                 )
 
             self.assertFalse(passed)

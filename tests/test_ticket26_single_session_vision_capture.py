@@ -15,6 +15,7 @@ sys.path.insert(0, str(SCRIPTS))
 
 import capture_golden
 from _lib.spec_contract import load_contract_data, load_spec_binding
+from model_adaptation_capture import capture_adapter_validation
 from model_adaptation_capture import plugin
 from model_adaptation_capture import preflight
 from model_adaptation_capture.contracts import (
@@ -222,7 +223,7 @@ class Ticket26SingleSessionVisionCaptureTest(unittest.TestCase):
                     ],
                 ),
             ):
-                capture_golden.run_preflight_session(
+                capture_golden.run_cuda_environment_preflight(
                     SPEC,
                     run_dir,
                     worktree,
@@ -291,7 +292,7 @@ class Ticket26SingleSessionVisionCaptureTest(unittest.TestCase):
                 {"SGLANG_IS_FLASHINFER_AVAILABLE": "False"},
                 clear=True,
             ), self.assertRaisesRegex(
-                preflight.PreflightError,
+                preflight.EnvironmentPreflightError,
                 "P800-only",
             ):
                 preflight.run_environment_worker(config_path)
@@ -418,7 +419,7 @@ class Ticket26SingleSessionVisionCaptureTest(unittest.TestCase):
                     "--run-dir",
                     str(run_dir),
                     "--mode",
-                    "preflight-session",
+                    "preflight",
                     "--scan-result",
                     "runs/scan-007/result.json",
                     "--sglang-worktree",
@@ -426,6 +427,27 @@ class Ticket26SingleSessionVisionCaptureTest(unittest.TestCase):
                 ],
             ):
                 self.assertEqual(capture_golden.main(), 2)
+            self.assertFalse(run_dir.exists())
+
+    def test_revision_six_rejects_historical_capture_adapter_validation(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            run_dir = workspace / "capture-adapter-validation"
+
+            with self.assertRaisesRegex(
+                capture_golden.ToolError,
+                "Contract revisions 1 through 5",
+            ):
+                capture_golden.run_capture_adapter_validation(
+                    SPEC,
+                    run_dir,
+                    ROOT / "runs" / "scan-007" / "result.json",
+                    SWIGLU_CLAMP_OPERATOR_ID,
+                    workspace / "sglang",
+                )
+
             self.assertFalse(run_dir.exists())
 
     def test_revision_six_requires_every_gap_including_vision_in_capture_plan(
@@ -786,10 +808,16 @@ class Ticket26SingleSessionVisionCaptureTest(unittest.TestCase):
                     stderr="",
                 )
 
-            with patch.object(preflight.subprocess, "run", side_effect=worker):
-                passed, evidence = preflight.run_capture_preflight(
-                    config_path,
-                    worktree,
+            with patch.object(
+                capture_adapter_validation.subprocess,
+                "run",
+                side_effect=worker,
+            ):
+                passed, evidence = (
+                    capture_adapter_validation.run_capture_adapter_validation(
+                        config_path,
+                        worktree,
+                    )
                 )
 
             self.assertTrue(passed)

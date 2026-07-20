@@ -30,7 +30,7 @@ class Ticket12CudaCaptureEntrypointTest(unittest.TestCase):
             runbook,
         )
         self.assertIn("Ticket 23 已实现对应 adapter", runbook)
-        self.assertIn("--mode preflight", runbook)
+        self.assertIn("--mode capture-adapter-validation", runbook)
         self.assertIn("不加载 checkpoint", runbook)
         self.assertIn("不消耗唯一", runbook)
         self.assertIn("不要继续正式模型 Capture", runbook)
