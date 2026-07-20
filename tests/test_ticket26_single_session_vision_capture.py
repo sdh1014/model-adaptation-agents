@@ -186,6 +186,248 @@ class Ticket26SingleSessionVisionCaptureTest(unittest.TestCase):
     def setUp(self) -> None:
         plugin._reset_for_tests()
 
+    def test_revision_six_preflight_reports_only_environment_readiness(
+        self,
+    ) -> None:
+        environment = {
+            "python_version": "3.12.0",
+            "torch_version": "2.11.0+cu129",
+            "cuda_available": True,
+            "cuda_device_count": 8,
+            "bfloat16_supported": True,
+            "sglang_module_path": "/fixed/sglang/python/sglang/__init__.py",
+            "plugin_entry_point": "model_adaptation_capture",
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            worktree = workspace / "sglang"
+            worktree.mkdir()
+            run_dir = workspace / "cuda-environment-preflight"
+
+            with patch.object(
+                capture_golden,
+                "resolve_git_revision",
+                return_value=load_contract_data(SPEC)["source"]["sglang_revision"],
+            ), patch.object(
+                capture_golden,
+                "run_environment_preflight",
+                return_value=(
+                    True,
+                    environment,
+                    [
+                        "environment-config.json",
+                        "environment.log",
+                        "environment-result.json",
+                    ],
+                ),
+            ):
+                capture_golden.run_preflight_session(
+                    SPEC,
+                    run_dir,
+                    worktree,
+                )
+
+            result = json.loads(
+                (run_dir / "result.json").read_text(encoding="utf-8")
+            )
+            config = json.loads(
+                (run_dir / "environment-config.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+
+            self.assertEqual(result["action"], "environment-preflight")
+            self.assertTrue(result["passed"])
+            self.assertEqual(
+                result["preflight_status"],
+                "PREFLIGHT_PASSED",
+            )
+            self.assertFalse(result["consumes_capture_session"])
+            self.assertEqual(result["environment"], environment)
+            self.assertNotIn("capture_status", result)
+            self.assertNotIn("operator_ids", result)
+            self.assertNotIn("request_modes", result)
+            self.assertNotIn("scan_result", config)
+            self.assertNotIn("operators", config)
+            self.assertNotIn("requests", config)
+            self.assertNotIn("preflight_tp_context", config)
+            self.assertFalse((run_dir / "operators").exists())
+            self.assertFalse((run_dir / "samples").exists())
+
+    def test_cuda_environment_preflight_rejects_p800_only_flags(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            worktree = workspace / "sglang"
+            worktree.mkdir()
+            config_path = workspace / "environment-config.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "schema": preflight.ENVIRONMENT_CONFIG_SCHEMA,
+                        "spec_binding": {
+                            "spec_id": "step3p7-flash-p800-demo",
+                            "contract_revision": 6,
+                            "contract_data_sha256": "a" * 64,
+                        },
+                        "run_dir": str(workspace),
+                        "source": {
+                            "sglang_revision": "b" * 40,
+                            "sglang_worktree": str(worktree),
+                        },
+                        "runtime": {
+                            "tensor_parallel_size": 8,
+                            "dtype": "bfloat16",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with patch.dict(
+                os.environ,
+                {"SGLANG_IS_FLASHINFER_AVAILABLE": "False"},
+                clear=True,
+            ), self.assertRaisesRegex(
+                preflight.PreflightError,
+                "P800-only",
+            ):
+                preflight.run_environment_worker(config_path)
+
+    def test_cuda_environment_worker_checks_tp8_bf16_and_fixed_sglang(
+        self,
+    ) -> None:
+        class FakeCuda:
+            @staticmethod
+            def device_count():
+                return 8
+
+            @staticmethod
+            def is_bf16_supported():
+                return True
+
+            @staticmethod
+            def get_device_name(index):
+                return f"CUDA-{index}"
+
+        fake_torch = types.SimpleNamespace(
+            __version__="2.11.0+cu129",
+            cuda=FakeCuda(),
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            worktree = workspace / "sglang"
+            package = worktree / "python" / "sglang"
+            package.mkdir(parents=True)
+            module_file = package / "__init__.py"
+            module_file.write_text("", encoding="utf-8")
+            config_path = workspace / "environment-config.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "schema": preflight.ENVIRONMENT_CONFIG_SCHEMA,
+                        "spec_binding": {
+                            "spec_id": "step3p7-flash-p800-demo",
+                            "contract_revision": 6,
+                            "contract_data_sha256": "a" * 64,
+                        },
+                        "run_dir": str(workspace),
+                        "source": {
+                            "sglang_revision": "b" * 40,
+                            "sglang_worktree": str(worktree),
+                        },
+                        "runtime": {
+                            "tensor_parallel_size": 8,
+                            "dtype": "bfloat16",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            loaded_plugins = []
+            modules = {
+                "sglang": types.ModuleType("sglang"),
+                "sglang.srt": types.ModuleType("sglang.srt"),
+                "sglang.srt.plugins": types.ModuleType("sglang.srt.plugins"),
+            }
+            modules["sglang"].__file__ = str(module_file)
+            modules["sglang"].__path__ = []
+            modules["sglang.srt"].__path__ = []
+            modules["sglang.srt.plugins"].load_plugins = (
+                lambda: loaded_plugins.append("loaded")
+            )
+
+            with patch.object(
+                preflight,
+                "_require_cuda_torch",
+                return_value=fake_torch,
+            ), patch.object(
+                preflight,
+                "_require_capture_entry_point",
+            ), patch.dict(
+                sys.modules,
+                modules,
+            ), patch.dict(
+                os.environ,
+                {"CUDA_VISIBLE_DEVICES": "0,1,2,3,4,5,6,7"},
+                clear=True,
+            ):
+                preflight.run_environment_worker(config_path)
+
+            result = json.loads(
+                (workspace / "environment-result.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertTrue(result["passed"])
+            self.assertEqual(result["tensor_parallel_size"], 8)
+            self.assertEqual(result["dtype"], "bfloat16")
+            self.assertEqual(result["environment"]["cuda_device_count"], 8)
+            self.assertEqual(
+                result["environment"]["cuda_devices"],
+                [f"CUDA-{index}" for index in range(8)],
+            )
+            self.assertTrue(result["environment"]["bfloat16_supported"])
+            self.assertEqual(
+                result["environment"]["sglang_module_path"],
+                str(module_file.resolve()),
+            )
+            self.assertEqual(loaded_plugins, ["loaded"])
+            serialized = json.dumps(result)
+            self.assertNotIn("operator", serialized)
+            self.assertNotIn("shape", serialized)
+            self.assertNotIn("sample", serialized)
+            self.assertNotIn("replay", serialized)
+
+    def test_environment_preflight_cli_rejects_scan_and_operator_inputs(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            run_dir = Path(temp_dir) / "environment-preflight"
+            with patch.object(
+                sys,
+                "argv",
+                [
+                    "capture_golden.py",
+                    "--spec",
+                    str(SPEC),
+                    "--run-dir",
+                    str(run_dir),
+                    "--mode",
+                    "preflight-session",
+                    "--scan-result",
+                    "runs/scan-007/result.json",
+                    "--sglang-worktree",
+                    "/fixed/sglang",
+                ],
+            ):
+                self.assertEqual(capture_golden.main(), 2)
+            self.assertFalse(run_dir.exists())
+
     def test_revision_six_requires_every_gap_including_vision_in_capture_plan(
         self,
     ) -> None:
@@ -418,7 +660,7 @@ class Ticket26SingleSessionVisionCaptureTest(unittest.TestCase):
             },
         )
 
-    def test_session_preflight_captures_and_self_replays_every_operator(
+    def test_session_capture_adapter_validation_covers_every_operator(
         self,
     ) -> None:
         image_bytes = b"fixed-image-fixture"
@@ -436,7 +678,7 @@ class Ticket26SingleSessionVisionCaptureTest(unittest.TestCase):
             image_path.write_bytes(image_bytes)
             scan_path = workspace / "scan.json"
             scan_path.write_text(json.dumps(scan), encoding="utf-8")
-            run_dir = workspace / "preflight"
+            run_dir = workspace / "capture-adapter-validation"
             with patch.object(
                 capture_golden,
                 "resolve_git_revision",

@@ -1,4 +1,4 @@
-"""Validate capture hooks, rank filtering, and replay without a checkpoint."""
+"""Check CUDA readiness and retain historical capture-adapter validation."""
 
 import argparse
 import hashlib
@@ -17,10 +17,14 @@ from .contracts import (
     KERNEL_REPLAY_RESULT_SCHEMA,
     MLP_HOOK_TARGET,
     PLUGIN_ENTRY_POINT,
+    REPLAY_CONFIG_ENV,
     SESSION_CONFIG_SCHEMA,
     SWIGLU_CLAMP_HOOK_TARGET,
     SWIGLU_CLAMP_OPERATOR_ID,
 )
+
+ENVIRONMENT_CONFIG_SCHEMA = "cuda-environment-preflight-config/v1"
+ENVIRONMENT_RESULT_SCHEMA = "cuda-environment-preflight-result/v1"
 
 
 class PreflightError(RuntimeError):
@@ -70,6 +74,79 @@ def _replay_worker_environment(
     environment.pop(CAPTURE_CONFIG_ENV, None)
     environment.pop("SGLANG_PLUGINS", None)
     return environment
+
+
+def _environment_worker_environment(sglang_worktree: Path) -> Dict[str, str]:
+    environment = os.environ.copy()
+    scripts_root = str(Path(__file__).resolve().parents[1])
+    sglang_python = str((sglang_worktree / "python").resolve())
+    python_paths = [scripts_root, sglang_python]
+    if environment.get("PYTHONPATH"):
+        python_paths.append(environment["PYTHONPATH"])
+    environment["PYTHONPATH"] = os.pathsep.join(python_paths)
+    environment["SGLANG_PLUGINS"] = PLUGIN_ENTRY_POINT
+    environment.pop(CAPTURE_CONFIG_ENV, None)
+    environment.pop(REPLAY_CONFIG_ENV, None)
+    return environment
+
+
+def run_environment_preflight(
+    config_path: Path,
+    sglang_worktree: Path,
+) -> tuple[bool, Dict[str, Any], list[str]]:
+    run_dir = config_path.resolve().parent
+    config = read_json_object(config_path, "environment preflight config")
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "model_adaptation_capture.preflight",
+            "--mode",
+            "environment",
+            "--config",
+            str(config_path.resolve()),
+        ],
+        cwd=sglang_worktree,
+        env=_environment_worker_environment(sglang_worktree),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    log_path = run_dir / "environment.log"
+    log_path.write_text(
+        "\n".join(
+            [
+                "worker_mode=environment",
+                f"returncode={completed.returncode}",
+                "--- stdout ---",
+                completed.stdout,
+                "--- stderr ---",
+                completed.stderr,
+            ]
+        ),
+        encoding="utf-8",
+    )
+    evidence = ["environment-config.json", "environment.log"]
+    result_path = run_dir / "environment-result.json"
+    if not result_path.is_file():
+        return False, {}, evidence
+    evidence.append("environment-result.json")
+    result = read_json_object(result_path, "environment preflight result")
+    expected = {
+        "schema": ENVIRONMENT_RESULT_SCHEMA,
+        "spec_binding": config["spec_binding"],
+        "sglang_revision": config["source"]["sglang_revision"],
+        "tensor_parallel_size": config["runtime"]["tensor_parallel_size"],
+        "dtype": config["runtime"]["dtype"],
+        "passed": True,
+    }
+    passed = completed.returncode == 0 and all(
+        result.get(field) == value for field, value in expected.items()
+    )
+    environment = result.get("environment")
+    if not isinstance(environment, dict):
+        return False, {}, evidence
+    return passed, environment, evidence
 
 
 def _capture_artifact_fingerprint(
@@ -584,6 +661,101 @@ def _require_capture_entry_point() -> None:
         )
 
 
+def run_environment_worker(config_path: Path) -> None:
+    config = read_json_object(config_path, "environment preflight config")
+    if config.get("schema") != ENVIRONMENT_CONFIG_SCHEMA:
+        raise PreflightError("environment preflight config schema is invalid")
+    p800_only_environment = {}
+    if os.environ.get("SGLANG_PLATFORM", "").lower() == "kunlun":
+        p800_only_environment["SGLANG_PLATFORM"] = os.environ[
+            "SGLANG_PLATFORM"
+        ]
+    if os.environ.get(
+        "SGLANG_IS_FLASHINFER_AVAILABLE",
+        "",
+    ).lower() in {"0", "false", "no"}:
+        p800_only_environment["SGLANG_IS_FLASHINFER_AVAILABLE"] = (
+            os.environ["SGLANG_IS_FLASHINFER_AVAILABLE"]
+        )
+    if p800_only_environment:
+        raise PreflightError(
+            "CUDA environment contains P800-only launch flags: "
+            + ", ".join(sorted(p800_only_environment))
+        )
+
+    runtime = config.get("runtime")
+    source = config.get("source")
+    if not isinstance(runtime, dict) or not isinstance(source, dict):
+        raise PreflightError(
+            "environment preflight config is missing runtime or source"
+        )
+    tensor_parallel_size = runtime.get("tensor_parallel_size")
+    if (
+        isinstance(tensor_parallel_size, bool)
+        or not isinstance(tensor_parallel_size, int)
+        or tensor_parallel_size < 1
+    ):
+        raise PreflightError("tensor_parallel_size must be a positive integer")
+    if runtime.get("dtype") != "bfloat16":
+        raise PreflightError("environment preflight requires bfloat16")
+
+    torch = _require_cuda_torch()
+    device_count = torch.cuda.device_count()
+    if device_count < tensor_parallel_size:
+        raise PreflightError(
+            "CUDA environment exposes fewer devices than tensor_parallel_size: "
+            f"required {tensor_parallel_size}, got {device_count}"
+        )
+    if not torch.cuda.is_bf16_supported():
+        raise PreflightError("CUDA environment does not support bfloat16")
+
+    _require_capture_entry_point()
+    import sglang
+    from sglang.srt.plugins import load_plugins
+
+    module_file = getattr(sglang, "__file__", None)
+    if not isinstance(module_file, str) or not module_file:
+        raise PreflightError("loaded SGLang module does not have a source path")
+    loaded_module = Path(module_file).resolve()
+    expected_package = (
+        Path(source["sglang_worktree"]).resolve() / "python" / "sglang"
+    )
+    if not loaded_module.is_relative_to(expected_package):
+        raise PreflightError(
+            f"loaded SGLang module {loaded_module} is outside "
+            f"{expected_package}"
+        )
+
+    load_plugins()
+    environment = {
+        "python_executable": sys.executable,
+        "python_version": sys.version.split()[0],
+        "torch_version": torch.__version__,
+        "cuda_available": True,
+        "cuda_device_count": device_count,
+        "cuda_devices": [
+            torch.cuda.get_device_name(index)
+            for index in range(tensor_parallel_size)
+        ],
+        "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES"),
+        "bfloat16_supported": True,
+        "sglang_module_path": str(loaded_module),
+        "plugin_entry_point": PLUGIN_ENTRY_POINT,
+    }
+    write_json(
+        Path(config["run_dir"]) / "environment-result.json",
+        {
+            "schema": ENVIRONMENT_RESULT_SCHEMA,
+            "spec_binding": config["spec_binding"],
+            "sglang_revision": source["sglang_revision"],
+            "tensor_parallel_size": tensor_parallel_size,
+            "dtype": runtime["dtype"],
+            "passed": True,
+            "environment": environment,
+        },
+    )
+
+
 def run_capture_worker(config_path: Path) -> None:
     config = read_json_object(config_path, "capture config")
     torch = _require_cuda_torch()
@@ -972,7 +1144,11 @@ def run_capture_worker(config_path: Path) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--mode", required=True, choices=("capture",))
+    parser.add_argument(
+        "--mode",
+        required=True,
+        choices=("capture", "environment"),
+    )
     parser.add_argument("--config", required=True, type=Path)
     return parser.parse_args()
 
@@ -980,7 +1156,10 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     try:
-        run_capture_worker(args.config)
+        if args.mode == "environment":
+            run_environment_worker(args.config)
+        else:
+            run_capture_worker(args.config)
     except (
         PreflightError,
         AssertionError,

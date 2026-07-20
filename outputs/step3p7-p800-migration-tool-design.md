@@ -5,7 +5,8 @@
 > 当前状态：`ACTIVE / CUDA_CAPTURE`，当前扫描为 `runs/scan-007`
 >
 > 当前采集准备：`runs/capture-session-tool-001` 已生成一个五算子、文本加单图的
-> session config；真实 CUDA preflight 尚未执行
+> session config；`runs/cuda-preflight-r6-002` 已证明采集器集成，但只检查环境的
+> preflight 将在正式 Session 占位前执行
 >
 > 证据边界：revision 5 的单算子 CUDA/P800 数值证据保留为历史；`35aa72e`
 > 的自定义 repair helper 未通过正式审查。revision 6 不复用旧 Golden 冒充全队列
@@ -395,11 +396,13 @@ worktree 的完整 diff 与 `candidate.patch` 逐字节比较；当前 SwiGLU ad
 `kunlun_ops.swiglu`。重放代码只能装配真实输入和参数，不能复制修复算法或在生产
 源码新增 helper。`workspace_guard.py` 负责累计 patch、replay 顺序与失败恢复。
 
-revision 6 新增 `prepare-session / preflight-session`：一个 config 内含五个
-operator collector 和两条请求。插件只 Hook Scan Run 记录的五个现有调用；每个
-collector 各自按输入 shape 去重并保存 rank 0 最多三份。SOURCE 单元测试已覆盖
-完整 capture plan、固定图像摘要、多 Hook 注册、attention 输出缓冲区和逐算子
-CUDA self-replay 编排。没有 CUDA 的 SOURCE 结果不能替代真实 preflight。
+revision 6 的 `prepare-session` 生成一个包含五个 operator collector 和两条请求的
+正式 Session config。插件只 Hook Scan Run 记录的五个现有调用；每个 collector
+各自按输入 shape 去重并保存 rank 0 最多三份。`preflight-session` 不读取该
+capture plan，也不调用任何算子；它只验证 CUDA Torch、TP8 设备数、BF16、固定
+SGLang worktree 和插件入口是否可用。SOURCE 单元测试已覆盖完整 capture plan、
+固定图像摘要、多 Hook 注册、attention 输出缓冲区和逐算子 CUDA self-replay
+编排，但这些属于采集集成验证和正式 Session 职责，不属于环境 preflight。
 
 revision 6 的 Handoff 使用 Manifest v2。build 不再读取生产代码中的单算子常量，
 而是校验不可变 Scan Run 的 `CAPTURE_REQUIRED` operators、gap queue 和 capture
@@ -448,8 +451,8 @@ Contract revision 6
   -> spec-binding-005
   -> scan-007（scan-006 只作历史线索）
   -> 排好完整 gap queue，第一项成为 active_operator
-  -> 一个 session config 装入五个 collector
-  -> CUDA preflight-session（不消耗正式 Session）
+  -> CUDA 环境 preflight-session（不读取 Scan 或算子，不消耗正式 Session）
+  -> 一个正式 session config 装入五个 collector
   -> 一次 CUDA 模型 Session 收齐全部计划项
      同一进程发送固定文本和固定单图请求
      每个算子最多三个 shape
@@ -535,7 +538,7 @@ P800 PASS；需要设备验证时仍应形成新 Run。
 
 ## 14. revision 6 当前状态与自动续行
 
-当前 Working State 为 revision 44 `ACTIVE / CUDA_CAPTURE`。`runs/scan-007`
+当前 Working State 为 revision 46 `ACTIVE / CUDA_CAPTURE`。`runs/scan-007`
 已固定五个缺口及同一 capture plan；`runs/multimodal-capture-tool-001` 已在
 SOURCE 实现一个 session config、五个原调用 Hook、逐算子 rank-0 collector 和
 CUDA self-replay 编排；`runs/p800-launch-environment-tool-001` 又固定了 P800
@@ -543,10 +546,12 @@ Kunlun 必需环境和 Agent 按需选择其余变量的边界；
 `runs/gap-driven-handoff-tool-001` 已实现由 Scan 缺口集合驱动的多 Golden
 Manifest v2；`runs/gap-driven-handoff-tool-002` 补齐同一 Session/进程、输出
 元数据和 revision 6 禁止回退 v1；`runs/gap-driven-handoff-tool-003` 再补齐
-正式 Session 结果和固定请求绑定。唯一下一步是在固定 CUDA revision 的 TP8 环境执行
-`capture_golden.py --mode preflight-session`。真实 CUDA preflight、正式一次性
-Session 和真实样本构建的 bundle 仍为 `PENDING`；旧 revision 5 单算子 runbook
-不可直接执行。除已有 SwiGLU 外，其余 P800 replay adapter 也保持
+正式 Session 结果和固定请求绑定。CUDA 回传的 `runs/cuda-preflight-r6-001` 与
+`runs/cuda-preflight-r6-002` 已重新归类为历史采集集成验证，不再充当环境
+preflight。唯一下一步是执行 revision 6 正式 runbook：先做不读取算子的环境检查，
+通过后再提交 Session 占位并启动一次真实 TP8 Capture。正式一次性 Session 和真实
+样本构建的 bundle 仍为 `PENDING`；旧 revision 5 单算子 runbook不可直接执行。
+除已有 SwiGLU 外，其余 P800 replay adapter 也保持
 `PENDING_AGENT_RESOLUTION`，由 Agent 在队列推进到对应算子时依据原 Kunlun
 调用点补齐。
 

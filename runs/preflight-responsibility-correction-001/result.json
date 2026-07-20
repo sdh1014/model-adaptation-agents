@@ -1,0 +1,134 @@
+{
+  "action": "separate_environment_preflight_from_capture_validation",
+  "capture_session_binding": {
+    "bundled": true,
+    "formal_result": true,
+    "one_process": true,
+    "one_session_config": true,
+    "scan_ordered_operator_configs": true,
+    "scan_requests": true
+  },
+  "compatibility": {
+    "revision_5_manifest_v1_historical": true,
+    "revision_6_requires_scan": true
+  },
+  "consumes_capture_session": false,
+  "evidence": [
+    "validation.log",
+    "runs/cuda-preflight-r6-001/result.json",
+    "runs/cuda-preflight-r6-002/result.json"
+  ],
+  "execution_site": "SOURCE",
+  "gap_inventory": {
+    "production_operator_constants_in_v2": false,
+    "required_operator_verdict": "CAPTURE_REQUIRED",
+    "requires_exact_operator_set": true,
+    "requires_queue_order": true,
+    "source": "Scan Run gap_queue"
+  },
+  "historical_capture_validation": {
+    "failed_run": "runs/cuda-preflight-r6-001",
+    "failed_run_classification": "CAPTURE_TOOL_SOURCE_SEAM_VALIDATION_FAILURE",
+    "passed_run": "runs/cuda-preflight-r6-002",
+    "passed_run_classification": "CAPTURE_ADAPTER_INTEGRATION_VALIDATION",
+    "proves_environment_preflight": false,
+    "proves_operator_gap": false,
+    "reexecution_required": false
+  },
+  "manifest_schema": "handoff-manifest/v2",
+  "passed": true,
+  "preflight_boundary": {
+    "accepts_operator_id": false,
+    "accepts_scan_result": false,
+    "checks": [
+      "CUDA Torch import and availability",
+      "at least Contract tensor_parallel_size devices",
+      "bfloat16 support",
+      "fixed SGLang worktree import and Git revision",
+      "model_adaptation_capture plugin entry point",
+      "absence of P800-only launch flags"
+    ],
+    "loads_checkpoint": false,
+    "records_samples": false,
+    "runs_operator_hooks": false,
+    "runs_self_replay": false
+  },
+  "runtime_validation": {
+    "cuda_capture_adapter_validation": "PASSED_IN_RUNS_CUDA_PREFLIGHT_R6_002",
+    "cuda_environment_preflight": "PENDING_AS_FIRST_FORMAL_RUNBOOK_STEP",
+    "formal_bundle_build": "NOT_STARTED",
+    "formal_cuda_capture": "NOT_STARTED",
+    "p800_bundle_verify": "NOT_STARTED"
+  },
+  "sample_validation": {
+    "input_tensor_metadata": true,
+    "non_tensor_arguments": true,
+    "output_tensor_metadata": true,
+    "saved_direct_parameters": true
+  },
+  "source_files": [
+    {
+      "path": "migration-spec.md",
+      "sha256": "8586210138a0109451ebf69f2534460074118e700d139d7e462c3614c0307729"
+    },
+    {
+      "path": "model-adaptation/SKILL.md",
+      "sha256": "390d842d9f1016d234915fc36953b13505670a464faa4e2404533ac6238ad23f"
+    },
+    {
+      "path": "model-adaptation/scripts/capture_golden.py",
+      "sha256": "b62ac1a6cc3efa83d90d4d2308bb849d4676309d582e10de52dd7e5e6e34b923"
+    },
+    {
+      "path": "model-adaptation/scripts/model_adaptation_capture/preflight.py",
+      "sha256": "2b2e30ba516bcf3f5e573a9994b7816d5e972fe135ae54a8eb3e3c30abbe062a"
+    },
+    {
+      "path": "outputs/step3p7-p800-migration-tool-design.md",
+      "sha256": "bee37a6130ee5eed22549ad00167a6c4259a5f419a9661f079ce8a70c2b82b07"
+    },
+    {
+      "path": "tests/test_ticket16_p800_baseline_runbook.py",
+      "sha256": "c51e2d7730f04b8f8f587970e0fa11a04d941f7dd17e23a5d106b9846aa66283"
+    },
+    {
+      "path": "tests/test_ticket26_single_session_vision_capture.py",
+      "sha256": "c02a01c6ebe714c99f2f92c03ec585efd66ec964f98c3ce4feb560bd7627ee25"
+    },
+    {
+      "path": "tests/test_ticket27_p800_kunlun_environment.py",
+      "sha256": "1fbfac18958bbdd4ecd7e6132483379289061fb1ff6321d8eeca21edcf391d59"
+    },
+    {
+      "path": "tests/test_ticket28_gap_driven_handoff_bundle.py",
+      "sha256": "ad03255867cbd9346a0d712ab54e74afd389d823c8b1b55363c766299b8f01ce"
+    }
+  ],
+  "source_validation": {
+    "focused_tests": {
+      "command": "python3 -m unittest tests.test_ticket26_single_session_vision_capture",
+      "passed": true,
+      "tests_run": 10
+    },
+    "git_diff_check": "PASS",
+    "python_compile": "PASS",
+    "torch_available": false,
+    "torch_required_tests": {
+      "discovered": 7,
+      "status": "NOT_RUN_NO_LOCAL_TORCH"
+    },
+    "torch_free_regression_tests": {
+      "command": "python3 -m unittest tests.test_ticket10_spec_binding tests.test_ticket11_scan_artifact tests.test_ticket12_cuda_capture_entrypoint tests.test_ticket12_cuda_capture_preflight tests.test_ticket12_sglang_capture_plugin tests.test_ticket13_handoff_bundle tests.test_ticket14_repair_loop tests.test_ticket15_formal_cuda_capture_runbook tests.test_ticket15_formal_cuda_evidence_review tests.test_ticket15_handoff_plan tests.test_ticket15_p800_handoff_verification tests.test_ticket16_p800_baseline_runbook tests.test_ticket18_target_only_eager_scan tests.test_ticket19_mlp_boundary tests.test_ticket21_kernel_scan_scope tests.test_ticket23_swiglu_clamp_adapter tests.test_ticket25_operator_queue tests.test_ticket26_single_session_vision_capture tests.test_ticket27_p800_kunlun_environment tests.test_ticket28_gap_driven_handoff_bundle",
+      "passed": true,
+      "tests_run": 160
+    }
+  },
+  "spec_binding": {
+    "contract_data_sha256": "74723d4cca3008710b04ac56c6ea06a652babd81e101bddaf5ae9b70eb2fbab3",
+    "contract_revision": 6,
+    "spec_id": "step3p7-flash-p800-demo"
+  },
+  "summary": "Revision 6 environment preflight now checks only CUDA software and hardware readiness. Scan-driven hooks, shape deduplication, rank filtering, sample capture and self-replay remain formal Capture Session responsibilities. The uploaded r6-001 and r6-002 Runs are retained as capture-adapter integration history, not Operator Gap or environment-preflight evidence.",
+  "supersedes": "runs/gap-driven-handoff-tool-003/result.json",
+  "tool": "migration-agent"
+}

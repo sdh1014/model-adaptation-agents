@@ -13,7 +13,12 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 HANDOFF = ROOT / "model-adaptation" / "scripts" / "handoff_bundle.py"
 SPEC = ROOT / "migration-spec.md"
-SOURCE_RUN = ROOT / "runs" / "gap-driven-handoff-tool-003" / "result.json"
+SOURCE_RUN = (
+    ROOT
+    / "runs"
+    / "preflight-responsibility-correction-001"
+    / "result.json"
+)
 
 
 def canonical_json_bytes(value: object) -> bytes:

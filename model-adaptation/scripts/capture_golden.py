@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare and validate bounded CUDA capture for one selected Kernel Call."""
+"""Check CUDA readiness and prepare bounded Golden capture."""
 
 import argparse
 import hashlib
@@ -41,8 +41,10 @@ from model_adaptation_capture.contracts import (
     checkpoint_metadata,
 )
 from model_adaptation_capture.preflight import (
+    ENVIRONMENT_CONFIG_SCHEMA,
     PreflightError,
     run_capture_preflight,
+    run_environment_preflight,
 )
 
 
@@ -814,43 +816,61 @@ def run_prepare_session(
 def run_preflight_session(
     spec_path: Path,
     run_dir: Path,
-    scan_result_path: Path,
     sglang_worktree: Path,
 ) -> None:
-    binding, config = prepare_capture_session_config(
-        spec_path,
-        run_dir,
-        scan_result_path,
-        sglang_worktree,
-        preflight=True,
-    )
-    passed, evidence = run_capture_preflight(
-        run_dir / "capture-config.json",
+    binding = load_spec_binding(spec_path)
+    contract = load_contract_data(spec_path)
+    actual_revision = resolve_git_revision(sglang_worktree)
+    expected_revision = contract["source"]["sglang_revision"]
+    if actual_revision != expected_revision:
+        raise ToolError(
+            "SGLang worktree revision does not match Contract Data: "
+            f"expected {expected_revision}, got {actual_revision}"
+        )
+    try:
+        run_dir.mkdir(parents=True, exist_ok=False)
+    except OSError as error:
+        raise ToolError(
+            f"run directory must be fresh and creatable: {error}"
+        ) from error
+    config = {
+        "schema": ENVIRONMENT_CONFIG_SCHEMA,
+        "spec_binding": binding.as_result_dict(),
+        "run_dir": str(run_dir.resolve()),
+        "source": {
+            "sglang_revision": actual_revision,
+            "sglang_worktree": str(sglang_worktree.resolve()),
+        },
+        "runtime": {
+            "tensor_parallel_size": contract["runtime"][
+                "tensor_parallel_size"
+            ],
+            "dtype": contract["runtime"]["dtype"],
+        },
+    }
+    config_path = run_dir / "environment-config.json"
+    write_json(config_path, config)
+    passed, environment, evidence = run_environment_preflight(
+        config_path,
         sglang_worktree,
     )
     result = {
         "tool": "capture_golden.py",
-        "action": "preflight-session",
+        "action": "environment-preflight",
         "spec_binding": binding.as_result_dict(),
         "passed": passed,
-        "capture_status": (
+        "preflight_status": (
             "PREFLIGHT_PASSED" if passed else "PREFLIGHT_FAILED"
         ),
         "consumes_capture_session": False,
-        "operator_ids": [
-            item["operator_id"] for item in config["operators"]
-        ],
-        "request_modes": [
-            item["input_mode"] for item in config["requests"]
-        ],
+        "environment": environment,
         "evidence": evidence,
         "summary": (
-            "All planned existing calls captured three rank-0 shapes and "
-            "self-replayed in one multi-collector preflight."
+            "The fixed CUDA Python, TP8, BF16, SGLang worktree, and capture "
+            "plugin environment are available."
             if passed
             else
-            "The multi-collector preflight did not prove every planned call; "
-            "inspect its per-operator logs."
+            "The CUDA capture environment is not ready; inspect environment.log."
         ),
     }
     write_json(run_dir / "result.json", result)
@@ -916,7 +936,7 @@ def parse_args() -> argparse.Namespace:
             "preflight-session",
         ),
     )
-    parser.add_argument("--scan-result", required=True, type=Path)
+    parser.add_argument("--scan-result", type=Path)
     parser.add_argument("--operator-id")
     parser.add_argument("--sglang-worktree", required=True, type=Path)
     return parser.parse_args()
@@ -925,23 +945,33 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     try:
-        if args.mode in {"prepare-session", "preflight-session"}:
+        if args.mode == "preflight-session":
+            if args.operator_id is not None or args.scan_result is not None:
+                raise ToolError(
+                    "environment preflight does not accept --operator-id or "
+                    "--scan-result"
+                )
+            run_preflight_session(
+                args.spec,
+                args.run_dir,
+                args.sglang_worktree,
+            )
+        elif args.mode == "prepare-session":
             if args.operator_id is not None:
                 raise ToolError(
                     "--operator-id is not used by session preparation"
                 )
-            action = (
-                run_prepare_session
-                if args.mode == "prepare-session"
-                else run_preflight_session
-            )
-            action(
+            if args.scan_result is None:
+                raise ToolError("--scan-result is required by prepare-session")
+            run_prepare_session(
                 args.spec,
                 args.run_dir,
                 args.scan_result,
                 args.sglang_worktree,
             )
         else:
+            if args.scan_result is None:
+                raise ToolError("--scan-result is required by prepare and preflight")
             if not args.operator_id:
                 raise ToolError("--operator-id is required by prepare and preflight")
             action = run_prepare if args.mode == "prepare" else run_preflight

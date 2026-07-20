@@ -194,7 +194,7 @@ passing_run: null`。Contract 保持不变。静态缺口只能写
    新增模型 helper 或自定义算子；
 5. 把实现与测试证据写入新的 Run，不改写 Scan Run；所有计划项 adapter 都完成
    后，才更新 Working State 的 Closure Evidence、`last_completed_action`、
-   `last_run` 和唯一 preflight 下一动作。
+   `last_run` 和唯一 CUDA Capture 下一动作。
 6. `capture_golden.py --mode prepare-session` 必须生成一个 config，插件从中加载
    全部 capture plan collector；不能靠逐项 `prepare` 宣称一次 Session。一个
    bundle 包含全部 Golden Run 的能力仍要在正式 Session 前通过测试封存。
@@ -205,48 +205,55 @@ capture/replay adapter
 时，准确报告缺口并执行对应实现 ticket；不要运行旧 MLP preflight，也不要消耗
 CUDA Session。
 
-adapter 完成后，为当前 Contract revision 生成并审查新的 preflight runbook，
-先执行不消耗正式 Session 的 preflight。现有
+adapter 完成后，为当前 Contract revision 生成并审查新的正式 Capture runbook。
+现有
 [references/cuda-capture-validation.md](references/cuda-capture-validation.md)
 和 [references/formal-cuda-capture.md](references/formal-cuda-capture.md)
-只绑定 revision 5，当前 revision 不得直接执行。新 preflight 必须验证：
+只绑定 revision 5，当前 revision 不得直接执行。
 
-- Scan Run 和当前 Contract 绑定；
-- Hook 的是 Scan Run 记录的现有调用；
-- rank 0 和最多三个 shape 的去重；
-- 直接参数可保存，但完整 checkpoint 和 module state 会被拒绝；
-- 相同样本可以按固定 Precision Gate self-replay。
+preflight 只验证正式采集所需的环境是否可用，不验证任何具体算子。它只检查：
 
-revision 6 的多算子 preflight 入口是：
+- 当前 Python 能导入 CUDA Torch，且可见设备数不少于 Contract 的 TP8；
+- CUDA 支持 Contract 固定的 BF16；
+- 加载的 SGLang 来自固定 worktree 且 Git revision 与 Contract 一致；
+- `model_adaptation_capture` 插件入口可以被 SGLang 加载；
+- CUDA 环境没有继承 P800 专用的 `SGLANG_PLATFORM` 或
+  `SGLANG_IS_FLASHINFER_AVAILABLE`。
+
+revision 6 的环境 preflight 入口是：
 
 ```text
 python3 model-adaptation/scripts/capture_golden.py \
   --spec migration-spec.md \
-  --run-dir runs/cuda-preflight-r6-001 \
+  --run-dir runs/cuda-environment-preflight-r6-001 \
   --mode preflight-session \
-  --scan-result runs/scan-007/result.json \
   --sglang-worktree "$SGLANG_CUDA_WORKTREE"
 ```
 
-它在一个配置中预检五个现有调用；每项分别验证三种 shape、rank 过滤和 CUDA
-self-replay。这个命令不加载正式 checkpoint，也不消耗唯一 Capture Session。
-只能在 CUDA 机器运行；SOURCE 机器上的单元测试不能替代它。
+这个入口不接收 `--scan-result` 或 `--operator-id`，不加载 checkpoint，不 Hook
+算子，不构造 shape，不保存 Tensor，也不执行 self-replay。它不消耗唯一 Capture
+Session，只能在 CUDA 机器运行；SOURCE 单元测试不能替代它。正式 runbook 在
+提交 `session-start.json` 前先运行该命令；通过后由同一个 CUDA Agent 继续，不需要
+为了环境结果单独中途回传。
 
-这一步不宣称其余四项已经有 P800 replay adapter。正式 Golden 会保存原 CUDA
-Kernel Call 的完整最小边界；P800 队列推进到每一项前，Agent 再根据 Kunlun 源码
-补齐该项 baseline/candidate 参数装配。adapter 缺失必须报告为流程能力待补齐，
-不能记成 Operator Gap。
+`runs/cuda-preflight-r6-001` 与 `runs/cuda-preflight-r6-002` 是本职责纠正前形成的
+历史采集集成验证：它们验证五个 collector、shape 去重、rank 过滤和 CUDA
+self-replay，不能再称为环境 preflight，也不要求重复执行。前者暴露工具的 seam
+源码解析问题，后者证明修复后的采集集成路径；两者都没有消耗正式 Session。
 
-如果 adapter Run 记录的任一源码 SHA 在最近一次 PASS preflight 后发生变化，旧
-preflight 只能作为历史证据；Closure Evidence 必须把当前源码 preflight 标为
-`PENDING`，且不得开始正式 CUDA Session。先按 runbook 生成新的 preflight Run。
+具体算子的 Hook、rank 0、最多三个真实 shape、参数保存边界和 CUDA self-replay
+全部属于正式 Capture Session。任何一项失败都使正式 Session 失败并保留证据，
+不能归因于环境 preflight。正式 Golden 会保存原 CUDA Kernel Call 的完整最小
+边界；P800 队列推进到每一项前，Agent 再根据 Kunlun 源码补齐该项
+baseline/candidate 参数装配。adapter 缺失必须报告为流程能力待补齐，不能记成
+Operator Gap。
 
 如果 Working State 的 `execution_site` 是 `CUDA`，但当前会话不在用户指定的 CUDA
 机器，不创建 preflight Run，也不运行合成替代品。只报告 runbook 中的命令和
 GitHub evidence 分支回传要求，保持 Working State 不变并停止本次执行。
 
-preflight 通过且唯一下一动作已进入正式 Session 时，完整读取当前 revision 新生成
-且绑定新 Scan Run、全部 adapter Run 和全部 capture plan 的正式 runbook。正式
+环境 preflight 通过后，继续执行当前 revision 新生成且绑定新 Scan Run、全部
+adapter Run 和全部 capture plan 的正式 runbook。正式
 Session 启动前仍先通过 GitHub 提交占位；模型停止后不再为了审查样本做一次中途
 回传。同一个 CUDA Agent 继续在本地完成样本审查、临时 Spec、bundle build 和
 verify，全部通过后再一次性回传 Session、Golden、record-samples、bundle 和审查
