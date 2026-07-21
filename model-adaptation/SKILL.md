@@ -1,265 +1,172 @@
 ---
 name: model-adaptation
-description: 按固定 Contract 在 KLX P800 上验证算子、跑通 eager 模型并检查精度。
-argument-hint: "Model name, e.g. Step-3.7-Flash"
+description: 在 KLX P800 上验证 Step-3.7-Flash 算子、自动修复运行报错并跑通 eager 服务。
+argument-hint: "Step-3.7-Flash"
 disable-model-invocation: true
 ---
 
-# Input
+# 输入和目标
 
-把用户传给 Skill 的完整参数作为模型名。当前工作区只接受精确参数
-`Step-3.7-Flash`。参数缺失或不同于 Contract Data 的 `model` 时，报告正确调用：
+只接受精确调用：
 
 ```text
 $model-adaptation Step-3.7-Flash
 ```
 
-然后停止，不猜测其他模型。
+参数缺失或不同就说明正确调用并停止，不猜测其他模型。
 
-# Outcome
-
-从工作区根目录的 `migration-spec.md` 启动或恢复同一个 Migration Agent。目标不是
-只关闭局部算子，而是依次完成：
+本 Skill 只完成一个闭环：
 
 ```text
-PREFLIGHT
--> OPERATOR_VERIFICATION
--> EAGER_BRINGUP
--> MODEL_ACCURACY
--> ACCURACY_DEBUG（仅精度失败时）
--> DONE
+PREFLIGHT -> OPERATOR_VERIFICATION -> EAGER_BRINGUP -> DONE
+                  ^                         |
+                  +--- 新算子问题 ----------+
 ```
 
-Operator Verification Queue 中的每一行都必须实际测试。初始五个历史 Operator
-Candidate 不能因旧 Run 或静态源码判断而跳过；局部队列全部通过也不能替代真实
-模型和精度验收。
+失败留在当前 phase，进入 BUG Repair Loop；修复后从原失败点继续。只有两个正常退出：
 
-本 Skill 不依赖本仓库内的通用 Tensor 采集、序列化、跨机交接或重放程序。Agent
-直接读取固定源码，在目标 SGLang-Kunlun 仓库创建聚焦测试、调用 P800 生产入口，并
-用 Contract 固定门槛比较。
+- `PASS / DONE`：固定 P800 环境、全部算子和固定 eager 请求通过；
+- `BLOCKED`：同一个 BUG 的 3 次不同、可验证的修复尝试都失败。
 
-# State and authority
+这里验证的是“服务能够稳定启动并正常回答”，不执行整模型 CPU reference，不宣称完成
+整模型精度验证。
 
-`migration-spec.md` 是唯一恢复状态：
+# 唯一状态和按需资料
 
-- `Contract` 由人确认，固定模型、源码、checkpoint、运行方式、请求、Precision
-  Gate、Repair Scope 和停止规则；Agent 不得修改。
-- `Working State` 由 Agent 更新，保存 phase、队列、模型状态、Failure Observation、
-  Run Evidence 和唯一 `next_action`。
-- 每次动作前重读整个 Spec；动作后先写新 Run Evidence，再更新 Working State。
-- 旧 Contract revision 的 Run 只能提供源码线索，不能替当前 P800 测试或模型结果。
+每次动作前完整读取工作区根目录的 `migration-spec.md`。其中 Contract 固定模型、源码、
+checkpoint、运行参数、容差和修复边界；Working State 保存唯一当前状态和
+`next_action`。不要从旧 Run 推断当前进度。
 
-允许 Agent：
+只在对应阶段读取以下资料：
 
-- 读取固定 SGLang、SGLang-Kunlun 和 checkpoint 配置；
-- 在固定 Kunlun worktree 内新增或修改聚焦测试和 Repair Scope 内的生产代码；
-- 运行 CPU、P800、单进程或 Contract 固定多卡命令；
-- 使用 SGLang 自带的 dumper、forward hook 和 comparator；
-- 按证据更新 Working State。
+- P800 环境失败：`docs/p800-environment-and-repair.md`；
+- 算子分类和测试用例：`docs/step3p7-p800-operator-gap-analysis.md`；
+- 第一次真实失败：完整读取 `references/bug-repair-loop.md`；
+- BUG 历史：追加到 `docs/step3p7-p800-bug-log.md`。
 
-不允许 Agent：
+本流程不使用通用 Tensor capture、pickle/JSON replay、handoff bundle 或统一 adapter。
+局部测试直接调用固定源码的 P800 生产入口。
 
-- 放宽 Precision Gate；
-- 用 test-only helper 代替实际生产调用；
-- 把环境、工具或路由失败写成算子缺失；
-- 自动取得新凭证、猜 checkpoint 或猜节点类型；
-- 新增 C++、自定义 kernel 或底层注册。确实需要时进入 `BLOCKED`。
+# 不可放宽的规则
 
-# Precision Gate
+- 不修改 Contract 固定的 commit、checkpoint、TP8、BF16、eager 请求和精度门槛。
+- 不用 test-only helper 代替真实生产调用。
+- 不把导入、设备、依赖或路由错误记成算子缺失。
+- 已有精确 PyTorch/`forward_native` 语义时标为 `NATIVE_IMPLEMENTATION`；实现存在与
+  P800 生产路由是否可达分开记录。
+- 浮点结果使用 Contract 的 `torch.testing.assert_close`；整数和布尔结果精确相等；
+  同时检查结构、shape、声明 dtype、有限值，以及生产接口要求的 stride、alias、输出
+  buffer 和原地语义。
+- 允许自主修改 Repair Scope 内的 Python、P800 PyTorch 和已有 Kunlun 算子装配；不
+  新增 C++、自定义 kernel 或底层注册。
+- 不自动登录远端、取得凭证、创建分支、commit 或 push；只使用用户已经提供的 P800
+  会话和工作树。
 
-所有 Operator Verification 和模型张量比较都从 Contract 读取门槛：
+# 执行流程
 
-1. CPU reference 可以用 FP32 完成归约，但比较前转换到声明的输出 dtype。
-2. 输出容器结构和 shape 必须一致。
-3. P800 生产输出 dtype 必须等于源码声明的 dtype。
-4. 两侧数字 Tensor 必须都是有限值。
-5. 浮点 Tensor 使用 `torch.testing.assert_close` 和固定 `atol`、`rtol`。
-6. 整数和布尔 Tensor 精确相等。
-7. 原地算子分别比较每个被修改的 buffer；返回 `None` 不代表没有输出。
-8. 根据生产接口检查必要的 stride、非连续输入、alias 和输出 buffer 语义。
-9. Agent 不得因为失败而改变门槛；只能修实现、修输入构造错误或报告 `BLOCKED`。
+## 1. PREFLIGHT
 
-# Process
+在判断算子前验证并记录：
 
-## 1. Validate Contract and workspace
+1. SGLang、SGLang-Kunlun 和 checkpoint 与 Contract 一致；
+2. 实际导入路径来自固定 worktree，Kunlun platform 已激活；
+3. 8 张目标设备可见，BF16 Tensor 创建、搬运和简单运算正常；
+4. decode 和 prefill graph backend 都关闭；
+5. 启动所需依赖、模型配置和固定请求资源可读。
 
-读取 Contract Data，确认：
+全部通过后写 Run Evidence，设置 `environment_status: PASS`，进入
+`OPERATOR_VERIFICATION`。任何失败都记录为 `ENVIRONMENT` BUG 并进入修复循环；环境
+通过前不得产生 `OPERATOR_MISSING` 结论。
 
-- `schema` 为 `model-adaptation/v1`；
-- 模型参数与 Skill 输入相同；
-- SGLang、SGLang-Kunlun revision 和 checkpoint 都已固定；
-- TP、dtype、target-only eager、文本与单图请求已固定；
-- operator 和 model 两组 Precision Gate 完整；
-- Repair Scope 明确禁止新 C++、自定义 kernel 和底层注册。
+## 2. OPERATOR_VERIFICATION
 
-读取 `docs/p800-environment-and-repair.md`。检查当前工作区已有修改，只修改本轮相关
-文件，不清理或覆盖无法解释的用户改动。
+按 Spec 中 Operator Verification Queue 的顺序处理每一行，包括初始五个历史
+Candidate；静态复核或旧结果不能将它们直接设为 `PASS`。
 
-## 2. `PREFLIGHT`
+对每项执行：
 
-在任何算子判断之前，在 P800 现场验证：
+1. 从固定源码确认模型调用点、语义边界、已有 native/Kunlun 实现和实际 P800 路由；
+2. 从固定 native 实现、社区测试或独立公式建立 CPU reference，不能调用待验证实现；
+3. 按队列的 `required cases` 生成确定性输入，并直接调用 P800 Production Operator；
+4. 使用 Contract Precision Gate 比较全部语义输出；
+5. 保存源码锚点、命令、shape、dtype、layout、stride、seed 和逐项结果。
 
-- `SGLANG_KUNLUN_WORKTREE` 指向固定 revision；
-- `sglang`、`sglang_kunlun` 从固定 worktree 导入；
-- Kunlun platform 和 Contract 要求的设备数量可用；
-- BF16 Tensor 创建、设备搬运和简单 PyTorch 运算正常；
-- checkpoint 可读且配置摘要一致；
-- decode 和 prefill graph backend 都关闭；
-- 实际环境变量及选择原因已经记录。
+一项只有同时满足以下条件才算“算子可用”：
 
-把命令、版本、导入路径、设备结果和日志写入新的 Run Evidence。
+- `route_state: PRODUCTION_REACHABLE`；
+- 所有 required cases 满足数值和接口契约；
+- 聚焦测试直接覆盖真实生产入口。
 
-- 全部通过：`environment_status: PASS`，进入 `OPERATOR_VERIFICATION`。
-- 任一失败：记录 `ENVIRONMENT`；修复后重复本 phase。
-- 缺少人才能提供的路径、权限或节点类型：进入 `NEEDS_HUMAN`。
+通过后将该项设为 `PASS` 并继续下一项。失败按首个根因分类为 `ADAPTATION`、
+`OPERATOR_MISSING`、`OPERATOR_CONTRACT` 或 `DISTRIBUTED_RUNTIME`，进入修复循环。
+队列全部通过后进入 `EAGER_BRINGUP`。
 
-环境通过前不得把任何条目标为 `OPERATOR_MISSING` 或
-`OPERATOR_CONTRACT`。
+## 3. EAGER_BRINGUP
 
-## 3. `OPERATOR_VERIFICATION`
+用 Contract 固定的 TP8、BF16、target-only eager 配置启动真实 Step-3.7-Flash，依次
+执行固定文本和单图请求。
 
-按 Spec 表格顺序选择第一项 `PENDING`，改为 `ACTIVE`。必须遍历当前 Operator
-Verification Queue 中的每一行；Skill 不另存一份 operator id 清单。
+“回答正常”必须同时满足：
 
-### 3.1 Establish the source contract
+- engine 或服务到达 ready；
+- 两个固定请求都成功返回，响应结构有效且生成内容非空；
+- 日志没有未处理 traceback，能观察到的数值结果均为有限值；
+- 相同确定性请求至少复跑一次仍成功；
+- 已验证算子的生产路径在真实模型中可达。
 
-Agent 从固定版本源码确认：
+遇到失败，只处理日志中的首个根因：
 
-- 从模型入口到 P800 Production Operator 的实际调用链；
-- 输入、输出、直接参数和非 Tensor 参数；
-- 输出 dtype、输出 buffer、原地修改和 layout 要求；
-- 社区测试或数学定义中的独立 CPU reference。
+- 环境或依赖问题回到 `PREFLIGHT`；
+- 新的生产算子或新 shape/dtype/layout 问题追加到队列，回到
+  `OPERATOR_VERIFICATION`；
+- 模型适配或多卡运行问题留在 `EAGER_BRINGUP` 修复。
 
-静态缺少同名 symbol 只能记录为 Operator Candidate。只有实际 P800 生产调用已经
-到达，才能判为 `OPERATOR_MISSING` 或 `OPERATOR_CONTRACT`。
+修复后必须重新执行原失败请求。两个请求都正常后写最终 Run Evidence，一次性设置：
 
-### 3.2 Create focused tests
+```text
+model_status: PASS
+status: PASS
+phase: DONE
+next_action: null
+```
 
-优先扩展目标仓库已有测试；没有合适 seam 时，在目标仓库按其测试约定新增一个聚焦
-测试。测试必须直接调用 P800 生产入口，不能在本仓库建设统一 adapter。
+然后停止。不要追加整模型 CPU 精度比较或逐层 debugger。
 
-输入由代码确定性构造，不保存任意活体 Tensor。涉及非连续布局时，在 CPU 和 P800
-分别从 base Tensor 创建 view，显式断言预期 stride。
+# BUG Repair Loop
 
-每项至少覆盖 Spec 的 required cases：
+任何真实命令、测试或请求失败时，读取 `references/bug-repair-loop.md` 并执行：
 
-- SwiGLU clamp：`gemm1_limit=None` 和有限 limit；输入包含超过正负 clamp 边界的值，
-  同时验证实际 Kunlun 调用取得模型配置中的 limit。
-- Gemma RMSNorm：BF16、生产 hidden size、较小诊断 shape、连续和
-  `base[:, :hidden]` 非连续输入；参考计算用 FP32 归约后转回输入 dtype。
-- Gemma fused add RMSNorm：除 RMSNorm 条件外，分别比较修改后的 `x` 和
-  `residual`，确认函数返回 `None` 时两个输出仍被验证。
-- TopK sigmoid：有/无 `correction_bias`、`renormalize` 分支、生产 top-k 和专家数；
-  构造无并列分数，weights 按浮点门槛比较，ids 精确相等。
-- Visual prefill attention：ragged sequence、causal 分支、生产 head dim、Q/KV head
-  数和 GQA 映射；按 `b_start_loc`、`b_seq_len` 分段。Agent 检查固定源码和社区测试
-  后选择独立 CPU reference，并在 Run Evidence 中说明其 mask、scale 和 GQA 语义；
-  Skill 不预先指定具体 PyTorch helper。
+1. 分配稳定 `bug_id`，保存可复现失败并追加 Bug Ledger；
+2. 每个 attempt 只验证一个有证据的根因假设，做最小范围修改；
+3. 先重跑聚焦复现，再重跑最初失败的 P800 命令或请求；
+4. 修复成功时记录根因、解决方法和回归证据，关闭 BUG 并继续当前流程；
+5. 同一 BUG 第 3 次不同尝试仍失败时，记录所有尝试，设置 `BLOCKED` 并停止。
 
-历史 shape 可以作为 case 线索，但不能单独替代当前 P800 生产测试。运行时出现的新
-shape 要加入当前算子的聚焦回归测试。
+不得重复相同命令和补丁来凑 attempt；只有证据证明根因不同才创建新 `bug_id`。
+普通 Repair Scope 内修复不等待用户选择方案。
 
-### 3.3 Compare and decide
+`auto_repair_status` 只使用：
 
-运行 CPU reference 和 P800 生产算子，按 Precision Gate 比较并保存 Run Evidence。
+- `NOT_EXERCISED`：尚未遇到真实 BUG；
+- `ACTIVE`：正在修复；
+- `PASS`：至少一个真实 BUG 已完成失败复现、修复和原路径复验；
+- `BLOCKED`：当前 BUG 的 3 次修复尝试都失败。
 
-- 直接通过：队列行改为 `PASS`。
-- 实现不存在：记录 `OPERATOR_MISSING`，在 Repair Scope 内修复并重测。
-- 执行成功但数值、dtype、layout 或原地语义失败：记录
-  `OPERATOR_CONTRACT`，修复并重测。
-- 生产调用没有到达：记录 `ADAPTATION`，先修实际路由。
-- 多卡通信、rank、内存或 stream 失败：记录 `DISTRIBUTED_RUNTIME`。
+不得主动注入故障来制造 `PASS`。
 
-修复通过后保留聚焦回归测试，并继续下一条，不等待人工选择方案。五项全部
-`PASS` 后进入 `EAGER_BRINGUP`。
+# Evidence 和状态更新
 
-## 4. `EAGER_BRINGUP`
+每次检查或 attempt 都先创建新的 `runs/<run-id>/result.md` 或 `result.json`，至少记录：
 
-使用 Contract 固定的 TP8、BF16、target-only eager 配置启动真实模型，依次执行
-固定文本和单图请求。至少验证：
+- Contract revision、phase、结论和完整命令；
+- 固定源码 commit、checkpoint、实际导入路径和环境；
+- 算子 reference/生产入口的源码锚点，或 eager 请求与日志；
+- 使用的输入特征、Precision Gate、预期与实际结果；
+- BUG 的 `bug_id`、attempt 序号、假设、修改文件和验证结果；
+- 唯一下一动作。
 
-- 服务或离线 engine 完成启动；
-- 实际 backend 和调用路径符合固定源码；
-- 两种请求都完成，输出和必要 logits 有限；
-- 相同输入在确定性设置下可以重复；
-- 初始五个算子的 P800 Production Operator 在真实模型路径可达。
+关闭 BUG 时还要记录确认根因、最终解决方法、聚焦回归、原始 P800 路径复验和残余
+风险。随后再更新 Working State；不要覆盖旧 evidence 或旧 attempt。
 
-遇到失败时按以下规则处理：
-
-| category | rule | action |
-|---|---|---|
-| `ENVIRONMENT` | 生产算子前的导入、设备、依赖、checkpoint 问题 | 回到 `PREFLIGHT` |
-| `ADAPTATION` | 模型类、plugin、backend、dispatch 或调用路由错误 | 修适配代码后重启 |
-| `OPERATOR_MISSING` | 实际到达的新生产算子没有实现 | 追加队列并回到 `OPERATOR_VERIFICATION` |
-| `OPERATOR_CONTRACT` | 实际 shape/dtype/layout/原地语义暴露新问题 | 扩充对应聚焦测试并回到算子验证 |
-| `DISTRIBUTED_RUNTIME` | TP/EP、collective、rank、通信、内存或 stream 问题 | 建立最小多卡复现后修复 |
-| `ACCURACY` | 请求完成但结果不满足门槛 | 进入 `MODEL_ACCURACY` |
-
-每轮只处理有证据的首个根因。修复后重新运行失败请求；两个固定请求都通过后设置
-`model_status: PASS`，进入 `MODEL_ACCURACY`。
-
-## 5. `MODEL_ACCURACY`
-
-使用 Contract 固定的同版本 SGLang reference runtime 和相同 checkpoint、输入、
-tokenizer、TP 拓扑、dtype 与 eager 设置进行比较。不要只比较自然语言观感。
-
-至少检查：
-
-- 输入 token、图像预处理结果和生成配置一致；
-- 第一个生成位置和需要的后续位置 logits 满足 model Precision Gate；
-- 离散 token、router ids 等整数结果精确相等；
-- 两种固定请求都通过；
-- P800 结果全部有限。
-
-通过后设置 `accuracy_status: PASS` 并进入 `DONE`。失败时记录 `ACCURACY`，进入
-`ACCURACY_DEBUG`，不得回头放宽门槛。
-
-## 6. `ACCURACY_DEBUG`
-
-优先复用固定 SGLang 版本已有的：
-
-- `python/sglang/srt/debug_utils/dumper.py`
-- `python/sglang/srt/debug_utils/tensor_dump_forward_hook.py`
-- `python/sglang/srt/debug_utils/comparator/`
-
-保持两端输入、tokenizer、checkpoint、拓扑、dtype 和 eager 设置一致。先比较
-embedding、每个 decoder layer 输出、final norm 和 logits，定位第一个发散层；多卡
-Tensor 必须记录 rank 和切分维度，必要时给 comparator 提供 dims override。
-
-找到第一个发散层后：
-
-1. 对比该层输入，确认误差不是上游传播；
-2. 缩小到模块和 P800 Production Operator；
-3. 将新算子或新 case 加入 Operator Verification Queue；
-4. 修复并依次重跑局部测试、真实模型和 Model Accuracy Gate。
-
-函数级 logger 只可辅助确认调用和崩溃；对返回 `None` 的原地算子，必须显式保存并
-比较修改后的参数，不能只查看返回值。
-
-# Run Evidence
-
-每次动作创建新的 `runs/<run-id>/result.md` 或 `result.json`，至少记录：
-
-- Contract revision、phase、category 和结论；
-- SGLang、SGLang-Kunlun commit、checkpoint 和完整命令；
-- CPU reference 的固定源码位置；
-- P800 Production Operator 的固定源码位置和真实调用链；
-- 输入 shape、dtype、layout、stride、seed 和关键标量；
-- 使用的 Precision Gate；
-- 通过项、失败项、traceback 和下一动作。
-
-默认不保存完整输入输出 Tensor。只有 `ACCURACY_DEBUG` 无法由统计和局部测试定位时，
-Agent 才保存必要的定点张量，并在 Run Evidence 中说明原因和范围。
-
-# State transitions and stop conditions
-
-- `ACTIVE`：保存证据、更新 Working State、重读 Spec 并继续唯一下一动作。
-- `NEEDS_HUMAN`：只用于缺少人才能提供的路径、权限、节点类型、baseline 或 Contract
-  决定；写一个明确问题后停止。
-- `BLOCKED`：需要新增 C++、自定义 kernel、底层注册或越过 Repair Scope；保存证据后
-  停止。
-- `PASS / DONE`：环境、全部队列项、两个真实模型请求和 Model Accuracy Gate 全部
-  通过，且没有未处理 Failure Observation。
-
-不自动 SSH、登录、管理凭证、创建分支、commit 或 push。用户明确提供远端会话或
-要求相应 Git 动作时再执行。
+每次更新后重读 Spec：状态仍为 `ACTIVE` 就立即执行唯一 `next_action`；达到 `PASS /
+DONE` 或 `BLOCKED` 才结束本次循环。

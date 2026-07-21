@@ -4,15 +4,15 @@
 
 ## Contract
 
-本区由人确认。Migration Agent 必须完整读取，但不能自行修改模型、源码、
-checkpoint、运行方式、Precision Gate、Repair Scope 或停止规则。任何人类修改都要
-增加 `contract_revision` 并追加 Human Decision。
+本区由人确认。Migration Agent 必须完整读取，但不能自行修改模型、源码、checkpoint、
+运行方式、Precision Gate、Repair Scope 或停止规则。人修改后增加
+`contract_revision` 并追加 Human Decision。
 
 <!-- CONTRACT-DATA: BEGIN -->
 {
   "schema": "model-adaptation/v1",
   "spec_id": "step3p7-flash-p800",
-  "contract_revision": 7,
+  "contract_revision": 10,
   "model": "Step-3.7-Flash",
   "source": {
     "sglang_revision": "49e384ce9d304648e9959666ecb8ce8cd98d0deb",
@@ -60,23 +60,14 @@ checkpoint、运行方式、Precision Gate、Repair Scope 或停止规则。任�
       "require_declared_dtype": true,
       "require_finite": true,
       "integer_exact": true
-    },
-    "model": {
-      "comparator": "torch.testing.assert_close",
-      "atol": 0.01,
-      "rtol": 0.02,
-      "require_exact_structure": true,
-      "require_declared_dtype": true,
-      "require_finite": true,
-      "integer_exact": true,
-      "reference_runtime": "same-source-sglang"
     }
   },
   "repair_scope": {
     "allow_python": true,
     "allow_p800_pytorch": true,
     "allow_existing_xspeedgate_or_kunlun_ops": true,
-    "allow_new_cpp_or_kernel_registration": false
+    "allow_new_cpp_or_kernel_registration": false,
+    "max_attempts_per_bug": 3
   }
 }
 <!-- CONTRACT-DATA: END -->
@@ -85,29 +76,27 @@ checkpoint、运行方式、Precision Gate、Repair Scope 或停止规则。任�
 
 在固定 TP8、BF16、target-only eager 环境中：
 
-1. 验证 P800 环境；
-2. 对五个历史 Operator Candidate 全部执行独立 CPU reference 与 P800 生产算子测试；
-3. 跑通固定文本和单图真实模型请求；
-4. 对固定同版本 reference runtime 验证模型精度；
-5. 只有精度失败时逐层、多卡定位并把新 case 返回算子队列。
+1. P800 Preflight 通过；
+2. 五个历史 Operator Candidate 先区分 native/Kunlun 实现和生产路由，再全部完成局部
+   CPU reference 与 P800 生产入口验证；
+3. 真实模型运行中发现的新算子问题也加入队列并关闭；
+4. 固定文本和单图请求均正常返回并复跑成功；
+5. 遇到 BUG 时由 Agent 在允许范围内自主修复，并把失败、尝试、根因和方案归档。
 
-### Precision rules
+本 Contract 不执行整模型 CPU reference 或逐层精度比较。eager 服务正常后直接
+`PASS / DONE`，它只表示运行链路通过，不表示整模型精度已验证。
 
-- CPU reference 必须来自固定 SGLang 源码、社区测试或独立数学定义，不能调用待验证
-  的 P800 实现。
-- CPU reference 可以 FP32 计算，比较前转为声明的输出 dtype。
-- 浮点使用 Contract 固定的 `torch.testing.assert_close`、`atol` 和 `rtol`。
-- 整数和布尔结果精确相等。
-- 结构、shape、声明输出 dtype 和有限值必须满足。
-- 原地算子检查每个被修改的 buffer；必要的 stride、alias 和输出 buffer 语义必须
-  符合生产接口。
+### Operator rules
+
+- Candidate 的统计主口径是固定 `sglang_kunlun_revision` 的完整生产树和 plugin；固定
+  `sglang_revision` 用于 native/CUDA 语义对照。
+- 已有精确 PyTorch/`forward_native` 语义时标为 `NATIVE_IMPLEMENTATION`；缺少同名
+  Kunlun/CUDA symbol 不能直接写成 `OPERATOR_MISSING`。
+- 实现分类、生产路由和验证状态分开记录。已有实现但 dispatch 不可达时先记
+  `ADAPTATION`。
+- CPU reference 必须独立于待验证 P800 实现。浮点结果使用固定 `atol`、`rtol`；整数
+  和布尔结果精确相等；结构、shape、声明 dtype、有限值及生产接口语义必须满足。
 - Agent 不得放宽门槛；局部通过后必须回到真实模型路径。
-
-### Repair Scope
-
-允许修改原 P800 生产调用附近的 Python、P800 可执行 PyTorch，以及已有
-xspeedgate/kunlun_ops 的组合或参数装配。不得为测试新增生产 helper。需要新增 C++、
-自定义 kernel 或底层注册时进入 `BLOCKED`。
 
 ### Failure categories
 
@@ -116,27 +105,28 @@ xspeedgate/kunlun_ops 的组合或参数装配。不得为测试新增生产 hel
 - `OPERATOR_MISSING`
 - `OPERATOR_CONTRACT`
 - `DISTRIBUTED_RUNTIME`
-- `ACCURACY`
 
-### Closure
+### Repair and stop rules
 
-只有以下条件全部成立才能写 `PASS / DONE`：
+- 一个 `bug_id` 最多 3 次不同、有证据的范围内修复尝试；相同命令、补丁或假设不能
+  重复计数。
+- 修复成功必须同时通过聚焦复现、相邻回归和最初失败的 P800 路径，然后归档并继续。
+- 同一 BUG 第 3 次尝试后仍失败，保存全部证据并进入 `BLOCKED`。
+- 初始队列、运行中新发现的算子和两个固定 eager 请求全部通过后进入 `PASS / DONE`。
+- 不新增 C++、自定义 kernel 或底层注册；若某次假设需要越界，记录该 attempt 失败并
+  继续寻找范围内方案，不能静默越界。
 
-1. P800 Preflight 通过；
-2. 初始五个 Operator Verification Queue 条目全部在当前固定 revision 上通过；
-3. 运行中发现的新 Confirmed Operator Gap 全部关闭；
-4. 固定文本和单图请求都在真实 TP8 eager 模型上通过；
-5. 两个请求的模型精度通过；
-6. 没有未处理 Failure Observation。
-
-SOURCE 静态检查、历史 Run 或已有建议补丁不能替代当前 P800 结果。
+SOURCE 静态检查、旧 Run 或已有建议补丁不能替代当前 P800 结果。
 
 ### Human Decisions
 
 | revision | decision |
 |---:|---|
 | 1-6 | 历史 Contract 使用算子级 Golden 流程；只保留为 Git 历史。 |
-| 7 | 删除通用采集与重放框架，改为 Agent 驱动的 CPU reference、P800 生产算子、真实 eager 模型和按需逐层精度定位；五个历史 Operator Candidate 全部重新进入测试队列。 |
+| 7 | 删除通用采集与重放框架，改为 Agent 驱动的算子验证与 eager 模型运行。 |
+| 8 | 整模型 CPU reference 暂不可行，曾在 eager 后设置计划内 `BLOCKED`。 |
+| 9 | Candidate 改按 Kunlun 生产路径统计，先区分 native/Kunlun 实现与路由状态。 |
+| 10 | 当前目标收敛为“算子可用并跑通 eager”；删除模型精度阶段。Agent 自动修复并归档 BUG；同一 BUG 最多 3 次尝试，eager 正常即 `PASS / DONE`。 |
 
 <!-- HUMAN-OWNED CONTRACT: END -->
 
@@ -144,20 +134,20 @@ SOURCE 静态检查、历史 Run 或已有建议补丁不能替代当前 P800 �
 
 ## Working State
 
-Agent 每次动作前重读 Contract 和本区。动作结束后先写新 Run Evidence，再原子更新
-本区；详细命令、日志和源码证据不堆入 Working State。
+每次动作前重读 Contract 和本区。动作结束后先写新 Run Evidence，再更新 Working
+State；详细日志不堆入本文件。
 
 ### Current
 
-- `observed_contract_revision`: `7`
-- `state_revision`: `51`
+- `observed_contract_revision`: `10`
+- `state_revision`: `55`
 - `status`: `ACTIVE`
 - `phase`: `PREFLIGHT`
 - `execution_site`: `SOURCE`
 - `active_operator`: `null`
-- `last_completed_action`: `run_driven_workflow_source_rewrite_and_review_alignment`
-- `last_run`: `runs/run-driven-workflow-rewrite-001/result.md`
-- `next_action`: `在 P800 固定 worktree 完成环境检查；通过后按 Operator Verification Queue 顺序测试全部五个历史 Operator Candidate`
+- `last_completed_action`: `simplify_skill_for_p800_eager_loop`
+- `last_run`: `runs/skill-simplification-r10-001/result.md`
+- `next_action`: `在 P800 固定 worktree 执行 Preflight；通过后从 step3p7.moe.swiglu_clamp 开始验证全部算子`
 
 phase 只使用：
 
@@ -165,10 +155,19 @@ phase 只使用：
 PREFLIGHT
 OPERATOR_VERIFICATION
 EAGER_BRINGUP
-MODEL_ACCURACY
-ACCURACY_DEBUG
 DONE
 ```
+
+### Auto Repair
+
+- `auto_repair_status`: `NOT_EXERCISED`
+- `active_bug`: `null`
+- `active_attempt`: `0`
+- `max_attempts_per_bug`: `3`
+- `bug_log`: `docs/step3p7-p800-bug-log.md`
+
+`auto_repair_status` 只使用 `NOT_EXERCISED | ACTIVE | PASS | BLOCKED`。SOURCE 文档修改
+或静态检查不能把它改为 `PASS`。
 
 ### Environment
 
@@ -177,41 +176,33 @@ DONE
 
 ### Operator Verification Queue
 
-| operator_id | status | required cases | current evidence |
-|---|---|---|---|
-| `sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul` | `PENDING` | `limit=None/finite；clamp 边界；生产配置参数可达` | `null` |
-| `sgl_kernel.gemma_rmsnorm` | `PENDING` | `BF16；生产 hidden size；小 shape；连续/非连续 stride` | `null` |
-| `sgl_kernel.gemma_fused_add_rmsnorm` | `PENDING` | `连续/非连续；mutated x；mutated residual；返回 None` | `null` |
-| `sgl_kernel.topk_sigmoid` | `PENDING` | `correction bias；renormalize；生产 top-k；无并列；ids 精确` | `null` |
-| `sglang.srt.layers.attention.triton_ops.prefill_attention._fwd_kernel` | `PENDING` | `ragged sequence；causal；生产 head dim；GQA；输出 buffer` | `null` |
+| candidate_id | historical_symbol | implementation_kind | route_state | status | required cases | current evidence |
+|---|---|---|---|---|---|---|
+| `step3p7.moe.swiglu_clamp` | `sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe._swiglu_silu_clamp_mul` | `NATIVE_IMPLEMENTATION` | `ROUTE_PENDING` | `PENDING` | `limit=None/finite；clamp 边界；生产配置 limit 可达 Kunlun 路径` | `docs/step3p7-p800-operator-gap-analysis.md` |
+| `step3p7.norm.gemma_rmsnorm` | `sgl_kernel.gemma_rmsnorm` | `NATIVE_IMPLEMENTATION` | `ROUTE_PENDING` | `PENDING` | `BF16；生产 hidden size；小 shape；连续/非连续 stride` | `docs/step3p7-p800-operator-gap-analysis.md` |
+| `step3p7.norm.gemma_fused_add_rmsnorm` | `sgl_kernel.gemma_fused_add_rmsnorm` | `NATIVE_IMPLEMENTATION` | `ROUTE_PENDING` | `PENDING` | `连续/非连续；x/residual 两个语义结果；post_residual_addition` | `docs/step3p7-p800-operator-gap-analysis.md` |
+| `step3p7.moe.topk_sigmoid` | `sgl_kernel.topk_sigmoid` | `NATIVE_IMPLEMENTATION` | `ROUTE_PENDING` | `PENDING` | `correction bias；renormalize；生产 top-k；无并列；ids 精确` | `docs/step3p7-p800-operator-gap-analysis.md` |
+| `step3p7.vision.prefill_attention` | `sglang.srt.layers.attention.triton_ops.prefill_attention._fwd_kernel` | `NATIVE_IMPLEMENTATION` | `ROUTE_PENDING` | `PENDING` | `单图生产 shape；head_dim=96；MHA；non-causal；dense sequence；输出 buffer` | `docs/step3p7-p800-operator-gap-analysis.md` |
 
-状态只使用 `PENDING | ACTIVE | PASS | BLOCKED`。初始五项必须全部测试；历史结果不能
-直接把任何一项改为 `PASS`。运行中确认的新生产算子缺口追加到表尾。
+初始五项必须全部实际测试。`route_state` 只使用
+`ROUTE_PENDING | PRODUCTION_REACHABLE | ROUTE_BLOCKED`；验证状态只使用
+`PENDING | ACTIVE | PASS | BLOCKED`。运行中确认的新生产算子问题追加到表尾。
 
 ### Model
 
 - `model_status`: `NOT_STARTED`
 - `model_run`: `null`
-- `accuracy_status`: `NOT_STARTED`
-- `accuracy_run`: `null`
-- `first_divergent_layer`: `null`
 
 ### Failure Observations
 
-| phase | category | summary | evidence | next_action |
-|---|---|---|---|---|
+| bug_id | phase | category | summary | attempts | evidence | next_action |
+|---|---|---|---|---:|---|---|
 
 ### Evidence rules
 
-每次动作在新 `runs/<run-id>/result.md` 或 `result.json` 中记录：
-
-- Contract revision、phase、失败类别和结论；
-- 两个固定 commit、checkpoint、完整命令和实际环境；
-- CPU reference 与 P800 生产调用的源码位置；
-- 输入 shape、dtype、layout、stride、seed 和关键标量；
-- 使用的 Precision Gate、逐输出结果和下一动作。
-
-默认不保存完整输入输出 Tensor。只有 `ACCURACY_DEBUG` 无法通过已有观测入口定位时，
-才保存必要的定点数据并记录原因和范围。
+每次动作在新 `runs/<run-id>/result.md` 或 `result.json` 中记录固定 revision、checkpoint、
+完整命令、实际环境、源码锚点、输入特征、精度门槛、结果和下一动作。遇到 BUG 时还要
+记录稳定 `bug_id`、attempt、根因假设、修改、聚焦回归、原始 P800 路径复验和 Bug
+Ledger 路径。默认不保存完整输入输出 Tensor。
 
 <!-- AGENT-WRITABLE WORKING STATE: END -->

@@ -71,8 +71,8 @@ Operator Verification 的 PASS/FAIL 结论。
 | `SGLANG_PREP_IN_CUDA_GRAPH` | 布尔开关，默认开启 | 仅当 eager 参数仍触发 graph preparation 时设为 `0` | `python/sglang/srt/environ.py:843-849`；`python/sglang/srt/layers/attention/deepseek_v4_backend.py:571` |
 
 没有固定源码锚点或当前现场证据的 D/P 节点数值、XSHMEM、BKCL、RDMA 等配置不在
-本文预设。确实需要而 Agent 无法从节点和启动脚本确认时，进入 `NEEDS_HUMAN`，不能
-猜值。
+本文预设。确实需要而 Agent 无法从节点和启动脚本确认时，把它记录为 `ENVIRONMENT`
+BUG，按 Repair Loop 尝试可验证的范围内方案，不能猜值。
 
 ## 4. 环境报错的判定方式
 
@@ -95,4 +95,5 @@ traceback 和导入路径，再按证据分类，不能把历史经验直接写�
 - 环境修复不能顺带修改算子语义。
 - 简单算子修复保留原生产调用位置，不为测试新增生产 helper。
 - 修改后先运行聚焦 CPU reference 与 P800 生产算子测试，再启动真实模型。
-- 需要新增 C++、自定义 kernel 或底层注册时进入 `BLOCKED`。
+- 某个假设需要新增 C++、自定义 kernel 或底层注册时，将该 attempt 记为失败并继续
+  寻找范围内方案；同一 BUG 达到 Contract 的 3 次上限后才进入 `BLOCKED`。
